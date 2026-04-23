@@ -24,14 +24,17 @@ use safetensors::SafeTensors;
 
 use crate::{
     core::{
+        manifest::{embedded_grok1_baseline, load_manifest, DissectManifest},
+        npy::{npy_stem_to_tensor_name, MmapNpy, NpyDtype},
+        precision::decide as precision_decide,
+        quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
+        selection::{classify, TensorClass},
         weight_pack::{
             PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_F16, TENSOR_TERNARY,
         },
-        npy::{npy_stem_to_tensor_name, MmapNpy, NpyDtype},
-        quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
     },
     error::{GrokOzempicError, Result},
-    types::{QuantizationConfig, QuantizationInputFormat},
+    types::{QuantizationConfig, QuantizationInputFormat, TensorPrecision},
 };
 
 // Grok-1 (JAX) architecture hints embedded in GOZ1 metadata — confirm against
@@ -82,17 +85,60 @@ pub fn append_grok1_arch_metadata(meta: &mut BTreeMap<String, PackMetaValue>) {
 }
 
 // ---------------------------------------------------------------------------
-// Tensor classification
+// Manifest resolution & deprecation warning
 // ---------------------------------------------------------------------------
 
-fn is_router_tensor(name: &str, patterns: &[String]) -> bool {
-    if patterns.is_empty() {
-        let defaults = [
-            "router", "gate", "moe_gate", "expert_router", "routing",
-        ];
-        return defaults.iter().any(|p| name.contains(p));
+/// Environment variable consulted when [`QuantizationConfig::manifest_path`]
+/// is `None`.
+pub const MANIFEST_ENV_VAR: &str = "GROK_OZEMPIC_MANIFEST";
+
+/// Resolve the xai-dissect manifest that governs this `run_quantization`
+/// call.
+///
+/// Precedence (first hit wins, errors bubble; no silent fallthrough):
+///
+/// 1. [`QuantizationConfig::manifest_path`] (explicit caller override).
+/// 2. `GROK_OZEMPIC_MANIFEST` environment variable.
+/// 3. Embedded Grok-1 baseline via [`embedded_grok1_baseline`].
+/// 4. `None` — selection falls back to the legacy heuristic in
+///    [`crate::core::selection::classify`].
+fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifest>> {
+    if let Some(path) = &config.manifest_path {
+        return Ok(Some(load_manifest(path)?));
     }
-    patterns.iter().any(|p| name.contains(p.as_str()))
+    if let Ok(env_path) = std::env::var(MANIFEST_ENV_VAR) {
+        if !env_path.is_empty() {
+            let p = std::path::PathBuf::from(env_path);
+            return Ok(Some(load_manifest(&p)?));
+        }
+    }
+    // Embedded baseline: clone once so callers own a DissectManifest.
+    // The OnceLock inside manifest.rs keeps the parse one-shot.
+    Ok(Some(embedded_grok1_baseline()?.clone()))
+}
+
+/// Return `true` if a deprecation warning about `router_patterns`
+/// alongside a manifest should be emitted.
+///
+/// Exposed (crate-private) so tests can assert the condition without
+/// capturing stderr.
+pub(crate) fn should_warn_router_patterns_deprecated(
+    manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> bool {
+    manifest.is_some() && !config.router_patterns.is_empty()
+}
+
+fn maybe_warn_router_patterns_deprecated(
+    manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) {
+    if should_warn_router_patterns_deprecated(manifest, config) {
+        eprintln!(
+            "grok-ozempic: router_patterns is set alongside an xai-dissect manifest; \
+             the manifest wins and router_patterns is ignored (deprecated)."
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +180,22 @@ struct ManifestEntry {
     source_path: PathBuf,
     tensor_name: String,
     shape: Vec<u64>,
-    is_router: bool,
+    precision: TensorPrecision,
+    gif_threshold: f32,
+}
+
+impl ManifestEntry {
+    /// True when this tensor goes through the FP16 passthrough path.
+    ///
+    /// TODO(phase-3): [`TensorPrecision::Preserve`] is currently aliased
+    /// to FP16 passthrough here. This is the single site of the
+    /// transitional alias; removal tracked in issue #6.
+    fn uses_fp16_passthrough(&self) -> bool {
+        matches!(
+            self.precision,
+            TensorPrecision::Fp16 | TensorPrecision::Preserve
+        )
+    }
 }
 
 /// Diagnostic statistics emitted after processing each shard / source file.
@@ -149,6 +210,9 @@ pub struct ShardStats {
 
 /// Run the full out-of-core quantization pipeline described by `config`.
 pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> {
+    let dissect_manifest = resolve_manifest(config)?;
+    maybe_warn_router_patterns_deprecated(dissect_manifest.as_ref(), config);
+
     let manifest = match config.input_format {
         QuantizationInputFormat::Safetensors => {
             let shards = collect_safetensor_shards(&config.input_dir)?;
@@ -158,7 +222,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
                     config.input_dir
                 )));
             }
-            build_manifest_safetensors(&shards, &config.router_patterns)?
+            build_manifest_safetensors(&shards, dissect_manifest.as_ref(), config)?
         }
         QuantizationInputFormat::NpyDir => {
             let paths = collect_npy_files(&config.input_dir)?;
@@ -168,7 +232,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
                     config.input_dir
                 )));
             }
-            build_manifest_npy(&paths, &config.router_patterns)?
+            build_manifest_npy(&paths, dissect_manifest.as_ref(), config)?
         }
     };
 
@@ -183,7 +247,10 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
         .map(|e| PackTensorHeader {
             name: e.tensor_name.clone(),
             shape: e.shape.clone(),
-            tensor_type: if e.is_router {
+            // TODO(phase-3): Preserve currently shares TENSOR_F16 with
+            // Fp16. Once source-dtype passthrough lands, introduce a
+            // dedicated TENSOR_PRESERVE constant. Tracked in issue #6.
+            tensor_type: if e.uses_fp16_passthrough() {
                 TENSOR_F16
             } else {
                 TENSOR_TERNARY
@@ -235,7 +302,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
         }
 
         let (packed, ternary_sparsity) = quantize_manifest_entry(entry, config)?;
-        if entry.is_router {
+        if entry.uses_fp16_passthrough() {
             shard_stats.tensors_fp16 += 1;
         } else {
             shard_stats.tensors_ternary += 1;
@@ -273,7 +340,7 @@ fn quantize_manifest_entry(
 
 fn quantize_safetensors_entry(
     entry: &ManifestEntry,
-    config: &QuantizationConfig,
+    _config: &QuantizationConfig,
 ) -> Result<(Vec<u8>, Option<f32>)> {
     let file = File::open(&entry.source_path).map_err(GrokOzempicError::Io)?;
     let mmap = unsafe { MmapOptions::new().map(&file).map_err(GrokOzempicError::Io)? };
@@ -288,22 +355,22 @@ fn quantize_safetensors_entry(
         )));
     }
 
-    if entry.is_router {
+    if entry.uses_fp16_passthrough() {
         let fp16_bytes = router_fp16_bytes(dtype, view.data())?;
         Ok((fp16_bytes, None))
     } else {
         let qt = match dtype {
             SourceDtype::F32 => {
                 let f32_slice = bytemuck_cast_f32(view.data());
-                quantize_f32(f32_slice, config.gif_threshold)
+                quantize_f32(f32_slice, entry.gif_threshold)
             }
             SourceDtype::F16 => {
                 let f16_slice: &[f16] = bytemuck_cast_f16(view.data());
-                quantize_f16(f16_slice, config.gif_threshold)
+                quantize_f16(f16_slice, entry.gif_threshold)
             }
             SourceDtype::BF16 => {
                 let f32_vals = bf16_bytes_to_f32(view.data());
-                quantize_f32(&f32_vals, config.gif_threshold)
+                quantize_f32(&f32_vals, entry.gif_threshold)
             }
             SourceDtype::Other => unreachable!(),
         };
@@ -314,7 +381,7 @@ fn quantize_safetensors_entry(
 
 fn quantize_npy_entry(
     entry: &ManifestEntry,
-    config: &QuantizationConfig,
+    _config: &QuantizationConfig,
 ) -> Result<(Vec<u8>, Option<f32>)> {
     let npy = MmapNpy::map_path(&entry.source_path)?;
     let dtype = npy_dtype_to_source(npy.dtype());
@@ -326,22 +393,22 @@ fn quantize_npy_entry(
     }
     let raw = npy.data();
 
-    if entry.is_router {
+    if entry.uses_fp16_passthrough() {
         let fp16_bytes = router_fp16_bytes(dtype, raw)?;
         Ok((fp16_bytes, None))
     } else {
         let qt = match dtype {
             SourceDtype::F32 => {
                 let f32_slice = bytemuck_cast_f32(raw);
-                quantize_f32(f32_slice, config.gif_threshold)
+                quantize_f32(f32_slice, entry.gif_threshold)
             }
             SourceDtype::F16 => {
                 let f16_slice: &[f16] = bytemuck_cast_f16(raw);
-                quantize_f16(f16_slice, config.gif_threshold)
+                quantize_f16(f16_slice, entry.gif_threshold)
             }
             SourceDtype::BF16 => {
                 let f32_vals = bf16_bytes_to_f32(raw);
-                quantize_f32(&f32_vals, config.gif_threshold)
+                quantize_f32(&f32_vals, entry.gif_threshold)
             }
             SourceDtype::Other => unreachable!(),
         };
@@ -369,9 +436,28 @@ fn router_fp16_bytes(dtype: SourceDtype, raw: &[u8]) -> Result<Vec<u8>> {
     Ok(b)
 }
 
+fn classify_and_decide(
+    name: &str,
+    dissect_manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<(TensorClass, TensorPrecision, f32)> {
+    // selection.rs is the single source of truth for classification.
+    // When a manifest is supplied, router_patterns is ignored (the
+    // deprecation warning above already informed the caller).
+    let legacy_patterns: &[String] = if dissect_manifest.is_some() {
+        &[]
+    } else {
+        &config.router_patterns
+    };
+    let class = classify(name, dissect_manifest, legacy_patterns);
+    let (precision, gif_threshold) = precision_decide(&class, dissect_manifest, config)?;
+    Ok((class, precision, gif_threshold))
+}
+
 fn build_manifest_safetensors(
     shards: &[PathBuf],
-    patterns: &[String],
+    dissect_manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
 ) -> Result<Vec<ManifestEntry>> {
     let mut v = Vec::new();
     for shard in shards {
@@ -383,20 +469,26 @@ fn build_manifest_safetensors(
             if dtype == SourceDtype::Other {
                 continue;
             }
-            let is_router = is_router_tensor(&name, patterns);
+            let (_class, precision, gif_threshold) =
+                classify_and_decide(&name, dissect_manifest, config)?;
             let shape: Vec<u64> = view.shape().iter().map(|&d| d as u64).collect();
             v.push(ManifestEntry {
                 source_path: shard.clone(),
                 tensor_name: name,
                 shape,
-                is_router,
+                precision,
+                gif_threshold,
             });
         }
     }
     Ok(v)
 }
 
-fn build_manifest_npy(paths: &[PathBuf], patterns: &[String]) -> Result<Vec<ManifestEntry>> {
+fn build_manifest_npy(
+    paths: &[PathBuf],
+    dissect_manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<Vec<ManifestEntry>> {
     let mut v = Vec::new();
     for path in paths {
         let npy = MmapNpy::map_path(path)?;
@@ -411,13 +503,15 @@ fn build_manifest_npy(paths: &[PathBuf], patterns: &[String]) -> Result<Vec<Mani
                 GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
             })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
-        let is_router = is_router_tensor(&tensor_name, patterns);
+        let (_class, precision, gif_threshold) =
+            classify_and_decide(&tensor_name, dissect_manifest, config)?;
         let shape: Vec<u64> = npy.shape().iter().map(|&d| d as u64).collect();
         v.push(ManifestEntry {
             source_path: path.clone(),
             tensor_name,
             shape,
-            is_router,
+            precision,
+            gif_threshold,
         });
     }
     Ok(v)
@@ -474,20 +568,50 @@ fn bf16_bytes_to_f32(raw: &[u8]) -> Vec<f32> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn router_classification_defaults() {
-        assert!(is_router_tensor("blk.0.moe_gate.weight", &[]));
-        assert!(is_router_tensor("model.layers.4.expert_router.weight", &[]));
-        assert!(is_router_tensor("transformer.h.1.routing.weight", &[]));
-        assert!(!is_router_tensor("blk.0.ffn_up.weight", &[]));
-        assert!(!is_router_tensor("blk.0.ffn_down.weight", &[]));
-    }
+    // Router-classification tests moved to src/core/selection.rs; this
+    // file no longer owns classification logic.
 
     #[test]
-    fn router_classification_custom_patterns() {
-        let patterns = vec!["special_router".to_string()];
-        assert!(is_router_tensor("blk.0.special_router.weight", &patterns));
-        assert!(!is_router_tensor("blk.0.gate.weight", &patterns));
+    fn deprecation_warning_fires_when_both_present() {
+        use crate::core::manifest::{
+            DissectManifest, ManifestDefaults, ManifestModel, MANIFEST_NAME_CONVENTION_V1,
+            MANIFEST_SCHEMA_VERSION,
+        };
+        let manifest = DissectManifest {
+            schema: "xai-dissect.manifest".into(),
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            model: ManifestModel {
+                family: "grok-1".into(),
+                source: "".into(),
+                tensor_name_convention: MANIFEST_NAME_CONVENTION_V1.into(),
+            },
+            produced_by: None,
+            defaults: ManifestDefaults::default(),
+            preserve: vec![],
+            fp16: vec![],
+            ternary_candidates: vec![],
+            blocks: vec![],
+        };
+
+        let config_with_patterns = QuantizationConfig {
+            router_patterns: vec!["legacy_router".into()],
+            ..Default::default()
+        };
+        assert!(should_warn_router_patterns_deprecated(
+            Some(&manifest),
+            &config_with_patterns,
+        ));
+
+        let config_empty = QuantizationConfig::default();
+        assert!(!should_warn_router_patterns_deprecated(
+            Some(&manifest),
+            &config_empty,
+        ));
+
+        assert!(!should_warn_router_patterns_deprecated(
+            None,
+            &config_with_patterns,
+        ));
     }
 
     #[test]
