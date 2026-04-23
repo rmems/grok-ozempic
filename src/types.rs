@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -11,6 +13,21 @@ pub enum TensorPrecision {
     TernarySnN,
     /// Keep original FP16 — used for MoE routing gates.
     Fp16,
+    /// Keep the tensor in its source dtype (routing-critical layers etc.).
+    ///
+    /// **Reserved in phase 1.** This variant is declared so the
+    /// `xai-dissect` manifest contract can reference it, but it is **not
+    /// yet consumed** by [`crate::core::stream::run_quantization`]. A
+    /// follow-up PR will wire it through the selection / precision seams.
+    ///
+    /// **Temporary semantic shortcut:** during the transitional window
+    /// the wiring code may alias `Preserve` to FP16 passthrough. That
+    /// alias is explicitly temporary and must be removed once
+    /// source-dtype passthrough lands. See the phase 2/3 tracking issue.
+    //
+    // TODO(phase-3): remove any Preserve→FP16 alias once source-dtype
+    // passthrough is implemented in stream.rs + weight_pack.rs.
+    Preserve,
 }
 
 /// Weight container layout for [`QuantizationConfig::input_dir`].
@@ -39,9 +56,27 @@ pub struct QuantizationConfig {
     pub gif_threshold: f32,
     /// Tensor name substrings that identify routing / gate tensors which should
     /// remain in FP16 instead of being ternary-quantized.
+    ///
+    /// **Legacy field.** When an `xai-dissect` manifest is supplied via
+    /// [`QuantizationConfig::manifest_path`], the manifest wins and this
+    /// list is ignored. A deprecation log line will be emitted by the
+    /// selection seam introduced in phase 2.
     pub router_patterns: Vec<String>,
     /// Input layout: safetensors shards vs flat `.npy` tensors.
     pub input_format: QuantizationInputFormat,
+    /// Optional path to an `xai-dissect` JSON manifest (schema v1).
+    ///
+    /// **Reserved in phase 1.** The field is exposed so callers can start
+    /// plumbing manifests through configuration, but
+    /// [`crate::core::stream::run_quantization`] does **not** consume it
+    /// yet. Wiring lands in phase 2 via dedicated selection and precision
+    /// modules.
+    ///
+    /// Precedence (phase 2+): this explicit path > `GROK_OZEMPIC_MANIFEST`
+    /// env var > in-tree `dissect/grok-1/baseline.json` fallback > legacy
+    /// `router_patterns` heuristic.
+    #[serde(default)]
+    pub manifest_path: Option<PathBuf>,
 }
 
 impl Default for QuantizationConfig {
@@ -52,6 +87,7 @@ impl Default for QuantizationConfig {
             gif_threshold: 0.05,
             router_patterns: Vec::new(),
             input_format: QuantizationInputFormat::Safetensors,
+            manifest_path: None,
         }
     }
 }
