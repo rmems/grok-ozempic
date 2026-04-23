@@ -22,6 +22,28 @@ pub enum GrokOzempicError {
 
     #[error("GOZ1 pack write error: {0}")]
     PackWrite(String),
+
+    #[error("manifest I/O error at {path}: {source}")]
+    ManifestIo {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("manifest parse error at {path}: {source}")]
+    ManifestParse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("unsupported manifest schema_version: got {got}, expected {expected}")]
+    ManifestSchemaVersion { got: u32, expected: u32 },
+
+    #[error(
+        "manifest tensor_name_convention mismatch: got {got:?}, expected {expected:?}"
+    )]
+    ManifestNameConventionMismatch { got: String, expected: String },
 }
 
 pub type Result<T> = std::result::Result<T, GrokOzempicError>;

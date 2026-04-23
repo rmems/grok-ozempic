@@ -25,3 +25,8 @@ pub use crate::core::weight_pack::{
 };
 pub use crate::core::weight_pack_read::{verify_pack_file, PackVerifyReport};
 pub use crate::core::quantizer::{quantize_f16, quantize_f32, QuantizedTensor};
+pub use crate::core::manifest::{
+    load_manifest, DissectManifest, Fp16Entry, ManifestBlock, ManifestDefaults, ManifestModel,
+    ManifestProducedBy, PreserveEntry, TernaryCandidate, MANIFEST_NAME_CONVENTION_V1,
+    MANIFEST_SCHEMA_VERSION,
+};

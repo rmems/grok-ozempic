@@ -1,5 +1,6 @@
 pub mod weight_pack;
 pub mod weight_pack_read;
+pub mod manifest;
 pub mod npy;
 pub mod ozempic;
 pub mod projector;
