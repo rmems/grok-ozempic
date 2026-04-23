@@ -107,8 +107,9 @@ pub struct ManifestDefaults {
 /// An entry in the `preserve` list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreserveEntry {
-    /// Exact tensor name or simple glob (`*` matches one or more dotted
-    /// segments).
+    /// Exact tensor name or simple glob where `*` matches **exactly one**
+    /// dotted segment. See `docs/dissect-manifest.md` for the full
+    /// matching rules.
     pub name: String,
     #[serde(default)]
     pub reason: Option<String>,
