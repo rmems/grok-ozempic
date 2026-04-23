@@ -322,6 +322,22 @@ mod tests {
     }
 
     #[test]
+    fn in_tree_grok1_baseline_loads() {
+        // Guard: the committed reference manifest must always parse against
+        // the current loader. It is non-authoritative (xai-dissect is the
+        // source of truth) but it is the crate's own bootstrapping example.
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("dissect/grok-1/baseline.json");
+        let manifest = load_manifest(&path).expect("baseline must load");
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.model.family, "grok-1");
+        assert_eq!(
+            manifest.model.tensor_name_convention,
+            MANIFEST_NAME_CONVENTION_V1
+        );
+    }
+
+    #[test]
     fn malformed_json_is_parse_error() {
         let path = write_tmp("malformed", "{ not valid json");
         let err = load_manifest(&path).unwrap_err();

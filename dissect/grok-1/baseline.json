@@ -1,0 +1,28 @@
+{
+  "schema": "xai-dissect.manifest",
+  "schema_version": 1,
+  "model": {
+    "family": "grok-1",
+    "source": "xai-org/grok-1",
+    "tensor_name_convention": "blk.{L}.{role}.weight"
+  },
+  "produced_by": {
+    "tool": "grok-ozempic (non-authoritative reference)",
+    "version": "0.1.0",
+    "commit": null
+  },
+  "defaults": {
+    "precision": "ternary_snn",
+    "gif_threshold": 0.05
+  },
+  "preserve": [
+    { "name": "blk.*.moe_gate.weight", "reason": "routing-critical gate" },
+    { "name": "blk.*.expert_router.weight", "reason": "routing-critical router" },
+    { "name": "blk.*.routing.weight", "reason": "routing-critical" }
+  ],
+  "fp16": [
+    { "name": "blk.*.attn_router.weight", "reason": "router readout (legacy FP16 default)" }
+  ],
+  "ternary_candidates": [],
+  "blocks": []
+}
