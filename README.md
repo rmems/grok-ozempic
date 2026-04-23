@@ -5,7 +5,7 @@
 - **Authoritative classification** comes from an `xai-dissect` schema-v1 manifest (segment-anchored globs, three precision tiers, per-tensor GIF-threshold overrides). The legacy substring heuristic is preserved as a fallback when no manifest is supplied. See [`docs/dissect-manifest.md`](docs/dissect-manifest.md).
 - **Output format is GOZ1** — our own packed checkpoint (magic `GOZ1`, see [`src/core/weight_pack.rs`](src/core/weight_pack.rs)). **Not GGUF.**
 - **Batch pass is out-of-core** — one tensor in RAM at a time, streamed via memory-mapped I/O.
-- **[Grok-1](https://huggingface.co/xai-org/grok-1)** ships as JAX / Flax weights; this crate does **not** load checkpoints directly. Export tensors to `.npy` (recommended for JAX) or `safetensors` first. **Pickle is not supported.**
+- **Upstream checkpoint parsing is `xai-dissect`'s job, not ours.** [Grok-1](https://huggingface.co/xai-org/grok-1) ships as raw xAI shard files (see `xai-dissect`, which parses them without a Python unpickler and emits the structural manifests this crate consumes). `grok-ozempic` operates on tensors exported to `.npy` or `safetensors`; it does not read raw shard files itself.
 
 ---
 
@@ -119,7 +119,7 @@ Alternatively, export `GROK_OZEMPIC_MANIFEST=/path/to/manifest.json` to have eve
 
 ## Repository
 
-**https://github.com/Spikenaut/grok-ozempic**
+**https://github.com/rmems/grok-ozempic**
 
 ## License
 
