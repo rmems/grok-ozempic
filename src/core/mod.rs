@@ -5,6 +5,7 @@ pub mod npy;
 pub mod ozempic;
 pub mod projector;
 pub mod quantizer;
+pub mod selection;
 pub mod stream;
 
 use crate::{
