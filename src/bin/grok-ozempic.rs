@@ -30,6 +30,16 @@ enum ArtifactsCommands {
         /// Output directory for the reports
         #[arg(long)]
         output_dir: PathBuf,
+
+        /// Optional path to the raw weights directory (e.g. ckpt-0)
+        /// Used to derive real checkpoint provenance and tensor totals.
+        #[arg(long)]
+        weights_dir: Option<PathBuf>,
+
+        /// Optional checkpoint name override. If not provided, it will be derived
+        /// from the weights_dir if present, or fallback to manifest source.
+        #[arg(long)]
+        checkpoint: Option<String>,
     },
     /// Validate generated reports in a directory
     Validate {
@@ -47,12 +57,57 @@ fn main() -> anyhow::Result<()> {
             ArtifactsCommands::Generate {
                 manifest,
                 output_dir,
+                weights_dir,
+                checkpoint,
             } => {
                 println!(
                     "Generating artifacts to {} using manifest {}",
                     output_dir.display(),
                     manifest.display()
                 );
+
+                let mut actual_checkpoint = checkpoint;
+                let mut actual_total_tensors = None;
+
+                if let Some(wd) = weights_dir {
+                    if wd.is_dir() {
+                        // Derive checkpoint provenance from path
+                        if actual_checkpoint.is_none() {
+                            let comps: Vec<_> = wd.components().rev().take(2).collect();
+                            if comps.len() == 2 {
+                                actual_checkpoint = Some(format!(
+                                    "{}/{}",
+                                    comps[1].as_os_str().to_string_lossy(),
+                                    comps[0].as_os_str().to_string_lossy()
+                                ));
+                            } else if comps.len() == 1 {
+                                actual_checkpoint =
+                                    Some(comps[0].as_os_str().to_string_lossy().to_string());
+                            }
+                        }
+
+                        // Derive tensor totals from the directory
+                        let mut count = 0;
+                        if let Ok(entries) = std::fs::read_dir(&wd) {
+                            for entry in entries.flatten() {
+                                if let Ok(ft) = entry.file_type()
+                                    && ft.is_file()
+                                {
+                                    let fname = entry.file_name();
+                                    if fname.to_string_lossy().starts_with("tensor") {
+                                        count += 1;
+                                    }
+                                }
+                            }
+                        }
+                        if count > 0 {
+                            actual_total_tensors = Some(count);
+                            println!("Discovered {} tensor shards in weights directory.", count);
+                        }
+                    } else {
+                        println!("Warning: weights_dir is not a valid directory.");
+                    }
+                }
 
                 let manifest_bytes = std::fs::read(&manifest)?;
                 let dissect_manifest = grok_ozempic::parse_manifest_bytes(
@@ -61,8 +116,12 @@ fn main() -> anyhow::Result<()> {
                 )
                 .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
 
-                let ir = reports::detector::build_ir_from_manifest(&dissect_manifest)
-                    .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
+                let ir = reports::detector::build_ir_from_manifest(
+                    &dissect_manifest,
+                    actual_checkpoint.as_deref(),
+                    actual_total_tensors,
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
 
                 reports::validator::validate_ir(&ir)
                     .map_err(|e| anyhow::anyhow!("Artifact validation failed: {}", e))?;

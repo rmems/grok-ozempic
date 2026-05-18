@@ -50,17 +50,26 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
     Ok(())
 }
 
-pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, GrokOzempicError> {
+pub fn build_ir_from_manifest(
+    manifest: &DissectManifest,
+    checkpoint: Option<&str>,
+    actual_total_tensors: Option<usize>,
+) -> Result<ArtifactIR, GrokOzempicError> {
     validate_supported_manifest(manifest)?;
 
     // Basic structural information
     let model_family = manifest.model.family.clone();
-    let checkpoint = "unknown".to_string(); // Usually passed as context or injected
+    let checkpoint = checkpoint
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| manifest.model.source.clone());
 
     // Extracted from totals in a real scan; here we'll mock up for structural compatibility based on Grok-1
+    // If we have actual_total_tensors, we use that for total, but for subsets we still use canonical values
+    // since we haven't done a full precision scan yet.
+    let total_tensors = actual_total_tensors.unwrap_or(GROK1_TENSOR_TOTAL);
     let totals = TensorTotals {
-        total: GROK1_TENSOR_TOTAL,
-        f32_tensors: GROK1_TENSOR_F32,
+        total: total_tensors,
+        f32_tensors: GROK1_TENSOR_F32, // TODO: derive from actual scan in phase 2
         int8_tensors: GROK1_TENSOR_INT8,
         quant_tensors: GROK1_TENSOR_QUANT,
     };
@@ -135,7 +144,7 @@ pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, 
         manifest: ArtifactManifest {
             model_family,
             checkpoint,
-            shards: GROK1_TENSOR_TOTAL,
+            shards: total_tensors,
             schema_version: 1,
         },
         hyperparameters,

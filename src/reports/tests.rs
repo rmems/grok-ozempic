@@ -6,7 +6,7 @@ use crate::reports::validator;
 fn create_valid_ir() -> ArtifactIR {
     // We can use the detector to build a valid IR from the embedded baseline
     let manifest = embedded_grok1_baseline().expect("Failed to get baseline manifest");
-    detector::build_ir_from_manifest(manifest).expect("Failed to build valid IR")
+    detector::build_ir_from_manifest(manifest, None, None).expect("Failed to build valid IR")
 }
 
 #[test]
