@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use grok_ozempic::reports;
-use std::path::{Path, PathBuf};
+use grok_ozempic::reports::schema::ArtifactIR;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "grok-ozempic")]
@@ -81,19 +82,7 @@ fn main() -> anyhow::Result<()> {
                 let (actual_checkpoint, actual_shards) =
                     resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, true)?;
 
-                let manifest_bytes = std::fs::read(&manifest)?;
-                let dissect_manifest = grok_ozempic::parse_manifest_bytes(
-                    &manifest_bytes,
-                    manifest.to_str().unwrap_or("manifest"),
-                )
-                .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
-
-                let ir = reports::detector::build_ir_from_manifest(
-                    &dissect_manifest,
-                    actual_checkpoint.as_deref(),
-                    actual_shards,
-                )
-                .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
+                let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
 
                 reports::validator::validate_ir(&ir)
                     .map_err(|e| anyhow::anyhow!("Artifact validation failed: {}", e))?;
@@ -118,19 +107,7 @@ fn main() -> anyhow::Result<()> {
                 let (actual_checkpoint, actual_shards) =
                     resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, false)?;
 
-                let manifest_bytes = std::fs::read(&manifest)?;
-                let dissect_manifest = grok_ozempic::parse_manifest_bytes(
-                    &manifest_bytes,
-                    manifest.to_str().unwrap_or("manifest"),
-                )
-                .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
-
-                let ir = reports::detector::build_ir_from_manifest(
-                    &dissect_manifest,
-                    actual_checkpoint.as_deref(),
-                    actual_shards,
-                )
-                .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
+                let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
 
                 reports::writer::validate_report_dir_against_ir(&report_dir, &ir)
                     .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
@@ -140,6 +117,22 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn load_manifest_ir(
+    manifest: &Path,
+    actual_checkpoint: Option<&str>,
+    actual_shards: Option<usize>,
+) -> anyhow::Result<ArtifactIR> {
+    let manifest_bytes = std::fs::read(manifest)?;
+    let dissect_manifest = grok_ozempic::parse_manifest_bytes(
+        &manifest_bytes,
+        manifest.to_str().unwrap_or("manifest"),
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
+
+    reports::detector::build_ir_from_manifest(&dissect_manifest, actual_checkpoint, actual_shards)
+        .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))
 }
 
 /// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_ir_from_manifest`].
@@ -153,15 +146,29 @@ fn resolve_checkpoint_and_shards(
     if let Some(wd) = weights_dir {
         if wd.is_dir() {
             if checkpoint.is_none() {
-                let comps: Vec<_> = wd.components().rev().take(2).collect();
-                if comps.len() == 2 {
-                    checkpoint = Some(format!(
-                        "{}/{}",
-                        comps[1].as_os_str().to_string_lossy(),
-                        comps[0].as_os_str().to_string_lossy()
-                    ));
-                } else if comps.len() == 1 {
-                    checkpoint = Some(comps[0].as_os_str().to_string_lossy().to_string());
+                let mut tail: Vec<_> = wd
+                    .components()
+                    .rev()
+                    .filter_map(|c| match c {
+                        Component::Normal(name) => Some(name),
+                        _ => None,
+                    })
+                    .take(2)
+                    .collect();
+                tail.reverse();
+                match tail.as_slice() {
+                    [] => {}
+                    [only] => {
+                        checkpoint = Some(only.to_string_lossy().to_string());
+                    }
+                    [parent, leaf] => {
+                        checkpoint = Some(format!(
+                            "{}/{}",
+                            parent.to_string_lossy(),
+                            leaf.to_string_lossy()
+                        ));
+                    }
+                    _ => {}
                 }
             }
 
