@@ -110,20 +110,7 @@ pub fn build_ir_from_manifest(
             experts: GROK1_EXPERT_COUNT as usize,
             expert_tensors: 3,
             slots: vec![0, 1, 2],
-            shapes: vec![
-                format!(
-                    "expert_slot_00 ({}, {}, {})",
-                    GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
-                ),
-                format!(
-                    "expert_slot_01 ({}, {}, {})",
-                    GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH, GROK1_HIDDEN_DIM
-                ),
-                format!(
-                    "expert_slot_02 ({}, {}, {})",
-                    GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
-                ),
-            ],
+            shapes: super::grok1_expected_expert_shape_strings().into(),
         });
 
         let shard_start = 2 + block_idx * GROK1_BLOCK_SHARDS;
