@@ -207,15 +207,12 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             .strip_prefix("block_")
             .and_then(|s| s.split_once('.'))
             .map(|(prefix, _)| prefix)
+            && let Ok(block) = block_str.parse::<usize>()
+            && block < ir.hyperparameters.n_blocks
+            && c.tensor.ends_with("slot_11.router")
+            && c.risk > CRITICAL_ROUTER_RISK_THRESHOLD
         {
-            if let Ok(block) = block_str.parse::<usize>() {
-                if block < ir.hyperparameters.n_blocks
-                    && c.tensor.ends_with("slot_11.router")
-                    && c.risk > CRITICAL_ROUTER_RISK_THRESHOLD
-                {
-                    critical_router_blocks.insert(block);
-                }
-            }
+            critical_router_blocks.insert(block);
         }
     }
 

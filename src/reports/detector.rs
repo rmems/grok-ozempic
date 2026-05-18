@@ -36,13 +36,13 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
                     expected_idx, block.index
                 )));
             }
-            if let Some(experts) = block.experts {
-                if experts as usize != GROK1_EXPERT_COUNT as usize {
-                    return Err(GrokOzempicError::InvalidConfig(format!(
-                        "expected {} experts for block {}, got {}",
-                        GROK1_EXPERT_COUNT, block.index, experts
-                    )));
-                }
+            if let Some(experts) = block.experts
+                && experts as usize != GROK1_EXPERT_COUNT as usize
+            {
+                return Err(GrokOzempicError::InvalidConfig(format!(
+                    "expected {} experts for block {}, got {}",
+                    GROK1_EXPERT_COUNT, block.index, experts
+                )));
             }
         }
     }

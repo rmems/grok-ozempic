@@ -117,10 +117,16 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 "write_tensor_data: more blobs than tensor headers".into(),
             ));
         }
-        let pos = self.writer.stream_position().map_err(GrokOzempicError::Io)?;
+        let pos = self
+            .writer
+            .stream_position()
+            .map_err(GrokOzempicError::Io)?;
         self.real_offsets.push(pos - self.data_section_start);
         self.writer.write_all(data).map_err(GrokOzempicError::Io)?;
-        let cur = self.writer.stream_position().map_err(GrokOzempicError::Io)?;
+        let cur = self
+            .writer
+            .stream_position()
+            .map_err(GrokOzempicError::Io)?;
         let pad = (DATA_ALIGNMENT - (cur % DATA_ALIGNMENT)) % DATA_ALIGNMENT;
         self.writer
             .write_all(&vec![0u8; pad as usize])
@@ -198,7 +204,7 @@ mod tests {
         let mut buf = Cursor::new(Vec::<u8>::new());
         {
             let mut w = PackStreamWriter::begin(&mut buf, &meta, &headers).unwrap();
-            w.write_tensor_data(&vec![0xAB; 64]).unwrap();
+            w.write_tensor_data(&[0xAB; 64]).unwrap();
             w.finalize().unwrap();
         }
         let bytes = buf.into_inner();

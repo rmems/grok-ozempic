@@ -630,7 +630,7 @@ mod tests {
         bytes.push(0); // minor
         bytes.extend_from_slice(&(header_len as u16).to_le_bytes());
         bytes.extend_from_slice(dict.as_bytes());
-        bytes.extend(std::iter::repeat(b' ').take(pad));
+        bytes.extend(std::iter::repeat_n(b' ', pad));
         for v in data {
             bytes.extend_from_slice(&v.to_le_bytes());
         }

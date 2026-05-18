@@ -134,7 +134,7 @@ fn tensor_nbytes(info: &TensorInfoParsed) -> Result<u64> {
 }
 
 fn align_up(n: u64, align: u64) -> u64 {
-    (n + align - 1) / align * align
+    n.div_ceil(align) * align
 }
 
 fn read_u32<R: Read>(r: &mut R) -> Result<u32> {
@@ -181,7 +181,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::io::{BufWriter, Write};
 
-    use crate::core::weight_pack::{PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_TERNARY};
+    use crate::core::weight_pack::{
+        PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_TERNARY,
+    };
 
     #[test]
     fn verify_round_trip_stream_writer() {

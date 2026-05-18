@@ -1,5 +1,3 @@
-pub mod weight_pack;
-pub mod weight_pack_read;
 pub mod manifest;
 pub mod npy;
 pub mod ozempic;
@@ -8,6 +6,8 @@ pub mod projector;
 pub mod quantizer;
 pub mod selection;
 pub mod stream;
+pub mod weight_pack;
+pub mod weight_pack_read;
 
 use crate::{
     error::Result,
@@ -29,7 +29,11 @@ impl HybridModel {
     pub fn from_config(config: HybridConfig) -> Self {
         let projector = Projector::from_config(&config);
         let moe = OzempicMoE::from_config(&config);
-        Self { config, projector, moe }
+        Self {
+            config,
+            projector,
+            moe,
+        }
     }
 
     /// Reset all stateful components (membrane potentials, etc.).

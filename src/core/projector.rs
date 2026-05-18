@@ -18,7 +18,12 @@ pub struct Projector {
 
 impl Projector {
     /// Create a new `Projector` with the given dimensions and mode.
-    pub fn new(input_dim: usize, output_dim: usize, mode: ProjectionMode, snn_steps: usize) -> Self {
+    pub fn new(
+        input_dim: usize,
+        output_dim: usize,
+        mode: ProjectionMode,
+        snn_steps: usize,
+    ) -> Self {
         Self {
             input_dim,
             output_dim,
@@ -56,8 +61,8 @@ impl Projector {
             });
         }
 
-        let leak: f32 = 0.9;        // membrane leak factor per step
-        let threshold: f32 = 1.0;   // firing threshold
+        let leak: f32 = 0.9; // membrane leak factor per step
+        let threshold: f32 = 1.0; // firing threshold
 
         let mut fired_indices: std::collections::BTreeSet<usize> = Default::default();
         let mut embedding = vec![0.0f32; self.output_dim];
