@@ -35,10 +35,11 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        if router.shape != (6144, 8) {
+        let expected_router_shape = (ir.hyperparameters.d_model, ir.hyperparameters.n_experts);
+        if router.shape != expected_router_shape {
             return Err(GrokOzempicError::ArtifactValidation(format!(
-                "Invalid router shape for block {}: expected (6144, 8), got {:?}",
-                router.block, router.shape
+                "Invalid router shape for block {}: expected {:?}, got {:?}",
+                router.block, expected_router_shape, router.shape
             )));
         }
 
@@ -95,10 +96,10 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        if block.experts != 8 {
+        if block.experts != ir.hyperparameters.n_experts {
             return Err(GrokOzempicError::ArtifactValidation(format!(
-                "Invalid expert count for block {}: expected 8, got {}",
-                block.block, block.experts
+                "Invalid expert count for block {}: expected {}, got {}",
+                block.block, ir.hyperparameters.n_experts, block.experts
             )));
         }
 
