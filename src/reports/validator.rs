@@ -1,12 +1,7 @@
 use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
+use crate::types::{GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL};
 use std::collections::HashSet;
-
-/// Grok-1 xai-dissect baseline inventory tensor counts (canonical fixture / upstream scan).
-const GROK1_TENSOR_TOTAL: usize = 770;
-const GROK1_TENSOR_F32: usize = 322;
-const GROK1_TENSOR_INT8: usize = 448;
-const GROK1_TENSOR_QUANT: usize = 448;
 const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {

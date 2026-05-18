@@ -24,11 +24,11 @@ use safetensors::SafeTensors;
 
 use crate::{
     core::{
-        manifest::{embedded_grok1_baseline, load_manifest, DissectManifest},
-        npy::{npy_stem_to_tensor_name, MmapNpy, NpyDtype},
+        manifest::{DissectManifest, embedded_grok1_baseline, load_manifest},
+        npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
         precision::decide as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
-        selection::{classify, TensorClass},
+        selection::{TensorClass, classify},
         weight_pack::{
             PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_F16, TENSOR_TERNARY,
         },
@@ -41,12 +41,12 @@ use crate::{
 // https://huggingface.co/xai-org/grok-1 `config.json` when updating.
 const GROK1_CONTEXT_LENGTH: u32 = 8192;
 const GROK1_EMBEDDING_LENGTH: u32 = 6144;
-const GROK1_FEED_FORWARD_LENGTH: u32 = 32768;
+pub const GROK1_FEED_FORWARD_LENGTH: u32 = 32768;
 const GROK1_ATTENTION_HEAD_COUNT: u32 = 48;
 const GROK1_ATTENTION_HEAD_COUNT_KV: u32 = 8;
-const GROK1_BLOCK_COUNT: u32 = 64;
+pub const GROK1_BLOCK_COUNT: u32 = 64;
 /// MoE experts **per layer** (matches HF Grok-1 and [`crate::types::HybridConfig`] defaults).
-const GROK1_EXPERT_COUNT: u32 = 8;
+pub const GROK1_EXPERT_COUNT: u32 = 8;
 
 /// Append Grok-1 model shape hints into GOZ1 metadata (for your own loaders / JAX tooling).
 pub fn append_grok1_arch_metadata(meta: &mut BTreeMap<String, PackMetaValue>) {
@@ -268,14 +268,8 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
         .collect();
 
     let mut metadata: BTreeMap<String, PackMetaValue> = BTreeMap::new();
-    metadata.insert(
-        "oz.name".into(),
-        PackMetaValue::Str("grok-ozempic".into()),
-    );
-    metadata.insert(
-        "oz.quantization_version".into(),
-        PackMetaValue::U32(1),
-    );
+    metadata.insert("oz.name".into(), PackMetaValue::Str("grok-ozempic".into()));
+    metadata.insert("oz.quantization_version".into(), PackMetaValue::U32(1));
     // Record the effective baseline gif_threshold so the artifact's
     // provenance metadata reflects what was actually applied. When the
     // manifest supplies a defaults.gif_threshold that overrides the
@@ -340,9 +334,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
     }
 
     stream.finalize()?;
-    out_writer
-        .flush()
-        .map_err(GrokOzempicError::Io)?;
+    out_writer.flush().map_err(GrokOzempicError::Io)?;
 
     Ok(all_stats)
 }
@@ -362,7 +354,11 @@ fn quantize_safetensors_entry(
     _config: &QuantizationConfig,
 ) -> Result<(Vec<u8>, Option<f32>)> {
     let file = File::open(&entry.source_path).map_err(GrokOzempicError::Io)?;
-    let mmap = unsafe { MmapOptions::new().map(&file).map_err(GrokOzempicError::Io)? };
+    let mmap = unsafe {
+        MmapOptions::new()
+            .map(&file)
+            .map_err(GrokOzempicError::Io)?
+    };
     let tensors = SafeTensors::deserialize(&mmap).map_err(GrokOzempicError::Safetensors)?;
     let view = tensors.tensor(&entry.tensor_name)?;
 
@@ -484,7 +480,11 @@ fn build_manifest_safetensors(
     let mut v = Vec::new();
     for shard in shards {
         let file = File::open(shard).map_err(GrokOzempicError::Io)?;
-        let mmap = unsafe { MmapOptions::new().map(&file).map_err(GrokOzempicError::Io)? };
+        let mmap = unsafe {
+            MmapOptions::new()
+                .map(&file)
+                .map_err(GrokOzempicError::Io)?
+        };
         let tensors = SafeTensors::deserialize(&mmap).map_err(GrokOzempicError::Safetensors)?;
         for (name, view) in tensors.tensors() {
             let dtype = parse_safetensors_dtype(view.dtype());
@@ -518,12 +518,9 @@ fn build_manifest_npy(
         if dtype == SourceDtype::Other {
             continue;
         }
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| {
-                GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
-            })?;
+        let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+            GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
+        })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
         let (_class, precision, gif_threshold) =
             classify_and_decide(&tensor_name, dissect_manifest, config)?;
@@ -563,16 +560,12 @@ fn collect_npy_files(dir: &str) -> Result<Vec<PathBuf>> {
 
 fn bytemuck_cast_f32(raw: &[u8]) -> &[f32] {
     assert_eq!(raw.len() % 4, 0, "f32 data length must be a multiple of 4");
-    unsafe {
-        std::slice::from_raw_parts(raw.as_ptr().cast::<f32>(), raw.len() / 4)
-    }
+    unsafe { std::slice::from_raw_parts(raw.as_ptr().cast::<f32>(), raw.len() / 4) }
 }
 
 fn bytemuck_cast_f16(raw: &[u8]) -> &[f16] {
     assert_eq!(raw.len() % 2, 0, "f16 data length must be a multiple of 2");
-    unsafe {
-        std::slice::from_raw_parts(raw.as_ptr().cast::<f16>(), raw.len() / 2)
-    }
+    unsafe { std::slice::from_raw_parts(raw.as_ptr().cast::<f16>(), raw.len() / 2) }
 }
 
 /// Serialises env-var mutations across tests that touch
@@ -620,9 +613,7 @@ mod tests {
                 .join(", ");
             format!("({inner})")
         };
-        let dict = format!(
-            "{{'descr': '<f4', 'fortran_order': False, 'shape': {shape_str}, }}"
-        );
+        let dict = format!("{{'descr': '<f4', 'fortran_order': False, 'shape': {shape_str}, }}");
         let magic = b"\x93NUMPY";
         let preamble_len = magic.len() + 1 /* major */ + 1 /* minor */ + 2 /* hlen */;
         // Pad the header string with spaces so (preamble + hlen) is a
@@ -677,7 +668,11 @@ mod tests {
         let expert_router = [1.0f32, -1.0, 0.5, -0.5];
         let attn_router = [0.05f32, 0.9, -0.05, -0.9];
         let ffn_up = [0.3f32, -0.3, 0.01, -0.01];
-        write_npy_f32(&dir.join("blk__0__moe_gate__weight.npy"), &[2, 2], &moe_gate);
+        write_npy_f32(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[2, 2],
+            &moe_gate,
+        );
         write_npy_f32(
             &dir.join("blk__0__expert_router__weight.npy"),
             &[2, 2],
@@ -715,8 +710,8 @@ mod tests {
     #[test]
     fn deprecation_warning_fires_when_both_present() {
         use crate::core::manifest::{
-            DissectManifest, ManifestDefaults, ManifestModel, MANIFEST_NAME_CONVENTION_V1,
-            MANIFEST_SCHEMA_VERSION,
+            DissectManifest, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION,
+            ManifestDefaults, ManifestModel,
         };
         let manifest = DissectManifest {
             schema: "xai-dissect.manifest".into(),

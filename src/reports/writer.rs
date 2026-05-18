@@ -39,7 +39,7 @@ pub fn validate_report_dir(dir: &Path) -> Result<(), GrokOzempicError> {
     Ok(())
 }
 
-pub fn write_reports(ir: &ArtifactIR, output_dir: &Path) -> std::io::Result<()> {
+pub fn write_reports(ir: &ArtifactIR, output_dir: &Path) -> Result<(), GrokOzempicError> {
     if !output_dir.exists() {
         fs::create_dir_all(output_dir)?;
     }

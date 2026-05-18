@@ -1,13 +1,16 @@
 use crate::core::manifest::DissectManifest;
+use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH};
 use crate::error::GrokOzempicError;
 use crate::reports::schema::{
     ArtifactIR, ArtifactManifest, ExpertBlock, Hyperparameters, RouterEntry, SaaqCritical,
     SaaqTarget, TensorTotals,
 };
+use crate::types::{
+    GROK1_HIDDEN_DIM, GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL,
+    GROK1_VOCAB_SIZE,
+};
 
 const GROK1_FAMILY: &str = "grok-1";
-const GROK1_N_BLOCKS: usize = 64;
-const GROK1_N_EXPERTS: usize = 8;
 
 fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOzempicError> {
     if manifest.model.family != GROK1_FAMILY {
@@ -18,10 +21,10 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
     }
 
     if !manifest.blocks.is_empty() {
-        if manifest.blocks.len() != GROK1_N_BLOCKS {
+        if manifest.blocks.len() != GROK1_BLOCK_COUNT as usize {
             return Err(GrokOzempicError::InvalidConfig(format!(
                 "expected {} manifest blocks for Grok-1, got {}",
-                GROK1_N_BLOCKS,
+                GROK1_BLOCK_COUNT,
                 manifest.blocks.len()
             )));
         }
@@ -34,10 +37,10 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
                 )));
             }
             if let Some(experts) = block.experts {
-                if experts as usize != GROK1_N_EXPERTS {
+                if experts as usize != GROK1_EXPERT_COUNT as usize {
                     return Err(GrokOzempicError::InvalidConfig(format!(
                         "expected {} experts for block {}, got {}",
-                        GROK1_N_EXPERTS, block.index, experts
+                        GROK1_EXPERT_COUNT, block.index, experts
                     )));
                 }
             }
@@ -56,44 +59,53 @@ pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, 
 
     // Extracted from totals in a real scan; here we'll mock up for structural compatibility based on Grok-1
     let totals = TensorTotals {
-        total: 770,
-        f32_tensors: 322,
-        int8_tensors: 448,
-        quant_tensors: 448,
+        total: GROK1_TENSOR_TOTAL,
+        f32_tensors: GROK1_TENSOR_F32,
+        int8_tensors: GROK1_TENSOR_INT8,
+        quant_tensors: GROK1_TENSOR_QUANT,
     };
 
     let hyperparameters = Hyperparameters {
-        vocab_size: 131072,
-        d_model: 6144,
-        n_experts: GROK1_N_EXPERTS,
-        d_ff: 32768,
-        n_blocks: GROK1_N_BLOCKS,
+        vocab_size: GROK1_VOCAB_SIZE,
+        d_model: GROK1_HIDDEN_DIM,
+        n_experts: GROK1_EXPERT_COUNT as usize,
+        d_ff: GROK1_FEED_FORWARD_LENGTH as usize,
+        n_blocks: GROK1_BLOCK_COUNT as usize,
     };
 
     let mut routers = Vec::new();
     let mut expert_blocks = Vec::new();
 
     // Grok-1 architecture specific structural scan
-    for block_idx in 0..GROK1_N_BLOCKS {
+    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
         routers.push(RouterEntry {
             block: block_idx,
             slot: 11,
-            shape: (6144, 8),
+            shape: (GROK1_HIDDEN_DIM, GROK1_EXPERT_COUNT as usize),
             orientation: "d_model_to_experts".to_string(),
-            experts: GROK1_N_EXPERTS,
+            experts: GROK1_EXPERT_COUNT as usize,
             kind: "router".to_string(),
             structural_name: format!("block_{:03}.routing_slot_11", block_idx),
         });
 
         expert_blocks.push(ExpertBlock {
             block: block_idx,
-            experts: GROK1_N_EXPERTS,
+            experts: GROK1_EXPERT_COUNT as usize,
             expert_tensors: 3,
             slots: vec![0, 1, 2],
             shapes: vec![
-                "expert_slot_00 (8, 6144, 32768)".to_string(),
-                "expert_slot_01 (8, 32768, 6144)".to_string(),
-                "expert_slot_02 (8, 6144, 32768)".to_string(),
+                format!(
+                    "expert_slot_00 ({}, {}, {})",
+                    GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
+                ),
+                format!(
+                    "expert_slot_01 ({}, {}, {})",
+                    GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH, GROK1_HIDDEN_DIM
+                ),
+                format!(
+                    "expert_slot_02 ({}, {}, {})",
+                    GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
+                ),
             ],
         });
     }
@@ -110,7 +122,7 @@ pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, 
     }];
 
     let mut saaq_critical = Vec::new();
-    for block_idx in 0..GROK1_N_BLOCKS {
+    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
         saaq_critical.push(SaaqCritical {
             tensor: format!("block_{:03}.slot_11.router", block_idx),
             readiness: 0.054,
@@ -123,7 +135,7 @@ pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, 
         manifest: ArtifactManifest {
             model_family,
             checkpoint,
-            shards: 770,
+            shards: GROK1_TENSOR_TOTAL,
             schema_version: 1,
         },
         hyperparameters,
