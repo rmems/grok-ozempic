@@ -65,7 +65,8 @@ This keeps memory usage low even for very large checkpoints.
 For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 
 ```text
-τ = gif_threshold × rms(layer)        |
+τ = gif_threshold × rms(layer)
+```
 
 ## Repository
 

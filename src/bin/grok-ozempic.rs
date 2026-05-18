@@ -54,7 +54,6 @@ fn main() -> anyhow::Result<()> {
                     manifest.display()
                 );
 
-                // Let's implement this for real
                 let manifest_bytes = std::fs::read(&manifest)?;
                 let dissect_manifest = grok_ozempic::parse_manifest_bytes(
                     &manifest_bytes,
@@ -77,7 +76,7 @@ fn main() -> anyhow::Result<()> {
                 println!("Validating reports in {}", report_dir.display());
                 reports::writer::validate_report_dir(&report_dir)
                     .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
-                println!("Report directory structure OK.");
+                println!("Report directory is structurally valid.");
             }
         },
     }

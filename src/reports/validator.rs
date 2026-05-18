@@ -1,5 +1,6 @@
 use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
+use std::collections::HashSet;
 
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
     // 1. Verify tensors parse and total exactly 770.
@@ -19,8 +20,21 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
         )));
     }
 
+    let mut seen_router_blocks = HashSet::new();
     for router in &ir.routers {
-        // The shape must strictly be `(6144, 8)`.
+        if router.block >= ir.hyperparameters.n_blocks {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Invalid router block index: expected < {}, got {}",
+                ir.hyperparameters.n_blocks, router.block
+            )));
+        }
+        if !seen_router_blocks.insert(router.block) {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Duplicate router entry for block {}",
+                router.block
+            )));
+        }
+
         if router.shape != (6144, 8) {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid router shape for block {}: expected (6144, 8), got {:?}",
@@ -28,7 +42,6 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        // The orientation must be labeled `d_model_to_experts`.
         if router.orientation != "d_model_to_experts" {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid router orientation for block {}: expected d_model_to_experts, got {}",
@@ -36,7 +49,6 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        // The artifact slot must be `11`.
         if router.slot != 11 {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid router slot for block {}: expected 11, got {}",
@@ -44,7 +56,6 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        // The structural name format must strictly be `block_{:03}.routing_slot_11`.
         let expected_name = format!("block_{:03}.routing_slot_11", router.block);
         if router.structural_name != expected_name {
             return Err(GrokOzempicError::ArtifactValidation(format!(
@@ -63,8 +74,20 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
         )));
     }
 
+    let mut seen_expert_blocks = HashSet::new();
     for block in &ir.expert_blocks {
-        // Each block must have exactly 3 expert tensors.
+        if block.block >= ir.hyperparameters.n_blocks {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Invalid expert block index: expected < {}, got {}",
+                ir.hyperparameters.n_blocks, block.block
+            )));
+        }
+        if !seen_expert_blocks.insert(block.block) {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Duplicate expert block entry for block {}",
+                block.block
+            )));
+        }
         if block.expert_tensors != 3 {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid expert tensors count for block {}: expected 3, got {}",
@@ -72,7 +95,6 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        // Total expert count per block must be `8`.
         if block.experts != 8 {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid expert count for block {}: expected 8, got {}",
@@ -95,7 +117,7 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
 
         if block.shapes.len() != expected_shapes.len() {
             return Err(GrokOzempicError::ArtifactValidation(format!(
-                "Invalid expert shapes count for block {}: expected {}, got {}",
+                "Invalid expert shape count for block {}: expected {}, got {}",
                 block.block,
                 expected_shapes.len(),
                 block.shapes.len()
@@ -123,17 +145,30 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
         ));
     }
 
-    let mut router_critical_count = 0;
+    let mut critical_router_blocks = HashSet::new();
     for c in &ir.saaq_critical {
-        if c.tensor.contains("slot_11.router") && c.risk > 0.5 {
-            router_critical_count += 1;
+        if let Some(block_str) = c
+            .tensor
+            .strip_prefix("block_")
+            .and_then(|s| s.split_once('.'))
+            .map(|(prefix, _)| prefix)
+        {
+            if let Ok(block) = block_str.parse::<usize>() {
+                if block < ir.hyperparameters.n_blocks
+                    && c.tensor.ends_with("slot_11.router")
+                    && c.risk > 0.5
+                {
+                    critical_router_blocks.insert(block);
+                }
+            }
         }
     }
 
-    if router_critical_count != ir.hyperparameters.n_blocks {
+    if critical_router_blocks.len() != ir.hyperparameters.n_blocks {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "Missing high-risk critical routers: expected {}, got {}",
-            ir.hyperparameters.n_blocks, router_critical_count
+            ir.hyperparameters.n_blocks,
+            critical_router_blocks.len()
         )));
     }
 
