@@ -181,7 +181,7 @@ pub enum ProjectionMode {
 pub enum ExecutionMode {
     #[default]
     SpikingSim, // GIF + ternary
-    DenseSim,   // for comparison
+    DenseSim, // for comparison
 }
 
 #[derive(Clone, Debug)]
@@ -194,3 +194,14 @@ pub struct HybridOutput {
 
 /// Grok-1 hidden size (`hidden_size` / `embedding_length` in model cards).
 pub const GROK1_HIDDEN_DIM: usize = 6144;
+
+/// Grok-1 vocabulary size (`vocab_size` in HF `config.json`).
+pub const GROK1_VOCAB_SIZE: usize = 131_072;
+
+/// Grok-1 xai-dissect baseline inventory tensor counts (canonical fixture / upstream scan).
+pub const GROK1_TENSOR_TOTAL: usize = 770;
+pub const GROK1_TENSOR_F32: usize = 322;
+pub const GROK1_TENSOR_INT8: usize = 448;
+pub const GROK1_TENSOR_QUANT: usize = 448;
+pub const GROK1_TENSOR_TOTAL_ELEMENTS: u64 = 315_684_820_992;
+pub const GROK1_TENSOR_TOTAL_BYTES: u64 = 318_114_914_304;

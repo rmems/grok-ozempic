@@ -92,8 +92,8 @@ pub fn parse_precision_str(s: &str) -> Result<TensorPrecision> {
 mod tests {
     use super::*;
     use crate::core::manifest::{
-        DissectManifest, ManifestDefaults, ManifestModel, MANIFEST_NAME_CONVENTION_V1,
-        MANIFEST_SCHEMA_VERSION,
+        DissectManifest, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION, ManifestDefaults,
+        ManifestModel,
     };
 
     fn manifest_with_defaults(precision: Option<&str>, gif: Option<f32>) -> DissectManifest {
@@ -130,10 +130,7 @@ mod tests {
             parse_precision_str("ternary_snn").unwrap(),
             TensorPrecision::TernarySnN
         );
-        assert_eq!(
-            parse_precision_str("fp16").unwrap(),
-            TensorPrecision::Fp16
-        );
+        assert_eq!(parse_precision_str("fp16").unwrap(), TensorPrecision::Fp16);
         assert_eq!(
             parse_precision_str("preserve").unwrap(),
             TensorPrecision::Preserve

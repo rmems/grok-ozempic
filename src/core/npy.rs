@@ -33,7 +33,11 @@ pub struct MmapNpy {
 impl MmapNpy {
     pub fn map_path(path: &Path) -> Result<Self> {
         let file = std::fs::File::open(path).map_err(GrokOzempicError::Io)?;
-        let mmap = unsafe { MmapOptions::new().map(&file).map_err(GrokOzempicError::Io)? };
+        let mmap = unsafe {
+            MmapOptions::new()
+                .map(&file)
+                .map_err(GrokOzempicError::Io)?
+        };
         let (dtype, shape, data_offset) = parse_npy_header(&mmap)?;
         Ok(Self {
             mmap,
@@ -93,15 +97,12 @@ pub fn parse_npy_header(buf: &[u8]) -> Result<(NpyDtype, Vec<usize>, usize)> {
             "npy: header length exceeds file".into(),
         ));
     }
-    let header_str = std::str::from_utf8(&buf[header_start..header_end]).map_err(|_| {
-        GrokOzempicError::InvalidConfig("npy: header is not valid UTF-8".into())
-    })?;
-    let descr = parse_descr(header_str).ok_or_else(|| {
-        GrokOzempicError::InvalidConfig("npy: could not parse descr".into())
-    })?;
-    let shape = parse_shape(header_str).ok_or_else(|| {
-        GrokOzempicError::InvalidConfig("npy: could not parse shape".into())
-    })?;
+    let header_str = std::str::from_utf8(&buf[header_start..header_end])
+        .map_err(|_| GrokOzempicError::InvalidConfig("npy: header is not valid UTF-8".into()))?;
+    let descr = parse_descr(header_str)
+        .ok_or_else(|| GrokOzempicError::InvalidConfig("npy: could not parse descr".into()))?;
+    let shape = parse_shape(header_str)
+        .ok_or_else(|| GrokOzempicError::InvalidConfig("npy: could not parse shape".into()))?;
     ensure_npy_c_order(header_str)?;
     let dtype = npy_descr_to_dtype(descr);
     let preamble = header_start;
@@ -214,7 +215,7 @@ mod tests {
         header.extend_from_slice(dict.as_bytes());
         let preamble = header.len();
         let pad = (64 - (preamble % 64)) % 64;
-        header.extend(std::iter::repeat(b' ').take(pad));
+        header.extend(std::iter::repeat_n(b' ', pad));
         let data_offset = header.len();
         header.extend_from_slice(&[0u8; 48]);
         let (dtype, shape, off) = parse_npy_header(&header).unwrap();
@@ -235,12 +236,9 @@ mod tests {
         header.extend_from_slice(dict.as_bytes());
         let preamble = header.len();
         let pad = (64 - (preamble % 64)) % 64;
-        header.extend(std::iter::repeat(b' ').take(pad));
+        header.extend(std::iter::repeat_n(b' ', pad));
         let err = parse_npy_header(&header).unwrap_err();
         let msg = err.to_string();
-        assert!(
-            msg.contains("fortran_order"),
-            "unexpected error: {msg}"
-        );
+        assert!(msg.contains("fortran_order"), "unexpected error: {msg}");
     }
 }

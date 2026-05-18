@@ -48,9 +48,7 @@ impl OzempicMoE {
             .num_experts
             .checked_mul(self.embedding_dim)
             .and_then(|n| n.checked_mul(2))
-            .ok_or_else(|| GrokOzempicError::InvalidConfig(
-                "gate buffer size overflow".into(),
-            ))?;
+            .ok_or_else(|| GrokOzempicError::InvalidConfig("gate buffer size overflow".into()))?;
         if data.len() != need {
             return Err(GrokOzempicError::DimensionMismatch {
                 expected: need,

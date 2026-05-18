@@ -30,8 +30,7 @@ use crate::error::{GrokOzempicError, Result};
 ///
 /// `xai-dissect` remains the authoritative source of truth; this constant
 /// is a bootstrapping convenience.
-pub const GROK1_BASELINE_JSON: &str =
-    include_str!("../../dissect/grok-1/baseline.json");
+pub const GROK1_BASELINE_JSON: &str = include_str!("../../dissect/grok-1/baseline.json");
 
 /// Schema version understood by this loader.
 pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
@@ -242,10 +241,7 @@ pub fn embedded_grok1_baseline() -> Result<&'static DissectManifest> {
     static CACHE: OnceLock<std::result::Result<DissectManifest, GrokOzempicError>> =
         OnceLock::new();
     match CACHE.get_or_init(|| {
-        parse_manifest_bytes(
-            GROK1_BASELINE_JSON.as_bytes(),
-            "<embedded grok-1 baseline>",
-        )
+        parse_manifest_bytes(GROK1_BASELINE_JSON.as_bytes(), "<embedded grok-1 baseline>")
     }) {
         Ok(m) => Ok(m),
         Err(e) => Err(clone_typed_error(e)),
@@ -260,11 +256,9 @@ pub fn embedded_grok1_baseline() -> Result<&'static DissectManifest> {
 /// stringified [`GrokOzempicError::InvalidConfig`].
 fn clone_typed_error(e: &GrokOzempicError) -> GrokOzempicError {
     match e {
-        GrokOzempicError::ManifestParse { path, source: _ } => {
-            GrokOzempicError::InvalidConfig(format!(
-                "embedded grok-1 baseline parse error at {path}"
-            ))
-        }
+        GrokOzempicError::ManifestParse { path, source: _ } => GrokOzempicError::InvalidConfig(
+            format!("embedded grok-1 baseline parse error at {path}"),
+        ),
         GrokOzempicError::ManifestSchemaVersion { got, expected } => {
             GrokOzempicError::ManifestSchemaVersion {
                 got: *got,
@@ -368,7 +362,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                GrokOzempicError::ManifestSchemaVersion { got: 2, expected: 1 }
+                GrokOzempicError::ManifestSchemaVersion {
+                    got: 2,
+                    expected: 1
+                }
             ),
             "expected ManifestSchemaVersion, got {err:?}"
         );
@@ -388,10 +385,7 @@ mod tests {
         let path = write_tmp("convention", json);
         let err = load_manifest(&path).unwrap_err();
         assert!(
-            matches!(
-                err,
-                GrokOzempicError::ManifestNameConventionMismatch { .. }
-            ),
+            matches!(err, GrokOzempicError::ManifestNameConventionMismatch { .. }),
             "expected ManifestNameConventionMismatch, got {err:?}"
         );
         let _ = fs::remove_file(&path);

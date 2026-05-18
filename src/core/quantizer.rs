@@ -116,7 +116,13 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
     // Step 4: pack into 2-bit representation.
     let packed = pack_trits(&ternary);
 
-    QuantizedTensor { packed, num_elements: n, rms, threshold, sparsity }
+    QuantizedTensor {
+        packed,
+        num_elements: n,
+        rms,
+        threshold,
+        sparsity,
+    }
 }
 
 /// Apply saliency-aware GIF ternary quantization to FP16 weights.
@@ -202,7 +208,7 @@ mod tests {
 
     #[test]
     fn passthrough_f16_roundtrip() {
-        let originals = vec![f16::from_f32(1.5), f16::from_f32(-3.14)];
+        let originals = vec![f16::from_f32(1.5), f16::from_f32(-std::f32::consts::PI)];
         let bytes = passthrough_f16(&originals);
         assert_eq!(bytes.len(), 4);
         // Reconstruct.

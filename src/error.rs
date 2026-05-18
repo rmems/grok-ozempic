@@ -40,13 +40,14 @@ pub enum GrokOzempicError {
     #[error("unsupported manifest schema_version: got {got}, expected {expected}")]
     ManifestSchemaVersion { got: u32, expected: u32 },
 
-    #[error(
-        "manifest tensor_name_convention mismatch: got {got:?}, expected {expected:?}"
-    )]
+    #[error("manifest tensor_name_convention mismatch: got {got:?}, expected {expected:?}")]
     ManifestNameConventionMismatch { got: String, expected: String },
 
     #[error("unsupported manifest precision tier: {got:?}")]
     ManifestInvalidPrecision { got: String },
+
+    #[error("artifact validation error: {0}")]
+    ArtifactValidation(String),
 }
 
 pub type Result<T> = std::result::Result<T, GrokOzempicError>;

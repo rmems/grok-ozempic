@@ -12,22 +12,15 @@
 //! Resolution order inside a manifest:
 //! `preserve` > `fp16` > `ternary_candidates` > `Default`.
 
-use crate::core::manifest::{
-    DissectManifest, Fp16Entry, PreserveEntry, TernaryCandidate,
-};
+use crate::core::manifest::{DissectManifest, Fp16Entry, PreserveEntry, TernaryCandidate};
 
 /// Default legacy router-name substrings used when no manifest is present
 /// and [`crate::types::QuantizationConfig::router_patterns`] is empty.
 ///
 /// Kept here (not in [`crate::core::stream`]) so all classification logic
 /// lives in one place.
-pub const LEGACY_DEFAULT_ROUTER_PATTERNS: &[&str] = &[
-    "router",
-    "gate",
-    "moe_gate",
-    "expert_router",
-    "routing",
-];
+pub const LEGACY_DEFAULT_ROUTER_PATTERNS: &[&str] =
+    &["router", "gate", "moe_gate", "expert_router", "routing"];
 
 /// Outcome of classification for a single tensor.
 ///
@@ -140,8 +133,8 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::core::manifest::{
-        DissectManifest, Fp16Entry, ManifestDefaults, ManifestModel, PreserveEntry,
-        TernaryCandidate, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION,
+        DissectManifest, Fp16Entry, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION,
+        ManifestDefaults, ManifestModel, PreserveEntry, TernaryCandidate,
     };
 
     fn empty_manifest() -> DissectManifest {
@@ -166,7 +159,10 @@ mod tests {
 
     #[test]
     fn glob_exact_match() {
-        assert!(glob_match("blk.0.attn_router.weight", "blk.0.attn_router.weight"));
+        assert!(glob_match(
+            "blk.0.attn_router.weight",
+            "blk.0.attn_router.weight"
+        ));
     }
 
     #[test]
@@ -246,7 +242,10 @@ mod tests {
         });
         let cls = classify("blk.0.ffn_up.weight", Some(&m), &[]);
         match cls {
-            TensorClass::TernaryCandidate { rank, gif_threshold } => {
+            TensorClass::TernaryCandidate {
+                rank,
+                gif_threshold,
+            } => {
                 assert_eq!(rank, Some(0.98));
                 assert_eq!(gif_threshold, Some(0.04));
             }
