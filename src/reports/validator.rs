@@ -7,6 +7,7 @@ const GROK1_TENSOR_TOTAL: usize = 770;
 const GROK1_TENSOR_F32: usize = 322;
 const GROK1_TENSOR_INT8: usize = 448;
 const GROK1_TENSOR_QUANT: usize = 448;
+const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
     // 1. Tensor inventory totals (strict Grok-1 baseline + internal consistency).
@@ -22,10 +23,7 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
     if sum_f32_int8 != ir.totals.total {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "Tensor subtotals do not sum to total: f32_tensors ({}) + int8_tensors ({}) = {}, expected total {}",
-            ir.totals.f32_tensors,
-            ir.totals.int8_tensors,
-            sum_f32_int8,
-            ir.totals.total
+            ir.totals.f32_tensors, ir.totals.int8_tensors, sum_f32_int8, ir.totals.total
         )));
     }
     if ir.totals.total != GROK1_TENSOR_TOTAL {
@@ -82,6 +80,13 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid router shape for block {}: expected {:?}, got {:?}",
                 router.block, expected_router_shape, router.shape
+            )));
+        }
+
+        if router.experts != ir.hyperparameters.n_experts {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Invalid router experts count for block {}: expected {}, got {}",
+                router.block, ir.hyperparameters.n_experts, router.experts
             )));
         }
 
@@ -199,7 +204,7 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             if let Ok(block) = block_str.parse::<usize>() {
                 if block < ir.hyperparameters.n_blocks
                     && c.tensor.ends_with("slot_11.router")
-                    && c.risk > 0.5
+                    && c.risk > CRITICAL_ROUTER_RISK_THRESHOLD
                 {
                     critical_router_blocks.insert(block);
                 }

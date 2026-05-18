@@ -14,8 +14,9 @@ fn test_inventory_totals() {
     let mut ir = create_valid_ir();
     assert_eq!(ir.totals.total, 770);
 
-    // Break the total
+    // Break the total while keeping subtotals internally consistent.
     ir.totals.total = 769;
+    ir.totals.int8_tensors = 447;
     let res = validator::validate_ir(&ir);
     assert!(res.is_err());
     assert!(
