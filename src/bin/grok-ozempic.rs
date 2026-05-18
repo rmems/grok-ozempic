@@ -41,11 +41,23 @@ enum ArtifactsCommands {
         #[arg(long)]
         checkpoint: Option<String>,
     },
-    /// Validate generated reports in a directory
+    /// Validate generated reports in a directory against the dissect manifest
     Validate {
         /// Directory containing generated reports to validate
         #[arg(long)]
         report_dir: PathBuf,
+
+        /// Path to the dissect manifest JSON file (same as for `generate`)
+        #[arg(long)]
+        manifest: PathBuf,
+
+        /// Optional path to the raw weights directory (e.g. ckpt-0), same semantics as `generate`
+        #[arg(long)]
+        weights_dir: Option<PathBuf>,
+
+        /// Optional checkpoint name override, same semantics as `generate`
+        #[arg(long)]
+        checkpoint: Option<String>,
     },
 }
 
@@ -66,34 +78,8 @@ fn main() -> anyhow::Result<()> {
                     manifest.display()
                 );
 
-                let mut actual_checkpoint = checkpoint;
-                let mut actual_shards = None;
-
-                if let Some(wd) = weights_dir {
-                    if wd.is_dir() {
-                        // Derive checkpoint provenance from path
-                        if actual_checkpoint.is_none() {
-                            let comps: Vec<_> = wd.components().rev().take(2).collect();
-                            if comps.len() == 2 {
-                                actual_checkpoint = Some(format!(
-                                    "{}/{}",
-                                    comps[1].as_os_str().to_string_lossy(),
-                                    comps[0].as_os_str().to_string_lossy()
-                                ));
-                            } else if comps.len() == 1 {
-                                actual_checkpoint =
-                                    Some(comps[0].as_os_str().to_string_lossy().to_string());
-                            }
-                        }
-
-                        if let Some(count) = count_xai_tensor_shards(&wd)? {
-                            actual_shards = Some(count);
-                            println!("Discovered {} xai-dissect tensor shards.", count);
-                        }
-                    } else {
-                        println!("Warning: weights_dir is not a valid directory.");
-                    }
-                }
+                let (actual_checkpoint, actual_shards) =
+                    resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, true)?;
 
                 let manifest_bytes = std::fs::read(&manifest)?;
                 let dissect_manifest = grok_ozempic::parse_manifest_bytes(
@@ -117,16 +103,80 @@ fn main() -> anyhow::Result<()> {
 
                 println!("Success!");
             }
-            ArtifactsCommands::Validate { report_dir } => {
-                println!("Validating reports in {}", report_dir.display());
-                reports::writer::validate_report_dir(&report_dir)
+            ArtifactsCommands::Validate {
+                report_dir,
+                manifest,
+                weights_dir,
+                checkpoint,
+            } => {
+                println!(
+                    "Validating reports in {} using manifest {}",
+                    report_dir.display(),
+                    manifest.display()
+                );
+
+                let (actual_checkpoint, actual_shards) =
+                    resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, false)?;
+
+                let manifest_bytes = std::fs::read(&manifest)?;
+                let dissect_manifest = grok_ozempic::parse_manifest_bytes(
+                    &manifest_bytes,
+                    manifest.to_str().unwrap_or("manifest"),
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
+
+                let ir = reports::detector::build_ir_from_manifest(
+                    &dissect_manifest,
+                    actual_checkpoint.as_deref(),
+                    actual_shards,
+                )
+                .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
+
+                reports::writer::validate_report_dir_against_ir(&report_dir, &ir)
                     .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
-                println!("Report directory is structurally valid.");
+                println!("Report directory matches manifest and passes IR validation.");
             }
         },
     }
 
     Ok(())
+}
+
+/// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_ir_from_manifest`].
+fn resolve_checkpoint_and_shards(
+    weights_dir: Option<&Path>,
+    mut checkpoint: Option<String>,
+    log_shard_discovery: bool,
+) -> anyhow::Result<(Option<String>, Option<usize>)> {
+    let mut actual_shards = None;
+
+    if let Some(wd) = weights_dir {
+        if wd.is_dir() {
+            if checkpoint.is_none() {
+                let comps: Vec<_> = wd.components().rev().take(2).collect();
+                if comps.len() == 2 {
+                    checkpoint = Some(format!(
+                        "{}/{}",
+                        comps[1].as_os_str().to_string_lossy(),
+                        comps[0].as_os_str().to_string_lossy()
+                    ));
+                } else if comps.len() == 1 {
+                    checkpoint = Some(comps[0].as_os_str().to_string_lossy().to_string());
+                }
+            }
+
+            if let Some(count) = count_xai_tensor_shards(wd)? {
+                actual_shards = Some(count);
+                if log_shard_discovery {
+                    println!("Discovered {} xai-dissect tensor shards.", count);
+                }
+            }
+        } else {
+            println!("Warning: weights_dir is not a valid directory.");
+        }
+    }
+
+    Ok((checkpoint, actual_shards))
 }
 
 fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<Option<usize>> {

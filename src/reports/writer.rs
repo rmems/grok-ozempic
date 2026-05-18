@@ -1,6 +1,7 @@
 use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
 use crate::reports::templates;
+use crate::reports::validator;
 use std::fs;
 use std::path::Path;
 
@@ -36,6 +37,49 @@ pub fn validate_report_dir(dir: &Path) -> Result<(), GrokOzempicError> {
             )));
         }
     }
+    Ok(())
+}
+
+/// Like [`validate_report_dir`], then ensures markdown is non-empty, `ir` passes [`validator::validate_ir`],
+/// and each report file matches the canonical template output for `ir`.
+pub fn validate_report_dir_against_ir(dir: &Path, ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
+    validate_report_dir(dir)?;
+    validator::validate_ir(ir)?;
+
+    let expected: [(&str, String); 5] = [
+        (REPORT_MARKDOWN_FILES[0], templates::generate_inventory(ir)),
+        (
+            REPORT_MARKDOWN_FILES[1],
+            templates::generate_routing_report(ir),
+        ),
+        (
+            REPORT_MARKDOWN_FILES[2],
+            templates::generate_experts_report(ir),
+        ),
+        (
+            REPORT_MARKDOWN_FILES[3],
+            templates::generate_saaq_readiness(ir),
+        ),
+        (REPORT_MARKDOWN_FILES[4], templates::generate_stats(ir)),
+    ];
+
+    for (name, expected_body) in expected {
+        let path = dir.join(name);
+        let got = fs::read_to_string(&path)?;
+        if got.trim().is_empty() {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "report file is empty: {}",
+                path.display()
+            )));
+        }
+        if got != expected_body {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "report file content does not match expected artifact IR (file: {})",
+                path.display()
+            )));
+        }
+    }
+
     Ok(())
 }
 
