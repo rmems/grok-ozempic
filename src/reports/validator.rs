@@ -93,6 +93,15 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             "expert_slot_02 (8, 6144, 32768)",
         ];
 
+        if block.shapes.len() != expected_shapes.len() {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Invalid expert shapes count for block {}: expected {}, got {}",
+                block.block,
+                expected_shapes.len(),
+                block.shapes.len()
+            )));
+        }
+
         for (i, shape) in block.shapes.iter().enumerate() {
             if shape != expected_shapes[i] {
                 return Err(GrokOzempicError::ArtifactValidation(format!(

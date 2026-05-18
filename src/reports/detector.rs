@@ -6,6 +6,13 @@ use crate::reports::schema::{
 };
 
 pub fn build_ir_from_manifest(manifest: &DissectManifest) -> Result<ArtifactIR, GrokOzempicError> {
+    if manifest.model.family != "grok-1" {
+        return Err(GrokOzempicError::InvalidConfig(format!(
+            "artifact IR build supports only grok-1 manifests; got family {:?}",
+            manifest.model.family
+        )));
+    }
+
     // Basic structural information
     let model_family = manifest.model.family.clone();
     let checkpoint = "unknown".to_string(); // Usually passed as context or injected

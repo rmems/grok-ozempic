@@ -75,7 +75,9 @@ fn main() -> anyhow::Result<()> {
             }
             ArtifactsCommands::Validate { report_dir } => {
                 println!("Validating reports in {}", report_dir.display());
-                // In a complete implementation, this would read back and validate:
+                reports::writer::validate_report_dir(&report_dir)
+                    .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
+                println!("Report directory structure OK.");
             }
         },
     }
