@@ -23,6 +23,43 @@ pub struct TensorTotals {
     pub f32_tensors: usize,
     pub int8_tensors: usize,
     pub quant_tensors: usize,
+    pub total_elements: u64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InventoryKindCount {
+    pub kind: String,
+    pub count: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InventoryBlockKind {
+    pub count: usize,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InventoryBlock {
+    pub label: String,
+    pub block: Option<usize>,
+    pub shard_start: usize,
+    pub shard_end: usize,
+    pub tensors: usize,
+    pub bytes: u64,
+    pub kinds: Vec<InventoryBlockKind>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InventoryTensor {
+    pub shard: usize,
+    pub in_shard: usize,
+    pub role: String,
+    pub dtype: String,
+    pub shape: String,
+    pub kind: String,
+    pub slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +115,9 @@ pub struct ArtifactIR {
     pub manifest: ArtifactManifest,
     pub hyperparameters: Hyperparameters,
     pub totals: TensorTotals,
+    pub inventory_kinds: Vec<InventoryKindCount>,
+    pub inventory_blocks: Vec<InventoryBlock>,
+    pub exemplar_tensors: Vec<InventoryTensor>,
     pub routers: Vec<RouterEntry>,
     pub expert_blocks: Vec<ExpertBlock>,
     pub saaq_targets: Vec<SaaqTarget>,

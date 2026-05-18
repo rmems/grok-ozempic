@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use grok_ozempic::reports;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(name = "grok-ozempic")]
@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
                 );
 
                 let mut actual_checkpoint = checkpoint;
-                let mut actual_total_tensors = None;
+                let mut actual_shards = None;
 
                 if let Some(wd) = weights_dir {
                     if wd.is_dir() {
@@ -86,23 +86,9 @@ fn main() -> anyhow::Result<()> {
                             }
                         }
 
-                        // Derive tensor totals from the directory
-                        let mut count = 0;
-                        if let Ok(entries) = std::fs::read_dir(&wd) {
-                            for entry in entries.flatten() {
-                                if let Ok(ft) = entry.file_type()
-                                    && ft.is_file()
-                                {
-                                    let fname = entry.file_name();
-                                    if fname.to_string_lossy().starts_with("tensor") {
-                                        count += 1;
-                                    }
-                                }
-                            }
-                        }
-                        if count > 0 {
-                            actual_total_tensors = Some(count);
-                            println!("Discovered {} tensor shards in weights directory.", count);
+                        if let Some(count) = count_xai_tensor_shards(&wd)? {
+                            actual_shards = Some(count);
+                            println!("Discovered {} xai-dissect tensor shards.", count);
                         }
                     } else {
                         println!("Warning: weights_dir is not a valid directory.");
@@ -119,7 +105,7 @@ fn main() -> anyhow::Result<()> {
                 let ir = reports::detector::build_ir_from_manifest(
                     &dissect_manifest,
                     actual_checkpoint.as_deref(),
-                    actual_total_tensors,
+                    actual_shards,
                 )
                 .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))?;
 
@@ -141,4 +127,35 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<Option<usize>> {
+    let mut count = 0usize;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if !entry.path().is_file() {
+            continue;
+        }
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(is_xai_tensor_shard_name)
+        {
+            count += 1;
+        }
+    }
+    Ok((count > 0).then_some(count))
+}
+
+fn is_xai_tensor_shard_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("tensor") else {
+        return false;
+    };
+    let Some((major, minor)) = rest.split_once('_') else {
+        return false;
+    };
+    major.len() == 5
+        && minor.len() == 3
+        && major.bytes().all(|byte| byte.is_ascii_digit())
+        && minor.bytes().all(|byte| byte.is_ascii_digit())
 }

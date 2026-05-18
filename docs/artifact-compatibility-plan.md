@@ -10,7 +10,7 @@ pub struct ArtifactManifest {
     pub model_family: String, // "grok-1"
     pub checkpoint: String,
     pub shards: usize,        // 770
-    pub schema_version: u32,  // 1
+    pub schema_version: u32,  // inventory schema v2
 }
 
 pub struct Hyperparameters {
@@ -26,6 +26,8 @@ pub struct TensorTotals {
     pub f32_tensors: usize,
     pub int8_tensors: usize,
     pub quant_tensors: usize,
+    pub total_elements: u64,
+    pub total_bytes: u64,
 }
 
 pub struct RouterEntry {
@@ -83,6 +85,8 @@ Mapping `grok-ozempic` physical tensor states to `xai-dissect` logical artifact 
 | `expert_00` | `expert_slot_00` | Shape `(8, 6144, 32768)` (up / w1) |
 | `expert_01` | `expert_slot_01` | Shape `(8, 32768, 6144)` (down / w2) |
 | `expert_02` | `expert_slot_02` | Shape `(8, 6144, 32768)` (gate / w3) |
+| rank-2 quantized attention, full width | `attn_proj_i8.model_width` | Shape `(6144, 6144)`, exact Q/K/V/O role unresolved |
+| rank-2 quantized attention, narrow | `attn_proj_i8.narrow` | Shape `(6144, 1024)`, exact Q/K/V/O role unresolved |
 
 ## 3. Routing Detection Rules & Invariants
 
@@ -115,7 +119,7 @@ Reports must match the upstream headers precisely.
 - **model_family**: `{model_family}`
 - **checkpoint**: `{checkpoint}`
 - **shards**: {shards}
-- **schema_version**: 1
+- **schema_version**: 2
 
 ## Inferred hyperparameters
 
@@ -124,6 +128,13 @@ Reports must match the upstream headers precisely.
 | vocab_size | {vocab_size} |
 | d_model | {d_model} |
 ...
+
+## Tensor kinds
+
+| Kind | Count | Bytes |
+| ---- | ----: | ----: |
+| attn_proj_i8.model_width | 128 | ... |
+| attn_proj_i8.narrow | 128 | ... |
 ```
 
 **`routing-report.md`**
@@ -160,6 +171,7 @@ Reports must match the upstream headers precisely.
 ## 6. Validator Tests Requirements
 
 - `test_inventory_totals`: Verify tensors parse and total exactly 770.
+- `test_inventory_uses_resolved_attention_labels`: Verify the inventory emits `attn_proj_i8.model_width` and `attn_proj_i8.narrow` instead of the old `unknown` bucket.
 - `test_router_shape_strict`: Inject an invalid `(8, 6144)` router shape into the IR and verify the validator strictly rejects it.
 - `test_expert_slot_mapping`: Verify that the order `00, 01, 02` strictly aligns with the shapes `(8, 6144, 32768)`, `(8, 32768, 6144)`, and `(8, 6144, 32768)`.
 - `test_saaq_readiness_criticality`: Ensure `token_embedding` is listed as a candidate and all 64 routers are listed as high-risk/critical.

@@ -1,6 +1,8 @@
 use crate::reports::schema::ArtifactIR;
 use std::fmt::Write as _;
 
+const DERIVED_REPORT_SCHEMA_VERSION: u32 = 1;
+
 pub fn generate_inventory(ir: &ArtifactIR) -> String {
     let mut out = String::new();
     let _ = write!(
@@ -30,6 +32,8 @@ pub fn generate_inventory(ir: &ArtifactIR) -> String {
 | f32 tensors | {} |
 | int8 tensors | {} |
 | quant tensors | {} |
+| total elements | {} |
+| total bytes | {} ({}) |
 "#,
         ir.manifest.model_family,
         ir.manifest.checkpoint,
@@ -44,7 +48,91 @@ pub fn generate_inventory(ir: &ArtifactIR) -> String {
         ir.totals.f32_tensors,
         ir.totals.int8_tensors,
         ir.totals.quant_tensors,
+        ir.totals.total_elements,
+        ir.totals.total_bytes,
+        human_bytes(ir.totals.total_bytes),
     );
+
+    let _ = write!(
+        out,
+        r#"
+## Tensor kinds
+
+| Kind | Count | Bytes |
+| ---- | ----: | ----: |
+"#
+    );
+    for kind in &ir.inventory_kinds {
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} ({}) |",
+            kind.kind,
+            kind.count,
+            kind.bytes,
+            human_bytes(kind.bytes)
+        );
+    }
+
+    let _ = write!(
+        out,
+        r#"
+## Blocks
+
+| Label | Block | Shards | Tensors | Bytes | Kinds |
+| ----- | ----: | ------ | ------: | ----: | ----- |
+"#
+    );
+    for block in &ir.inventory_blocks {
+        let kinds = block
+            .kinds
+            .iter()
+            .map(|kind| format!("{}x{}", kind.count, kind.kind))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "| {} | {} | {}..={} | {} | {} ({}) | {} |",
+            block.label,
+            block
+                .block
+                .map(|block| block.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            block.shard_start,
+            block.shard_end,
+            block.tensors,
+            block.bytes,
+            human_bytes(block.bytes),
+            kinds
+        );
+    }
+
+    if !ir.exemplar_tensors.is_empty() {
+        let _ = write!(
+            out,
+            r#"
+## Exemplar block (`block_000`)
+
+| Shard | In-shard | Role | Dtype | Shape | Kind | Slot |
+| ----: | -------: | ---- | ----- | ----- | ---- | ---: |
+"#
+        );
+        for tensor in &ir.exemplar_tensors {
+            let _ = writeln!(
+                out,
+                "| {} | {} | {} | {} | `{}` | {} | {} |",
+                tensor.shard,
+                tensor.in_shard,
+                tensor.role,
+                tensor.dtype,
+                tensor.shape,
+                tensor.kind,
+                tensor
+                    .slot
+                    .map(|slot| slot.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+        }
+    }
     out
 }
 
@@ -71,7 +159,7 @@ pub fn generate_routing_report(ir: &ArtifactIR) -> String {
         ir.manifest.shards,
         ir.hyperparameters.n_blocks,
         ir.hyperparameters.n_experts,
-        ir.manifest.schema_version
+        DERIVED_REPORT_SCHEMA_VERSION
     );
 
     for r in &ir.routers {
@@ -114,7 +202,7 @@ pub fn generate_experts_report(ir: &ArtifactIR) -> String {
         ir.manifest.shards,
         ir.hyperparameters.n_blocks,
         ir.hyperparameters.n_experts,
-        ir.manifest.schema_version
+        DERIVED_REPORT_SCHEMA_VERSION
     );
 
     for b in &ir.expert_blocks {
@@ -157,7 +245,7 @@ pub fn generate_saaq_readiness(ir: &ArtifactIR) -> String {
         ir.manifest.shards,
         ir.saaq_targets.len(),
         ir.saaq_critical.len(),
-        ir.manifest.schema_version
+        DERIVED_REPORT_SCHEMA_VERSION
     );
 
     for t in &ir.saaq_targets {
@@ -212,7 +300,7 @@ pub fn generate_stats(ir: &ArtifactIR) -> String {
         ir.manifest.model_family,
         ir.manifest.checkpoint,
         ir.manifest.shards,
-        ir.manifest.schema_version,
+        DERIVED_REPORT_SCHEMA_VERSION,
         ir.mean_rms
     );
 
@@ -224,4 +312,23 @@ pub fn generate_stats(ir: &ArtifactIR) -> String {
         );
     }
     out
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+
+    let bytes_f = bytes as f64;
+    if bytes_f >= GIB {
+        format!("{:.2} GiB", bytes_f / GIB)
+    } else if bytes_f >= MIB {
+        format!("{:.2} MiB", bytes_f / MIB)
+    } else if bytes_f >= KIB {
+        format!("{:.2} KiB", bytes_f / KIB)
+    } else if bytes == 1 {
+        "1 B".to_string()
+    } else {
+        format!("{bytes} B")
+    }
 }

@@ -203,3 +203,5 @@ pub const GROK1_TENSOR_TOTAL: usize = 770;
 pub const GROK1_TENSOR_F32: usize = 322;
 pub const GROK1_TENSOR_INT8: usize = 448;
 pub const GROK1_TENSOR_QUANT: usize = 448;
+pub const GROK1_TENSOR_TOTAL_ELEMENTS: u64 = 315_684_820_992;
+pub const GROK1_TENSOR_TOTAL_BYTES: u64 = 318_114_914_304;

@@ -3,11 +3,25 @@ use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
 use crate::types::{
     GROK1_HIDDEN_DIM, GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL,
+    GROK1_TENSOR_TOTAL_BYTES, GROK1_TENSOR_TOTAL_ELEMENTS,
 };
 use std::collections::HashSet;
 const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
+    if ir.hyperparameters.d_model != GROK1_HIDDEN_DIM {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "d_model mismatch: expected {}, got {}",
+            GROK1_HIDDEN_DIM, ir.hyperparameters.d_model
+        )));
+    }
+    if ir.hyperparameters.n_experts != GROK1_EXPERT_COUNT as usize {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "n_experts mismatch: expected {}, got {}",
+            GROK1_EXPERT_COUNT, ir.hyperparameters.n_experts
+        )));
+    }
+
     // 1. Tensor inventory totals (strict Grok-1 baseline + internal consistency).
     let sum_f32_int8 = ir
         .totals
@@ -48,8 +62,39 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             GROK1_TENSOR_QUANT, ir.totals.quant_tensors
         )));
     }
+    if ir.totals.total_elements != GROK1_TENSOR_TOTAL_ELEMENTS {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "total element count mismatch: expected {}, got {}",
+            GROK1_TENSOR_TOTAL_ELEMENTS, ir.totals.total_elements
+        )));
+    }
+    if ir.totals.total_bytes != GROK1_TENSOR_TOTAL_BYTES {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "total byte count mismatch: expected {}, got {}",
+            GROK1_TENSOR_TOTAL_BYTES, ir.totals.total_bytes
+        )));
+    }
+    if ir.inventory_kinds.iter().any(|kind| kind.kind == "unknown") {
+        return Err(GrokOzempicError::ArtifactValidation(
+            "Inventory kind counts must not include unknown after xai-dissect schema v2 attention classification".to_string(),
+        ));
+    }
+    for required in ["attn_proj_i8.model_width", "attn_proj_i8.narrow"] {
+        if !ir.inventory_kinds.iter().any(|kind| kind.kind == required) {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "Missing inventory kind count for {required}"
+            )));
+        }
+    }
 
     // 2. Routing Detection Rules & Invariants
+    if ir.hyperparameters.n_blocks != crate::core::stream::GROK1_BLOCK_COUNT as usize {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "n_blocks mismatch: expected {}, got {}",
+            crate::core::stream::GROK1_BLOCK_COUNT,
+            ir.hyperparameters.n_blocks
+        )));
+    }
     if ir.routers.len() != ir.hyperparameters.n_blocks {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "Router count mismatch: expected {}, got {}",
