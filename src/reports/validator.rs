@@ -1,6 +1,9 @@
+use crate::core::stream::{GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH};
 use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
-use crate::types::{GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL};
+use crate::types::{
+    GROK1_HIDDEN_DIM, GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL,
+};
 use std::collections::HashSet;
 const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
@@ -117,6 +120,21 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
         )));
     }
 
+    let expected_expert_shapes: [String; 3] = [
+        format!(
+            "expert_slot_00 ({}, {}, {})",
+            GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
+        ),
+        format!(
+            "expert_slot_01 ({}, {}, {})",
+            GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH, GROK1_HIDDEN_DIM
+        ),
+        format!(
+            "expert_slot_02 ({}, {}, {})",
+            GROK1_EXPERT_COUNT, GROK1_HIDDEN_DIM, GROK1_FEED_FORWARD_LENGTH
+        ),
+    ];
+
     let mut seen_expert_blocks = HashSet::new();
     for block in &ir.expert_blocks {
         if block.block >= ir.hyperparameters.n_blocks {
@@ -152,26 +170,20 @@ pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
             )));
         }
 
-        let expected_shapes = [
-            "expert_slot_00 (8, 6144, 32768)",
-            "expert_slot_01 (8, 32768, 6144)",
-            "expert_slot_02 (8, 6144, 32768)",
-        ];
-
-        if block.shapes.len() != expected_shapes.len() {
+        if block.shapes.len() != expected_expert_shapes.len() {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "Invalid expert shape count for block {}: expected {}, got {}",
                 block.block,
-                expected_shapes.len(),
+                expected_expert_shapes.len(),
                 block.shapes.len()
             )));
         }
 
         for (i, shape) in block.shapes.iter().enumerate() {
-            if shape != expected_shapes[i] {
+            if shape != &expected_expert_shapes[i] {
                 return Err(GrokOzempicError::ArtifactValidation(format!(
                     "Invalid expert shape for block {}, slot {}: expected {}, got {}",
-                    block.block, i, expected_shapes[i], shape
+                    block.block, i, expected_expert_shapes[i], shape
                 )));
             }
         }
