@@ -2,12 +2,54 @@ use crate::error::GrokOzempicError;
 use crate::reports::schema::ArtifactIR;
 use std::collections::HashSet;
 
+/// Grok-1 xai-dissect baseline inventory tensor counts (canonical fixture / upstream scan).
+const GROK1_TENSOR_TOTAL: usize = 770;
+const GROK1_TENSOR_F32: usize = 322;
+const GROK1_TENSOR_INT8: usize = 448;
+const GROK1_TENSOR_QUANT: usize = 448;
+
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
-    // 1. Verify tensors parse and total exactly 770.
-    if ir.totals.total != 770 {
+    // 1. Tensor inventory totals (strict Grok-1 baseline + internal consistency).
+    let sum_f32_int8 = ir
+        .totals
+        .f32_tensors
+        .checked_add(ir.totals.int8_tensors)
+        .ok_or_else(|| {
+            GrokOzempicError::ArtifactValidation(
+                "Tensor subtotals overflow when computing f32_tensors + int8_tensors".to_string(),
+            )
+        })?;
+    if sum_f32_int8 != ir.totals.total {
         return Err(GrokOzempicError::ArtifactValidation(format!(
-            "Total tensors mismatch: expected 770, got {}",
+            "Tensor subtotals do not sum to total: f32_tensors ({}) + int8_tensors ({}) = {}, expected total {}",
+            ir.totals.f32_tensors,
+            ir.totals.int8_tensors,
+            sum_f32_int8,
             ir.totals.total
+        )));
+    }
+    if ir.totals.total != GROK1_TENSOR_TOTAL {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "Total tensors mismatch: expected {}, got {}",
+            GROK1_TENSOR_TOTAL, ir.totals.total
+        )));
+    }
+    if ir.totals.f32_tensors != GROK1_TENSOR_F32 {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "f32 tensor count mismatch: expected {}, got {}",
+            GROK1_TENSOR_F32, ir.totals.f32_tensors
+        )));
+    }
+    if ir.totals.int8_tensors != GROK1_TENSOR_INT8 {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "int8 tensor count mismatch: expected {}, got {}",
+            GROK1_TENSOR_INT8, ir.totals.int8_tensors
+        )));
+    }
+    if ir.totals.quant_tensors != GROK1_TENSOR_QUANT {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "quant tensor count mismatch: expected {}, got {}",
+            GROK1_TENSOR_QUANT, ir.totals.quant_tensors
         )));
     }
 
