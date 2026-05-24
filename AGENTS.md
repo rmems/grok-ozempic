@@ -6,7 +6,7 @@ This is a pure Rust crate (no external services, databases, or Docker required).
 
 ### Toolchain
 
-Requires Rust edition 2024 (Rust >= 1.85). The update script ensures the latest stable toolchain is installed.
+Requires Rust edition 2024 (Rust >= 1.85). Ensure your toolchain is up to date using rustup.
 
 ### Commands
 
