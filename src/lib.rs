@@ -6,6 +6,7 @@
 //! The batch pipeline writes a **GOZ1** packed checkpoint (see [`core::weight_pack`]);
 //! weights are expected from JAX/NumPy (`.npy`) or safetensors — see the README.
 
+pub mod artifact;
 pub mod core;
 pub mod error;
 pub mod reports;

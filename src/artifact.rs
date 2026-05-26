@@ -1,0 +1,1214 @@
+use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
+use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT};
+use crate::error::{GrokOzempicError, Result};
+use crate::types::{GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+
+pub const GROK1_ARTIFACT_FORMAT: &str = "saaq-g1-v0";
+pub const GROK1_ROUTER_SHAPE: [usize; 2] = [GROK1_HIDDEN_DIM, GROK1_EXPERT_COUNT as usize];
+pub const GROK1_ROUTER_ORIENTATION: &str = "d_model_to_experts";
+pub const GROK1_EXPERT_FAMILIES_PER_BLOCK: usize = 3;
+pub const GROK1_BLOCK_TENSORS: usize = 12;
+pub const GROK1_NORMS_PER_BLOCK: usize = 4;
+pub const GROK1_UNKNOWN_DENSE_PER_BLOCK: usize = 4;
+
+const EMBEDDING_BYTES: u64 = 3_221_225_472;
+const FINAL_NORM_BYTES: u64 = 24_576;
+const EXPERT_BYTES: u64 = 1_610_612_736;
+const ATTN_MODEL_WIDTH_BYTES: u64 = 37_748_736;
+const ATTN_NARROW_BYTES: u64 = 6_291_456;
+const NORM_BYTES: u64 = 24_576;
+const ROUTER_BYTES: u64 = 196_608;
+const CHECKSUMS_FILE: &str = "checksums.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactIndex {
+    pub schema: String,
+    pub schema_version: u32,
+    pub format: String,
+    pub model_family: String,
+    pub mode: String,
+    pub dry_run: bool,
+    pub tensor_count: usize,
+    pub source_total_bytes: u64,
+    pub artifact_total_bytes: u64,
+    pub router_count: usize,
+    pub entries: Vec<ArtifactIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactIndexEntry {
+    pub source_tensor_name: String,
+    pub structural_name: String,
+    pub block: Option<usize>,
+    pub slot: Option<usize>,
+    pub kind: String,
+    pub dtype: String,
+    pub shape: Vec<usize>,
+    pub byte_len: u64,
+    pub source_checksum: Option<String>,
+    pub output_checksum: String,
+    pub quant_policy_applied: String,
+    pub artifact_path: String,
+    pub artifact_offset: u64,
+    pub protected: bool,
+    pub protected_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WarningRecord {
+    pub category: String,
+    pub tensor: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailureRecord {
+    pub category: String,
+    pub tensor: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationReport {
+    pub status: String,
+    pub source_tensor_count: usize,
+    pub artifact_tensor_count: usize,
+    pub router_count: usize,
+    pub protected_router_violations: usize,
+    pub protected_norm_violations: usize,
+    pub expert_association_count: usize,
+    pub unknown_unresolved_warning_count: usize,
+    pub checksum_coverage: String,
+    pub source_total_bytes: u64,
+    pub artifact_total_bytes: u64,
+    pub byte_accounting_result: String,
+    pub failures: Vec<FailureRecord>,
+    pub warnings: Vec<WarningRecord>,
+}
+
+pub struct ConvertOptions<'a> {
+    pub checkpoint: Option<&'a Path>,
+    pub manifest: &'a Path,
+    pub output_root: &'a Path,
+    pub format: &'a str,
+    pub protect_routers: bool,
+    pub protect_norms: bool,
+    pub dry_run: bool,
+}
+
+pub struct SmokeOptions<'a> {
+    pub checkpoint: Option<&'a Path>,
+    pub manifest: &'a Path,
+    pub block: usize,
+    pub include_embedding: bool,
+    pub include_final_norm: bool,
+    pub output_root: &'a Path,
+    pub dry_run: bool,
+}
+
+pub fn validate_ingest_path(
+    manifest_path: &Path,
+    checkpoint: Option<&Path>,
+) -> Result<DissectManifest> {
+    let manifest_bytes = fs::read(manifest_path).map_err(|e| GrokOzempicError::ManifestIo {
+        path: manifest_path.display().to_string(),
+        source: e,
+    })?;
+    let manifest = parse_manifest_bytes(&manifest_bytes, &manifest_path.display().to_string())?;
+    validate_grok1_manifest_identity(&manifest)?;
+
+    if let Some(checkpoint) = checkpoint {
+        if !checkpoint.exists() {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "checkpoint path does not exist: {}",
+                checkpoint.display()
+            )));
+        }
+        if !checkpoint.is_dir() {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "checkpoint path is not a directory: {}",
+                checkpoint.display()
+            )));
+        }
+        validate_checkpoint_checksums(checkpoint)?;
+    }
+
+    Ok(manifest)
+}
+
+pub fn convert_grok1(options: ConvertOptions<'_>) -> Result<ArtifactIndex> {
+    let manifest = validate_ingest_path(options.manifest, options.checkpoint)?;
+    validate_grok1_manifest_identity(&manifest)?;
+    if options.format != GROK1_ARTIFACT_FORMAT {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "unsupported Grok-1 artifact format: got {}, expected {}",
+            options.format, GROK1_ARTIFACT_FORMAT
+        )));
+    }
+    let mut warnings = planned_warnings();
+    let entries = planned_grok1_entries(options.protect_routers, options.protect_norms, None)?;
+    validate_full_expected_entries(&entries)?;
+    let index = build_index("full", options.format, options.dry_run, entries);
+    write_conversion_outputs(
+        options.output_root,
+        options.manifest,
+        &index,
+        &warnings,
+        options.dry_run,
+    )?;
+    // Stable warnings file includes checksum coverage note when input checksums are absent.
+    if index
+        .entries
+        .iter()
+        .any(|entry| entry.source_checksum.is_none())
+    {
+        warnings.push(WarningRecord {
+            category: "missing_optional_checksum".to_string(),
+            tensor: None,
+            message: "input manifest/checkpoint did not provide per-tensor source checksums; deterministic output checksums were still recorded".to_string(),
+        });
+        write_json(options.output_root.join("warnings.json"), &warnings)?;
+    }
+    Ok(index)
+}
+
+pub fn smoke_grok1(options: SmokeOptions<'_>) -> Result<ArtifactIndex> {
+    let manifest = validate_ingest_path(options.manifest, options.checkpoint)?;
+    validate_grok1_manifest_identity(&manifest)?;
+    if options.block >= GROK1_BLOCK_COUNT as usize {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "smoke block {} is outside Grok-1 range 0..{}",
+            options.block, GROK1_BLOCK_COUNT
+        )));
+    }
+
+    let selected = SmokeSelection {
+        block: options.block,
+        include_embedding: options.include_embedding,
+        include_final_norm: options.include_final_norm,
+    };
+    let entries = planned_grok1_entries(true, true, Some(selected))?;
+    validate_smoke_entries(
+        &entries,
+        options.block,
+        options.include_embedding,
+        options.include_final_norm,
+    )?;
+    let index = build_index("smoke", GROK1_ARTIFACT_FORMAT, options.dry_run, entries);
+    write_smoke_outputs(
+        options.output_root,
+        &index,
+        &planned_warnings(),
+        options.dry_run,
+    )?;
+    Ok(index)
+}
+
+pub fn validate_grok1_artifact(
+    manifest: &Path,
+    artifact_index: &Path,
+    checksums: Option<&Path>,
+    output_root: Option<&Path>,
+    strict_router_protection: bool,
+) -> Result<ValidationReport> {
+    let source_manifest = validate_ingest_path(manifest, None)?;
+    validate_grok1_manifest_identity(&source_manifest)?;
+
+    let index_bytes = fs::read(artifact_index)?;
+    let index: ArtifactIndex = serde_json::from_slice(&index_bytes).map_err(|e| {
+        GrokOzempicError::ArtifactValidation(format!(
+            "failed to parse artifact index {}: {e}",
+            artifact_index.display()
+        ))
+    })?;
+
+    let checksum_map = if let Some(path) = checksums {
+        Some(load_checksums_file(path)?)
+    } else {
+        None
+    };
+
+    let report = build_validation_report(&index, strict_router_protection, checksum_map.as_ref());
+    if let Some(dir) = output_root {
+        write_validation_outputs(dir, &report)?;
+    }
+    if report.status != "PASS" {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "Grok-1 artifact validation failed with {} failure(s); see validation.report.json",
+            report.failures.len()
+        )));
+    }
+    Ok(report)
+}
+
+fn validate_grok1_manifest_identity(manifest: &DissectManifest) -> Result<()> {
+    if manifest.model.family != "grok-1" {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "expected manifest model.family grok-1, got {}",
+            manifest.model.family
+        )));
+    }
+    Ok(())
+}
+
+fn validate_checkpoint_checksums(checkpoint: &Path) -> Result<()> {
+    let checksums = checkpoint.join(CHECKSUMS_FILE);
+    if !checksums.exists() {
+        return Ok(());
+    }
+    let map = load_checksums_file(&checksums)?;
+    for (relative, expected) in map {
+        let path = checkpoint.join(&relative);
+        if !path.is_file() {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "checksum entry references missing file: {}",
+                path.display()
+            )));
+        }
+        let actual = sha256_file(&path)?;
+        if normalize_checksum(&expected) != actual {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "checksum mismatch for {}: expected {}, got sha256:{}",
+                path.display(),
+                expected,
+                actual
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn load_checksums_file(path: &Path) -> Result<BTreeMap<String, String>> {
+    let bytes = fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(|e| {
+        GrokOzempicError::ArtifactValidation(format!(
+            "failed to parse checksum map {}: {e}",
+            path.display()
+        ))
+    })
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn normalize_checksum(value: &str) -> String {
+    value
+        .strip_prefix("sha256:")
+        .unwrap_or(value)
+        .to_ascii_lowercase()
+}
+
+#[derive(Clone, Copy)]
+struct SmokeSelection {
+    block: usize,
+    include_embedding: bool,
+    include_final_norm: bool,
+}
+
+fn planned_grok1_entries(
+    protect_routers: bool,
+    protect_norms: bool,
+    selection: Option<SmokeSelection>,
+) -> Result<Vec<ArtifactIndexEntry>> {
+    let mut entries = Vec::new();
+    let mut offset = 0u64;
+
+    let include_embedding = selection.map(|s| s.include_embedding).unwrap_or(true);
+    if include_embedding {
+        push_entry(
+            &mut entries,
+            &mut offset,
+            TensorPlan::new(
+                "embedding.slot_00.token_embedding",
+                "embedding.slot_00.token_embedding",
+                None,
+                Some(0),
+                "token_embedding",
+                "f32",
+                vec![131_072, GROK1_HIDDEN_DIM],
+                EMBEDDING_BYTES,
+                "candidate_saaq_embedding",
+                false,
+                None,
+            ),
+        );
+    }
+
+    let block_range: Vec<usize> = if let Some(selection) = selection {
+        vec![selection.block]
+    } else {
+        (0..GROK1_BLOCK_COUNT as usize).collect()
+    };
+
+    for block in block_range {
+        push_block_entries(
+            &mut entries,
+            &mut offset,
+            block,
+            protect_routers,
+            protect_norms,
+        );
+    }
+
+    let include_final_norm = selection.map(|s| s.include_final_norm).unwrap_or(true);
+    if include_final_norm {
+        push_entry(
+            &mut entries,
+            &mut offset,
+            TensorPlan::new(
+                "final_norm.slot_00.final_norm",
+                "final_norm.slot_00.final_norm",
+                None,
+                Some(0),
+                "final_norm",
+                "f32",
+                vec![GROK1_HIDDEN_DIM],
+                FINAL_NORM_BYTES,
+                "passthrough_f32_norm",
+                protect_norms,
+                protect_norms.then_some("final norm protected by policy"),
+            ),
+        );
+    }
+
+    Ok(entries)
+}
+
+fn push_block_entries(
+    entries: &mut Vec<ArtifactIndexEntry>,
+    offset: &mut u64,
+    block: usize,
+    protect_routers: bool,
+    protect_norms: bool,
+) {
+    let prefix = format!("block_{block:03}");
+    for (slot, kind, shape, bytes) in [
+        (
+            0,
+            "moe_expert.unresolved",
+            vec![8, GROK1_HIDDEN_DIM, 32_768],
+            EXPERT_BYTES,
+        ),
+        (
+            1,
+            "moe_expert.down",
+            vec![8, 32_768, GROK1_HIDDEN_DIM],
+            EXPERT_BYTES,
+        ),
+        (
+            2,
+            "moe_expert.unresolved",
+            vec![8, GROK1_HIDDEN_DIM, 32_768],
+            EXPERT_BYTES,
+        ),
+        (
+            3,
+            "unknown_dense.narrow",
+            vec![GROK1_HIDDEN_DIM, 1024],
+            ATTN_NARROW_BYTES,
+        ),
+        (
+            4,
+            "unknown_dense.model_width",
+            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
+            ATTN_MODEL_WIDTH_BYTES,
+        ),
+        (
+            5,
+            "unknown_dense.model_width",
+            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
+            ATTN_MODEL_WIDTH_BYTES,
+        ),
+        (
+            6,
+            "unknown_dense.narrow",
+            vec![GROK1_HIDDEN_DIM, 1024],
+            ATTN_NARROW_BYTES,
+        ),
+    ] {
+        let policy = if kind.starts_with("moe_expert") {
+            "wrap_existing_int8_expert"
+        } else {
+            "wrap_existing_int8_unknown"
+        };
+        push_entry(
+            entries,
+            offset,
+            TensorPlan::new(
+                &format!("{prefix}.slot_{slot:02}.{kind}"),
+                &format!("{prefix}.slot_{slot:02}.{kind}"),
+                Some(block),
+                Some(slot),
+                kind,
+                "int8",
+                shape,
+                bytes,
+                policy,
+                false,
+                None,
+            ),
+        );
+    }
+
+    for slot in 7..=10 {
+        push_entry(
+            entries,
+            offset,
+            TensorPlan::new(
+                &format!("{prefix}.slot_{slot:02}.block_norm"),
+                &format!("{prefix}.slot_{slot:02}.block_norm"),
+                Some(block),
+                Some(slot),
+                "block_norm",
+                "f32",
+                vec![GROK1_HIDDEN_DIM],
+                NORM_BYTES,
+                "passthrough_f32_norm",
+                protect_norms,
+                protect_norms.then_some("block norm protected by policy"),
+            ),
+        );
+    }
+
+    push_entry(
+        entries,
+        offset,
+        TensorPlan::new(
+            &format!("{prefix}.slot_11.router"),
+            &format!("{prefix}.slot_11.router"),
+            Some(block),
+            Some(11),
+            "router",
+            "f32",
+            GROK1_ROUTER_SHAPE.to_vec(),
+            ROUTER_BYTES,
+            "passthrough_f32_router",
+            protect_routers,
+            protect_routers.then_some("router protected by policy"),
+        ),
+    );
+}
+
+struct TensorPlan<'a> {
+    source_tensor_name: &'a str,
+    structural_name: &'a str,
+    block: Option<usize>,
+    slot: Option<usize>,
+    kind: &'a str,
+    dtype: &'a str,
+    shape: Vec<usize>,
+    byte_len: u64,
+    quant_policy_applied: &'a str,
+    protected: bool,
+    protected_reason: Option<&'a str>,
+}
+
+impl<'a> TensorPlan<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        source_tensor_name: &'a str,
+        structural_name: &'a str,
+        block: Option<usize>,
+        slot: Option<usize>,
+        kind: &'a str,
+        dtype: &'a str,
+        shape: Vec<usize>,
+        byte_len: u64,
+        quant_policy_applied: &'a str,
+        protected: bool,
+        protected_reason: Option<&'a str>,
+    ) -> Self {
+        Self {
+            source_tensor_name,
+            structural_name,
+            block,
+            slot,
+            kind,
+            dtype,
+            shape,
+            byte_len,
+            quant_policy_applied,
+            protected,
+            protected_reason,
+        }
+    }
+}
+
+fn push_entry(entries: &mut Vec<ArtifactIndexEntry>, offset: &mut u64, plan: TensorPlan<'_>) {
+    let output_checksum = planned_checksum(
+        plan.source_tensor_name,
+        plan.byte_len,
+        plan.quant_policy_applied,
+    );
+    entries.push(ArtifactIndexEntry {
+        source_tensor_name: plan.source_tensor_name.to_string(),
+        structural_name: plan.structural_name.to_string(),
+        block: plan.block,
+        slot: plan.slot,
+        kind: plan.kind.to_string(),
+        dtype: plan.dtype.to_string(),
+        shape: plan.shape,
+        byte_len: plan.byte_len,
+        source_checksum: None,
+        output_checksum,
+        quant_policy_applied: plan.quant_policy_applied.to_string(),
+        artifact_path: "artifact.saaq-g1-v0.meta".to_string(),
+        artifact_offset: *offset,
+        protected: plan.protected,
+        protected_reason: plan.protected_reason.map(str::to_string),
+    });
+    *offset += plan.byte_len;
+}
+
+fn planned_checksum(name: &str, byte_len: u64, policy: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(name.as_bytes());
+    hasher.update(byte_len.to_le_bytes());
+    hasher.update(policy.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn build_index(
+    mode: &str,
+    format: &str,
+    dry_run: bool,
+    entries: Vec<ArtifactIndexEntry>,
+) -> ArtifactIndex {
+    let source_total_bytes = entries.iter().map(|entry| entry.byte_len).sum();
+    let router_count = entries
+        .iter()
+        .filter(|entry| entry.kind == "router")
+        .count();
+    ArtifactIndex {
+        schema: "grok-ozempic.artifact_index".to_string(),
+        schema_version: 1,
+        format: format.to_string(),
+        model_family: "grok-1".to_string(),
+        mode: mode.to_string(),
+        dry_run,
+        tensor_count: entries.len(),
+        source_total_bytes,
+        artifact_total_bytes: source_total_bytes,
+        router_count,
+        entries,
+    }
+}
+
+fn validate_full_expected_entries(entries: &[ArtifactIndexEntry]) -> Result<()> {
+    if entries.len() != GROK1_TENSOR_TOTAL {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "expected {} tensors before writing final success, got {}",
+            GROK1_TENSOR_TOTAL,
+            entries.len()
+        )));
+    }
+    let index = build_index("full", GROK1_ARTIFACT_FORMAT, true, entries.to_vec());
+    let report = build_validation_report(&index, true, None);
+    if report.status != "PASS" {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "planned full artifact failed internal validation: {:?}",
+            report.failures
+        )));
+    }
+    Ok(())
+}
+
+fn validate_smoke_entries(
+    entries: &[ArtifactIndexEntry],
+    block: usize,
+    include_embedding: bool,
+    include_final_norm: bool,
+) -> Result<()> {
+    let block_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.block == Some(block))
+        .collect();
+    if block_entries.len() != GROK1_BLOCK_TENSORS {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "smoke block_{block:03} tensor count mismatch: expected {}, got {}",
+            GROK1_BLOCK_TENSORS,
+            block_entries.len()
+        )));
+    }
+    if include_embedding
+        && !entries
+            .iter()
+            .any(|entry| entry.source_tensor_name == "embedding.slot_00.token_embedding")
+    {
+        return Err(GrokOzempicError::ArtifactValidation(
+            "smoke run requested embedding but it is absent from smoke index".to_string(),
+        ));
+    }
+    if include_final_norm
+        && !entries
+            .iter()
+            .any(|entry| entry.source_tensor_name == "final_norm.slot_00.final_norm")
+    {
+        return Err(GrokOzempicError::ArtifactValidation(
+            "smoke run requested final norm but it is absent from smoke index".to_string(),
+        ));
+    }
+    let router_count = block_entries
+        .iter()
+        .filter(|entry| entry.kind == "router")
+        .count();
+    if router_count != 1 {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "smoke block_{block:03} router count mismatch: expected 1, got {router_count}"
+        )));
+    }
+    let expert_families = block_entries
+        .iter()
+        .filter(|entry| entry.kind.starts_with("moe_expert"))
+        .count();
+    if expert_families != GROK1_EXPERT_FAMILIES_PER_BLOCK {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "smoke block_{block:03} expert family count mismatch: expected {}, got {}",
+            GROK1_EXPERT_FAMILIES_PER_BLOCK, expert_families
+        )));
+    }
+    Ok(())
+}
+
+fn build_validation_report(
+    index: &ArtifactIndex,
+    strict_router_protection: bool,
+    checksums: Option<&BTreeMap<String, String>>,
+) -> ValidationReport {
+    let mut failures = Vec::new();
+    let warnings = planned_warnings();
+    let mut names = HashSet::new();
+    let mut duplicates = BTreeSet::new();
+    for entry in &index.entries {
+        if !names.insert(entry.source_tensor_name.as_str()) {
+            duplicates.insert(entry.source_tensor_name.clone());
+        }
+    }
+    for duplicate in duplicates {
+        failures.push(failure(
+            "duplicate_tensor",
+            Some(duplicate),
+            "artifact index contains duplicate tensor entry",
+        ));
+    }
+
+    if index.model_family != "grok-1" {
+        failures.push(failure(
+            "manifest_artifact_mismatch",
+            None,
+            "artifact index model_family is not grok-1",
+        ));
+    }
+    if index.mode == "full" && index.entries.len() != GROK1_TENSOR_TOTAL {
+        failures.push(failure(
+            "missing_tensor",
+            None,
+            format!(
+                "full artifact must contain exactly {GROK1_TENSOR_TOTAL} tensors, got {}",
+                index.entries.len()
+            ),
+        ));
+    }
+
+    let routers: Vec<_> = index
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "router")
+        .collect();
+    let expected_routers = if index.mode == "smoke" {
+        1
+    } else {
+        GROK1_BLOCK_COUNT as usize
+    };
+    if routers.len() != expected_routers {
+        failures.push(failure(
+            "router_count_mismatch",
+            None,
+            format!("expected {expected_routers} routers, got {}", routers.len()),
+        ));
+    }
+    let mut protected_router_violations = 0usize;
+    for router in &routers {
+        if router.dtype != "f32" || router.shape != GROK1_ROUTER_SHAPE {
+            failures.push(failure(
+                if router.dtype != "f32" {
+                    "dtype_mismatch"
+                } else {
+                    "shape_mismatch"
+                },
+                Some(router.source_tensor_name.clone()),
+                "router must remain f32 with shape (6144, 8)",
+            ));
+        }
+        if strict_router_protection
+            && (!router.protected || router.quant_policy_applied != "passthrough_f32_router")
+        {
+            protected_router_violations += 1;
+            failures.push(failure(
+                "router_policy_violation",
+                Some(router.source_tensor_name.clone()),
+                "router must be protected/pass-through/f32",
+            ));
+        }
+    }
+
+    let mut protected_norm_violations = 0usize;
+    for norm in index
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
+    {
+        if norm.dtype != "f32"
+            || !norm.protected
+            || norm.quant_policy_applied != "passthrough_f32_norm"
+        {
+            protected_norm_violations += 1;
+            failures.push(failure(
+                "norm_policy_violation",
+                Some(norm.source_tensor_name.clone()),
+                "norm tensors must be protected/pass-through/f32",
+            ));
+        }
+    }
+
+    let blocks: BTreeSet<usize> = index
+        .entries
+        .iter()
+        .filter_map(|entry| entry.block)
+        .collect();
+    let mut expert_association_count = 0usize;
+    for block in blocks {
+        let families = index
+            .entries
+            .iter()
+            .filter(|entry| entry.block == Some(block) && entry.kind.starts_with("moe_expert"))
+            .count();
+        if families != GROK1_EXPERT_FAMILIES_PER_BLOCK {
+            failures.push(failure(
+                "expert_family_missing",
+                None,
+                format!(
+                    "block_{block:03} expected {} expert families, got {families}",
+                    GROK1_EXPERT_FAMILIES_PER_BLOCK
+                ),
+            ));
+        }
+        expert_association_count += families * GROK1_EXPERT_COUNT as usize;
+    }
+
+    let source_total_bytes: u64 = index.entries.iter().map(|entry| entry.byte_len).sum();
+    if source_total_bytes != index.artifact_total_bytes {
+        failures.push(failure(
+            "byte_mismatch",
+            None,
+            format!(
+                "source byte accounting {source_total_bytes} != artifact byte accounting {}",
+                index.artifact_total_bytes
+            ),
+        ));
+    }
+    if index.mode == "full" && source_total_bytes != GROK1_TENSOR_TOTAL_BYTES {
+        failures.push(failure(
+            "byte_mismatch",
+            None,
+            format!(
+                "full raw source bytes must be {GROK1_TENSOR_TOTAL_BYTES}, got {source_total_bytes}"
+            ),
+        ));
+    }
+
+    let checksum_coverage = if let Some(checksums) = checksums {
+        let covered = index
+            .entries
+            .iter()
+            .filter(|entry| checksums.contains_key(&entry.source_tensor_name))
+            .count();
+        format!("{covered}/{} source tensors", index.entries.len())
+    } else {
+        let covered = index
+            .entries
+            .iter()
+            .filter(|entry| entry.source_checksum.is_some())
+            .count();
+        format!("{covered}/{} source tensors", index.entries.len())
+    };
+
+    ValidationReport {
+        status: if failures.is_empty() { "PASS" } else { "FAIL" }.to_string(),
+        source_tensor_count: if index.mode == "full" {
+            GROK1_TENSOR_TOTAL
+        } else {
+            index.entries.len()
+        },
+        artifact_tensor_count: index.entries.len(),
+        router_count: routers.len(),
+        protected_router_violations,
+        protected_norm_violations,
+        expert_association_count,
+        unknown_unresolved_warning_count: warnings.len(),
+        checksum_coverage,
+        source_total_bytes,
+        artifact_total_bytes: index.artifact_total_bytes,
+        byte_accounting_result: if source_total_bytes == index.artifact_total_bytes {
+            "match"
+        } else {
+            "mismatch"
+        }
+        .to_string(),
+        failures,
+        warnings,
+    }
+}
+
+fn failure(category: &str, tensor: Option<String>, message: impl Into<String>) -> FailureRecord {
+    FailureRecord {
+        category: category.to_string(),
+        tensor,
+        message: message.into(),
+    }
+}
+
+fn planned_warnings() -> Vec<WarningRecord> {
+    vec![
+        WarningRecord {
+            category: "unresolved_expert_projection".to_string(),
+            tensor: Some("*.slot_00.moe_expert.unresolved".to_string()),
+            message: "expert slot 00 is structurally preserved but projection label remains unresolved".to_string(),
+        },
+        WarningRecord {
+            category: "unresolved_expert_projection".to_string(),
+            tensor: Some("*.slot_02.moe_expert.unresolved".to_string()),
+            message: "expert slot 02 is structurally preserved but projection label remains unresolved".to_string(),
+        },
+        WarningRecord {
+            category: "unknown_dense_slot".to_string(),
+            tensor: Some("*.slot_03/04/05/06".to_string()),
+            message: "dense attention slots are wrapped as existing int8 payloads unless shape/dtype/count drift occurs".to_string(),
+        },
+    ]
+}
+
+fn write_conversion_outputs(
+    output_root: &Path,
+    manifest_path: &Path,
+    index: &ArtifactIndex,
+    warnings: &[WarningRecord],
+    dry_run: bool,
+) -> Result<()> {
+    fs::create_dir_all(output_root)?;
+    fs::copy(manifest_path, output_root.join("manifest.used.json"))?;
+    write_json(output_root.join("artifact.index.json"), index)?;
+    write_json(output_root.join("checksums.json"), &output_checksums(index))?;
+    write_json(output_root.join("warnings.json"), warnings)?;
+    if !dry_run {
+        fs::write(
+            output_root.join("artifact.saaq-g1-v0.meta"),
+            artifact_meta(index),
+        )?;
+    }
+    fs::write(
+        output_root.join("conversion.summary.md"),
+        conversion_summary(index),
+    )?;
+    Ok(())
+}
+
+fn write_smoke_outputs(
+    output_root: &Path,
+    index: &ArtifactIndex,
+    warnings: &[WarningRecord],
+    dry_run: bool,
+) -> Result<()> {
+    fs::create_dir_all(output_root)?;
+    write_json(output_root.join("smoke.index.json"), index)?;
+    write_json(
+        output_root.join("smoke.checksums.json"),
+        &output_checksums(index),
+    )?;
+    write_json(output_root.join("smoke.warnings.json"), warnings)?;
+    if !dry_run {
+        fs::write(
+            output_root.join("artifact.saaq-g1-v0.meta"),
+            artifact_meta(index),
+        )?;
+    }
+    fs::write(output_root.join("smoke.summary.md"), smoke_summary(index))?;
+    Ok(())
+}
+
+fn write_validation_outputs(output_root: &Path, report: &ValidationReport) -> Result<()> {
+    fs::create_dir_all(output_root)?;
+    fs::write(
+        output_root.join("validation.summary.md"),
+        validation_summary(report),
+    )?;
+    write_json(output_root.join("validation.report.json"), report)?;
+    write_json(
+        output_root.join("validation.failures.json"),
+        &report.failures,
+    )?;
+    write_json(
+        output_root.join("validation.warnings.json"),
+        &report.warnings,
+    )?;
+    Ok(())
+}
+
+fn output_checksums(index: &ArtifactIndex) -> BTreeMap<String, String> {
+    index
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.source_tensor_name.clone(),
+                entry.output_checksum.clone(),
+            )
+        })
+        .collect()
+}
+
+fn write_json<T: Serialize + ?Sized>(path: PathBuf, value: &T) -> Result<()> {
+    let body = serde_json::to_string_pretty(value).map_err(|e| {
+        GrokOzempicError::ArtifactValidation(format!("failed to serialize {}: {e}", path.display()))
+    })?;
+    fs::write(path, format!("{body}\n"))?;
+    Ok(())
+}
+
+fn artifact_meta(index: &ArtifactIndex) -> String {
+    let mut body = String::from("# grok-ozempic metadata-only artifact\n");
+    for entry in &index.entries {
+        body.push_str(&format!(
+            "{}\t{}\t{}\t{}\n",
+            entry.artifact_offset, entry.byte_len, entry.dtype, entry.source_tensor_name
+        ));
+    }
+    body
+}
+
+fn conversion_summary(index: &ArtifactIndex) -> String {
+    format!(
+        "# Grok-1 conversion summary\n\n- status: PASS\n- mode: {}\n- dry_run: {}\n- format: {}\n- tensor_count: {}\n- router_count: {}\n- source_total_bytes: {}\n- artifact_total_bytes: {}\n- f32_tensors: {}\n- int8_tensors: {}\n- policy: routers and norms are protected/pass-through; expert and unknown int8 tensors are wrapped with metadata.\n",
+        index.mode,
+        index.dry_run,
+        index.format,
+        index.tensor_count,
+        index.router_count,
+        index.source_total_bytes,
+        index.artifact_total_bytes,
+        index
+            .entries
+            .iter()
+            .filter(|entry| entry.dtype == "f32")
+            .count(),
+        index
+            .entries
+            .iter()
+            .filter(|entry| entry.dtype == "int8")
+            .count(),
+    )
+}
+
+fn smoke_summary(index: &ArtifactIndex) -> String {
+    let block = index
+        .entries
+        .iter()
+        .find_map(|entry| entry.block)
+        .unwrap_or(0);
+    format!(
+        "# Grok-1 smoke summary\n\n- status: PASS\n- block: block_{block:03}\n- dry_run: {}\n- tensor_count: {}\n- block_tensor_count: {}\n- router_count: {}\n- expert_families: {}\n- warnings: {}\n",
+        index.dry_run,
+        index.tensor_count,
+        index
+            .entries
+            .iter()
+            .filter(|entry| entry.block == Some(block))
+            .count(),
+        index.router_count,
+        index
+            .entries
+            .iter()
+            .filter(|entry| entry.kind.starts_with("moe_expert"))
+            .count(),
+        planned_warnings().len(),
+    )
+}
+
+fn validation_summary(report: &ValidationReport) -> String {
+    format!(
+        "# Grok-1 artifact validation summary\n\n- status: {}\n- source tensor count: {}\n- artifact tensor count: {}\n- router count: {}\n- protected router violations: {}\n- protected norm violations: {}\n- expert association count: {}\n- unknown/unresolved warning count: {}\n- checksum coverage: {}\n- byte accounting result: {}\n- source total bytes: {}\n- artifact total bytes: {}\n- failure count: {}\n",
+        report.status,
+        report.source_tensor_count,
+        report.artifact_tensor_count,
+        report.router_count,
+        report.protected_router_violations,
+        report.protected_norm_violations,
+        report.expert_association_count,
+        report.unknown_unresolved_warning_count,
+        report.checksum_coverage,
+        report.byte_accounting_result,
+        report.source_total_bytes,
+        report.artifact_total_bytes,
+        report.failures.len(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::manifest::GROK1_BASELINE_JSON;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("grok_ozempic_{name}_{stamp}"));
+        fs::create_dir_all(&path).expect("temp dir");
+        path
+    }
+
+    fn write_manifest(dir: &Path) -> PathBuf {
+        let path = dir.join("manifest.json");
+        fs::write(&path, GROK1_BASELINE_JSON).expect("manifest write");
+        path
+    }
+
+    #[test]
+    fn ingest_rejects_version_mismatch() {
+        let dir = temp_dir("bad_version");
+        let path = dir.join("manifest.json");
+        fs::write(
+            &path,
+            GROK1_BASELINE_JSON.replace("\"schema_version\": 1", "\"schema_version\": 99"),
+        )
+        .expect("manifest write");
+        let err = validate_ingest_path(&path, None).expect_err("bad version must fail");
+        assert!(err.to_string().contains("schema_version"));
+    }
+
+    #[test]
+    fn convert_writes_deterministic_full_index() {
+        let dir = temp_dir("convert");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        assert_eq!(index.tensor_count, GROK1_TENSOR_TOTAL);
+        assert_eq!(index.router_count, GROK1_BLOCK_COUNT as usize);
+        assert_eq!(index.source_total_bytes, GROK1_TENSOR_TOTAL_BYTES);
+        assert!(out.join("artifact.index.json").is_file());
+        assert!(out.join("conversion.summary.md").is_file());
+        assert!(out.join("checksums.json").is_file());
+        assert!(out.join("warnings.json").is_file());
+        assert!(!out.join("artifact.saaq-g1-v0.meta").exists());
+    }
+
+    #[test]
+    fn smoke_selects_one_block_with_embedding_and_final_norm() {
+        let dir = temp_dir("smoke");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("smoke-out");
+        let index = smoke_grok1(SmokeOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            block: 0,
+            include_embedding: true,
+            include_final_norm: true,
+            output_root: &out,
+            dry_run: true,
+        })
+        .expect("smoke");
+        assert_eq!(index.tensor_count, GROK1_BLOCK_TENSORS + 2);
+        assert_eq!(index.router_count, 1);
+        assert_eq!(
+            index
+                .entries
+                .iter()
+                .filter(|entry| entry.block == Some(0))
+                .count(),
+            GROK1_BLOCK_TENSORS
+        );
+        assert!(out.join("smoke.index.json").is_file());
+        assert!(out.join("smoke.summary.md").is_file());
+    }
+
+    #[test]
+    fn validator_reports_negative_cases() {
+        let dir = temp_dir("validate_neg");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let mut index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        index
+            .entries
+            .retain(|entry| entry.source_tensor_name != "block_000.slot_11.router");
+        if let Some(router) = index
+            .entries
+            .iter_mut()
+            .find(|entry| entry.kind == "router")
+        {
+            router.dtype = "int8".to_string();
+        }
+        index.entries.push(index.entries[0].clone());
+        if let Some(expert) = index
+            .entries
+            .iter_mut()
+            .find(|entry| entry.block == Some(1) && entry.kind.starts_with("moe_expert"))
+        {
+            expert.kind = "removed_expert".to_string();
+        }
+        index.artifact_total_bytes += 1;
+        let report = build_validation_report(&index, true, None);
+        for category in [
+            "router_count_mismatch",
+            "dtype_mismatch",
+            "duplicate_tensor",
+            "expert_family_missing",
+            "byte_mismatch",
+        ] {
+            assert!(
+                report
+                    .failures
+                    .iter()
+                    .any(|failure| failure.category == category),
+                "missing failure category {category}: {:?}",
+                report.failures
+            );
+        }
+    }
+}
