@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use grok_ozempic::artifact::{self, ConvertOptions, GROK1_ARTIFACT_FORMAT, SmokeOptions};
 use grok_ozempic::reports;
 use grok_ozempic::reports::schema::ArtifactIR;
@@ -48,11 +48,11 @@ enum Commands {
         format: String,
 
         /// Protect routers as f32 pass-through tensors
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = ArgAction::Set, default_value_t = true)]
         protect_routers: bool,
 
         /// Protect block norms and final norm as f32 pass-through tensors
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = ArgAction::Set, default_value_t = true)]
         protect_norms: bool,
 
         /// Validate and write metadata reports without creating large payload artifacts
@@ -74,11 +74,11 @@ enum Commands {
         block: usize,
 
         /// Include embedding.slot_00.token_embedding in the smoke slice
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = ArgAction::Set, default_value_t = true)]
         include_embedding: bool,
 
         /// Include final_norm.slot_00.final_norm in the smoke slice
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = ArgAction::Set, default_value_t = true)]
         include_final_norm: bool,
 
         /// Output directory for smoke summary/index/checksum/warnings files
@@ -108,7 +108,7 @@ enum Commands {
         output_root: Option<PathBuf>,
 
         /// Require every router to be protected/pass-through/f32
-        #[arg(long, default_value_t = true)]
+        #[arg(long, action = ArgAction::Set, default_value_t = true)]
         strict_router_protection: bool,
     },
 }

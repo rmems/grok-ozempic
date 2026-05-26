@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const GROK1_ARTIFACT_FORMAT: &str = "saaq-g1-v0";
 pub const GROK1_ROUTER_SHAPE: [usize; 2] = [GROK1_HIDDEN_DIM, GROK1_EXPERT_COUNT as usize];
@@ -151,9 +151,9 @@ pub fn convert_grok1(options: ConvertOptions<'_>) -> Result<ArtifactIndex> {
             options.format, GROK1_ARTIFACT_FORMAT
         )));
     }
-    let mut warnings = planned_warnings();
+    let warnings = planned_warnings();
     let entries = planned_grok1_entries(options.protect_routers, options.protect_norms, None)?;
-    validate_full_expected_entries(&entries)?;
+    validate_full_expected_entries(&entries, options.protect_routers, options.protect_norms)?;
     let index = build_index("full", options.format, options.dry_run, entries);
     write_conversion_outputs(
         options.output_root,
@@ -162,19 +162,6 @@ pub fn convert_grok1(options: ConvertOptions<'_>) -> Result<ArtifactIndex> {
         &warnings,
         options.dry_run,
     )?;
-    // Stable warnings file includes checksum coverage note when input checksums are absent.
-    if index
-        .entries
-        .iter()
-        .any(|entry| entry.source_checksum.is_none())
-    {
-        warnings.push(WarningRecord {
-            category: "missing_optional_checksum".to_string(),
-            tensor: None,
-            message: "input manifest/checkpoint did not provide per-tensor source checksums; deterministic output checksums were still recorded".to_string(),
-        });
-        write_json(options.output_root.join("warnings.json"), &warnings)?;
-    }
     Ok(index)
 }
 
@@ -234,14 +221,33 @@ pub fn validate_grok1_artifact(
         None
     };
 
-    let report = build_validation_report(&index, strict_router_protection, checksum_map.as_ref());
+    let expected_entries = expected_full_entry_map()?;
+    let report = build_validation_report(
+        &index,
+        GROK1_ARTIFACT_FORMAT,
+        strict_router_protection,
+        true,
+        Some(&expected_entries),
+        checksum_map.as_ref(),
+    );
     if let Some(dir) = output_root {
         write_validation_outputs(dir, &report)?;
     }
     if report.status != "PASS" {
-        return Err(GrokOzempicError::ArtifactValidation(format!(
-            "Grok-1 artifact validation failed with {} failure(s); see validation.report.json",
+        let mut message = format!(
+            "Grok-1 artifact validation failed with {} failure(s)",
             report.failures.len()
+        );
+        if output_root.is_some() {
+            message.push_str("; see validation.report.json");
+        } else if let Some(first) = report.failures.first() {
+            message.push_str(&format!(
+                "; first failure [{}] {}. rerun with --output-root to write validation.report.json",
+                first.category, first.message
+            ));
+        }
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "{message}"
         )));
     }
     Ok(report)
@@ -264,7 +270,7 @@ fn validate_checkpoint_checksums(checkpoint: &Path) -> Result<()> {
     }
     let map = load_checksums_file(&checksums)?;
     for (relative, expected) in map {
-        let path = checkpoint.join(&relative);
+        let path = resolve_checkpoint_checksum_entry_path(checkpoint, &relative)?;
         if !path.is_file() {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "checksum entry references missing file: {}",
@@ -309,10 +315,25 @@ fn sha256_file(path: &Path) -> Result<String> {
 }
 
 fn normalize_checksum(value: &str) -> String {
-    value
+    let lower = value.to_ascii_lowercase();
+    lower
         .strip_prefix("sha256:")
-        .unwrap_or(value)
-        .to_ascii_lowercase()
+        .unwrap_or(&lower)
+        .to_string()
+}
+
+fn resolve_checkpoint_checksum_entry_path(checkpoint: &Path, relative: &str) -> Result<PathBuf> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "illegal path traversal or absolute path in checksum relative path: {relative}"
+        )));
+    }
+    Ok(checkpoint.join(relative_path))
 }
 
 #[derive(Clone, Copy)]
@@ -611,7 +632,11 @@ fn build_index(
     }
 }
 
-fn validate_full_expected_entries(entries: &[ArtifactIndexEntry]) -> Result<()> {
+fn validate_full_expected_entries(
+    entries: &[ArtifactIndexEntry],
+    require_router_protection: bool,
+    require_norm_protection: bool,
+) -> Result<()> {
     if entries.len() != GROK1_TENSOR_TOTAL {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "expected {} tensors before writing final success, got {}",
@@ -620,7 +645,15 @@ fn validate_full_expected_entries(entries: &[ArtifactIndexEntry]) -> Result<()> 
         )));
     }
     let index = build_index("full", GROK1_ARTIFACT_FORMAT, true, entries.to_vec());
-    let report = build_validation_report(&index, true, None);
+    let expected_entries = expected_full_entry_map()?;
+    let report = build_validation_report(
+        &index,
+        GROK1_ARTIFACT_FORMAT,
+        require_router_protection,
+        require_norm_protection,
+        Some(&expected_entries),
+        None,
+    );
     if report.status != "PASS" {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "planned full artifact failed internal validation: {:?}",
@@ -689,17 +722,22 @@ fn validate_smoke_entries(
 
 fn build_validation_report(
     index: &ArtifactIndex,
-    strict_router_protection: bool,
+    expected_format: &str,
+    require_router_protection: bool,
+    require_norm_protection: bool,
+    expected_entries: Option<&BTreeMap<String, ArtifactIndexEntry>>,
     checksums: Option<&BTreeMap<String, String>>,
 ) -> ValidationReport {
     let mut failures = Vec::new();
     let warnings = planned_warnings();
     let mut names = HashSet::new();
     let mut duplicates = BTreeSet::new();
+    let mut actual_names = BTreeSet::new();
     for entry in &index.entries {
         if !names.insert(entry.source_tensor_name.as_str()) {
             duplicates.insert(entry.source_tensor_name.clone());
         }
+        actual_names.insert(entry.source_tensor_name.clone());
     }
     for duplicate in duplicates {
         failures.push(failure(
@@ -709,6 +747,16 @@ fn build_validation_report(
         ));
     }
 
+    if index.format != expected_format {
+        failures.push(failure(
+            "format_mismatch",
+            None,
+            format!(
+                "artifact index format must be {expected_format}, got {}",
+                index.format
+            ),
+        ));
+    }
     if index.model_family != "grok-1" {
         failures.push(failure(
             "manifest_artifact_mismatch",
@@ -725,6 +773,90 @@ fn build_validation_report(
                 index.entries.len()
             ),
         ));
+    }
+    if let Some(expected_entries) = expected_entries {
+        let expected_names: BTreeSet<_> = expected_entries.keys().cloned().collect();
+        for missing in expected_names.difference(&actual_names) {
+            failures.push(failure(
+                "missing_tensor",
+                Some(missing.clone()),
+                "expected tensor is missing from artifact index",
+            ));
+        }
+        for unexpected in actual_names.difference(&expected_names) {
+            failures.push(failure(
+                "manifest_artifact_mismatch",
+                Some(unexpected.clone()),
+                "artifact index tensor is not part of the Grok-1 source inventory",
+            ));
+        }
+        for entry in &index.entries {
+            let Some(expected) = expected_entries.get(&entry.source_tensor_name) else {
+                continue;
+            };
+            if entry.block != expected.block
+                || entry.slot != expected.slot
+                || entry.kind != expected.kind
+                || entry.quant_policy_applied != expected.quant_policy_applied
+            {
+                failures.push(failure(
+                    "manifest_artifact_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected block {:?} slot {:?} kind {} policy {}, got block {:?} slot {:?} kind {} policy {}",
+                        expected.block,
+                        expected.slot,
+                        expected.kind,
+                        expected.quant_policy_applied,
+                        entry.block,
+                        entry.slot,
+                        entry.kind,
+                        entry.quant_policy_applied
+                    ),
+                ));
+            }
+            if entry.dtype != expected.dtype {
+                failures.push(failure(
+                    "dtype_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected dtype {}, got {}",
+                        expected.dtype, entry.dtype
+                    ),
+                ));
+            }
+            if entry.shape != expected.shape {
+                failures.push(failure(
+                    "shape_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected shape {:?}, got {:?}",
+                        expected.shape, entry.shape
+                    ),
+                ));
+            }
+            if entry.byte_len != expected.byte_len {
+                failures.push(failure(
+                    "byte_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected byte length {}, got {}",
+                        expected.byte_len, entry.byte_len
+                    ),
+                ));
+            }
+            if normalize_checksum(&entry.output_checksum) != normalize_checksum(&expected.output_checksum)
+            {
+                failures.push(failure(
+                    "checksum_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected output checksum {}, got {}",
+                        expected.output_checksum, entry.output_checksum
+                    ),
+                ));
+            }
+        }
     }
 
     let routers: Vec<_> = index
@@ -746,25 +878,33 @@ fn build_validation_report(
     }
     let mut protected_router_violations = 0usize;
     for router in &routers {
-        if router.dtype != "f32" || router.shape != GROK1_ROUTER_SHAPE {
+        if router.dtype != "f32" {
             failures.push(failure(
-                if router.dtype != "f32" {
-                    "dtype_mismatch"
-                } else {
-                    "shape_mismatch"
-                },
+                "dtype_mismatch",
                 Some(router.source_tensor_name.clone()),
-                "router must remain f32 with shape (6144, 8)",
+                "router must remain f32",
             ));
         }
-        if strict_router_protection
-            && (!router.protected || router.quant_policy_applied != "passthrough_f32_router")
-        {
+        if router.shape != GROK1_ROUTER_SHAPE {
+            failures.push(failure(
+                "shape_mismatch",
+                Some(router.source_tensor_name.clone()),
+                "router must remain shape (6144, 8)",
+            ));
+        }
+        if router.quant_policy_applied != "passthrough_f32_router" {
             protected_router_violations += 1;
             failures.push(failure(
                 "router_policy_violation",
                 Some(router.source_tensor_name.clone()),
-                "router must be protected/pass-through/f32",
+                "router must remain pass-through/f32",
+            ));
+        } else if require_router_protection && !router.protected {
+            protected_router_violations += 1;
+            failures.push(failure(
+                "router_policy_violation",
+                Some(router.source_tensor_name.clone()),
+                "router must be protected when strict router protection is enabled",
             ));
         }
     }
@@ -772,29 +912,61 @@ fn build_validation_report(
     let mut protected_norm_violations = 0usize;
     for norm in index
         .entries
-        .iter()
-        .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
+            .iter()
+            .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
     {
-        if norm.dtype != "f32"
-            || !norm.protected
-            || norm.quant_policy_applied != "passthrough_f32_norm"
-        {
+        if norm.dtype != "f32" {
+            failures.push(failure(
+                "dtype_mismatch",
+                Some(norm.source_tensor_name.clone()),
+                "norm tensors must remain f32",
+            ));
+        }
+        if norm.quant_policy_applied != "passthrough_f32_norm" {
             protected_norm_violations += 1;
             failures.push(failure(
                 "norm_policy_violation",
                 Some(norm.source_tensor_name.clone()),
-                "norm tensors must be protected/pass-through/f32",
+                "norm tensors must remain pass-through/f32",
+            ));
+        } else if require_norm_protection && !norm.protected {
+            protected_norm_violations += 1;
+            failures.push(failure(
+                "norm_policy_violation",
+                Some(norm.source_tensor_name.clone()),
+                "norm tensors must be protected when strict norm protection is enabled",
             ));
         }
     }
 
-    let blocks: BTreeSet<usize> = index
-        .entries
-        .iter()
-        .filter_map(|entry| entry.block)
-        .collect();
     let mut expert_association_count = 0usize;
+    let blocks: Vec<_> = if index.mode == "full" {
+        (0..GROK1_BLOCK_COUNT as usize).collect()
+    } else {
+        index
+            .entries
+            .iter()
+            .filter_map(|entry| entry.block)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
     for block in blocks {
+        let block_entries: Vec<_> = index
+            .entries
+            .iter()
+            .filter(|entry| entry.block == Some(block))
+            .collect();
+        if block_entries.len() != GROK1_BLOCK_TENSORS {
+            failures.push(failure(
+                "missing_tensor",
+                None,
+                format!(
+                    "block_{block:03} expected {GROK1_BLOCK_TENSORS} tensors, got {}",
+                    block_entries.len()
+                ),
+            ));
+        }
         let families = index
             .entries
             .iter()
@@ -807,6 +979,43 @@ fn build_validation_report(
                 format!(
                     "block_{block:03} expected {} expert families, got {families}",
                     GROK1_EXPERT_FAMILIES_PER_BLOCK
+                ),
+            ));
+        }
+        let router_count = block_entries
+            .iter()
+            .filter(|entry| entry.kind == "router")
+            .count();
+        if router_count != 1 {
+            failures.push(failure(
+                "router_count_mismatch",
+                None,
+                format!("block_{block:03} expected 1 router, got {router_count}"),
+            ));
+        }
+        let norm_count = block_entries
+            .iter()
+            .filter(|entry| entry.kind == "block_norm")
+            .count();
+        if norm_count != GROK1_NORMS_PER_BLOCK {
+            failures.push(failure(
+                "missing_tensor",
+                None,
+                format!(
+                    "block_{block:03} expected {GROK1_NORMS_PER_BLOCK} block norms, got {norm_count}"
+                ),
+            ));
+        }
+        let unknown_dense_count = block_entries
+            .iter()
+            .filter(|entry| entry.kind.starts_with("unknown_dense"))
+            .count();
+        if unknown_dense_count != GROK1_UNKNOWN_DENSE_PER_BLOCK {
+            failures.push(failure(
+                "missing_tensor",
+                None,
+                format!(
+                    "block_{block:03} expected {GROK1_UNKNOWN_DENSE_PER_BLOCK} unknown dense tensors, got {unknown_dense_count}"
                 ),
             ));
         }
@@ -835,11 +1044,37 @@ fn build_validation_report(
     }
 
     let checksum_coverage = if let Some(checksums) = checksums {
-        let covered = index
-            .entries
-            .iter()
-            .filter(|entry| checksums.contains_key(&entry.source_tensor_name))
-            .count();
+        let mut covered = 0usize;
+        for entry in &index.entries {
+            match checksums.get(&entry.source_tensor_name) {
+                Some(expected) => {
+                    if normalize_checksum(expected) == normalize_checksum(&entry.output_checksum) {
+                        covered += 1;
+                    } else {
+                        failures.push(failure(
+                            "checksum_mismatch",
+                            Some(entry.source_tensor_name.clone()),
+                            format!(
+                                "checksums file expected {}, got {}",
+                                expected, entry.output_checksum
+                            ),
+                        ));
+                    }
+                }
+                None => failures.push(failure(
+                    "checksum_missing",
+                    Some(entry.source_tensor_name.clone()),
+                    "checksums file is missing this tensor entry",
+                )),
+            }
+        }
+        for unexpected in checksums.keys().filter(|name| !actual_names.contains(*name)) {
+            failures.push(failure(
+                "checksum_mismatch",
+                Some(unexpected.clone()),
+                "checksums file contains a tensor not present in artifact index",
+            ));
+        }
         format!("{covered}/{} source tensors", index.entries.len())
     } else {
         let covered = index
@@ -984,6 +1219,13 @@ fn output_checksums(index: &ArtifactIndex) -> BTreeMap<String, String> {
         .collect()
 }
 
+fn expected_full_entry_map() -> Result<BTreeMap<String, ArtifactIndexEntry>> {
+    Ok(planned_grok1_entries(false, false, None)?
+        .into_iter()
+        .map(|entry| (entry.source_tensor_name.clone(), entry))
+        .collect())
+}
+
 fn write_json<T: Serialize + ?Sized>(path: PathBuf, value: &T) -> Result<()> {
     let body = serde_json::to_string_pretty(value).map_err(|e| {
         GrokOzempicError::ArtifactValidation(format!("failed to serialize {}: {e}", path.display()))
@@ -1004,8 +1246,30 @@ fn artifact_meta(index: &ArtifactIndex) -> String {
 }
 
 fn conversion_summary(index: &ArtifactIndex) -> String {
+    let router_total = index
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "router")
+        .count();
+    let protected_routers = index
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "router" && entry.protected)
+        .count();
+    let norm_total = index
+        .entries
+        .iter()
+        .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
+        .count();
+    let protected_norms = index
+        .entries
+        .iter()
+        .filter(|entry| {
+            (entry.kind == "block_norm" || entry.kind == "final_norm") && entry.protected
+        })
+        .count();
     format!(
-        "# Grok-1 conversion summary\n\n- status: PASS\n- mode: {}\n- dry_run: {}\n- format: {}\n- tensor_count: {}\n- router_count: {}\n- source_total_bytes: {}\n- artifact_total_bytes: {}\n- f32_tensors: {}\n- int8_tensors: {}\n- policy: routers and norms are protected/pass-through; expert and unknown int8 tensors are wrapped with metadata.\n",
+        "# Grok-1 conversion summary\n\n- status: PASS\n- mode: {}\n- dry_run: {}\n- format: {}\n- tensor_count: {}\n- router_count: {}\n- source_total_bytes: {}\n- artifact_total_bytes: {}\n- f32_tensors: {}\n- int8_tensors: {}\n- protected routers: {protected_routers}/{router_total}\n- protected norms: {protected_norms}/{norm_total}\n- int8 wrapping policy: expert and unknown tensors are wrapped with metadata.\n",
         index.mode,
         index.dry_run,
         index.format,
@@ -1074,6 +1338,7 @@ fn validation_summary(report: &ValidationReport) -> String {
 mod tests {
     use super::*;
     use crate::core::manifest::GROK1_BASELINE_JSON;
+    use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -1160,6 +1425,79 @@ mod tests {
     }
 
     #[test]
+    fn convert_allows_unprotected_routers_and_norms() {
+        let dir = temp_dir("convert_unprotected");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: false,
+            protect_norms: false,
+            dry_run: true,
+        })
+        .expect("convert");
+        assert!(
+            index
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == "router")
+                .all(|entry| !entry.protected)
+        );
+        assert!(
+            index
+                .entries
+                .iter()
+                .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
+                .all(|entry| !entry.protected)
+        );
+        let summary = fs::read_to_string(out.join("conversion.summary.md")).expect("summary");
+        assert!(summary.contains("- protected routers: 0/64"));
+        assert!(summary.contains("- protected norms: 0/257"));
+    }
+
+    #[test]
+    fn checkpoint_checksums_reject_escape_paths() {
+        let dir = temp_dir("checkpoint_escape");
+        let checkpoint = dir.join("ckpt");
+        fs::create_dir_all(&checkpoint).expect("checkpoint dir");
+        fs::write(
+            checkpoint.join("checksums.json"),
+            serde_json::to_vec_pretty(&json!({
+                "../escape.bin": "sha256:deadbeef",
+            }))
+            .expect("checksums json"),
+        )
+        .expect("checksums write");
+        let err = validate_checkpoint_checksums(&checkpoint).expect_err("escape must fail");
+        assert!(
+            err.to_string()
+                .contains("illegal path traversal or absolute path")
+        );
+    }
+
+    #[test]
+    fn checkpoint_checksums_accept_uppercase_sha_prefix() {
+        let dir = temp_dir("checkpoint_sha_prefix");
+        let checkpoint = dir.join("ckpt");
+        fs::create_dir_all(&checkpoint).expect("checkpoint dir");
+        let payload = checkpoint.join("payload.bin");
+        fs::write(&payload, b"grok-ozempic").expect("payload write");
+        let digest = sha256_file(&payload).expect("digest");
+        fs::write(
+            checkpoint.join("checksums.json"),
+            serde_json::to_vec_pretty(&json!({
+                "payload.bin": format!("SHA256:{digest}"),
+            }))
+            .expect("checksums json"),
+        )
+        .expect("checksums write");
+        validate_checkpoint_checksums(&checkpoint).expect("uppercase prefix should normalize");
+    }
+
+    #[test]
     fn validator_reports_negative_cases() {
         let dir = temp_dir("validate_neg");
         let manifest = write_manifest(&dir);
@@ -1193,7 +1531,15 @@ mod tests {
             expert.kind = "removed_expert".to_string();
         }
         index.artifact_total_bytes += 1;
-        let report = build_validation_report(&index, true, None);
+        let expected_entries = expected_full_entry_map().expect("expected entries");
+        let report = build_validation_report(
+            &index,
+            GROK1_ARTIFACT_FORMAT,
+            true,
+            true,
+            Some(&expected_entries),
+            None,
+        );
         for category in [
             "router_count_mismatch",
             "dtype_mismatch",
@@ -1210,5 +1556,92 @@ mod tests {
                 report.failures
             );
         }
+    }
+
+    #[test]
+    fn validator_enforces_format_inventory_and_supplied_checksums() {
+        let dir = temp_dir("validate_contract");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let mut index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        let checksums = output_checksums(&index);
+        index.format = "custom-grok1".to_string();
+        if let Some(router) = index
+            .entries
+            .iter_mut()
+            .find(|entry| entry.source_tensor_name == "block_000.slot_11.router")
+        {
+            router.block = Some(1);
+        }
+        if let Some(final_norm) = index
+            .entries
+            .iter_mut()
+            .find(|entry| entry.source_tensor_name == "final_norm.slot_00.final_norm")
+        {
+            final_norm.source_tensor_name = "final_norm.slot_00.renamed".to_string();
+        }
+        if let Some(entry) = index.entries.first_mut() {
+            entry.output_checksum = "sha256:deadbeef".to_string();
+        }
+        let expected_entries = expected_full_entry_map().expect("expected entries");
+        let report = build_validation_report(
+            &index,
+            GROK1_ARTIFACT_FORMAT,
+            true,
+            true,
+            Some(&expected_entries),
+            Some(&checksums),
+        );
+        for category in [
+            "format_mismatch",
+            "missing_tensor",
+            "manifest_artifact_mismatch",
+            "checksum_mismatch",
+            "checksum_missing",
+            "router_count_mismatch",
+        ] {
+            assert!(
+                report
+                    .failures
+                    .iter()
+                    .any(|failure| failure.category == category),
+                "missing failure category {category}: {:?}",
+                report.failures
+            );
+        }
+    }
+
+    #[test]
+    fn validate_artifact_without_output_root_returns_inline_hint() {
+        let dir = temp_dir("validate_inline_hint");
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let mut index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        index.format = "bad-format".to_string();
+        let artifact_index = dir.join("artifact.index.json");
+        write_json(artifact_index.clone(), &index).expect("artifact index write");
+        let err = validate_grok1_artifact(&manifest, &artifact_index, None, None, true)
+            .expect_err("validation should fail");
+        let message = err.to_string();
+        assert!(message.contains("first failure ["));
+        assert!(message.contains("rerun with --output-root"));
     }
 }
