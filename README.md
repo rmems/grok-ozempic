@@ -68,6 +68,23 @@ For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 τ = gif_threshold × rms(layer)
 ```
 
+---
+
+### Grok-1 SAAQ artifact sprint commands
+
+The combined sprint path for ingest validation, one-block smoke validation,
+full `saaq-g1-v0` metadata conversion, and final structural validation is
+documented in [`docs/grok1-saaq-artifact-flow.md`](docs/grok1-saaq-artifact-flow.md).
+
+Key CLI entry points are available behind the `cli` feature:
+
+```bash
+cargo run --features cli -- validate-ingest --manifest dissect/grok-1/baseline.json
+cargo run --features cli -- smoke-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-smoke --dry-run
+cargo run --features cli -- convert-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-artifact --dry-run
+cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --checksums /tmp/grok1-artifact/checksums.json --output-root /tmp/grok1-validation
+```
+
 ## Repository
 
 **https://github.com/rmems/grok-ozempic**

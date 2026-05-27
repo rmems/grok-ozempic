@@ -1,6 +1,6 @@
 # First Quantization Target for `grok-ozempic`
 
-This document defines the first bounded quantization target for [`grok-ozempic`](../README.md) under GitHub issue `#13` / Linear `MET-76`.
+This document defines the first bounded quantization target for [`grok-ozempic`](../README.md) under GitHub issue `#14` / Linear `MET-76`. It is now implemented as part of the combined Grok-1 SAAQ artifact flow documented in [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md).
 
 ## Goal
 
@@ -56,7 +56,7 @@ The format must remain the existing GOZ1 container defined in [`src/core/weight_
 - Ternary packing must continue to use the existing encoding path in [`pack_trits()`](../src/core/quantizer.rs:62).
 - Source tensors that are still preserve/FP16 must remain on their existing paths.
 - Routing-critical tensors must remain unchanged.
-- The output stays a normal `.goz1` artifact, not a new sidecar or alternate packaging format.
+- For the sprint metadata writer, the selected target is represented in `artifact.index.json` with `candidate_saaq_embedding` policy under the `saaq-g1-v0` custom-format contract. The older GOZ1 streaming path remains separate and unchanged.
 
 ## Explicit non-goals for this issue
 
