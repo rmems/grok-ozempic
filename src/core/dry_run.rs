@@ -155,6 +155,10 @@ impl DryRunPlanner {
 
         // 4. Default rule — tensors not matched by any explicit list fall
         //    through to the manifest defaults or the pipeline default.
+        //
+        // For default fp16/preserve tiers, the source dtype may be F32 or
+        // BF16, so report the conversion path (same reasoning as the explicit
+        // preserve/fp16 loops above).
         let default_precision = manifest
             .defaults
             .precision
@@ -164,8 +168,8 @@ impl DryRunPlanner {
         let (_precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
         let default_method = match default_precision {
             "ternary_snn" => "quantize_f32",
-            "fp16" => "passthrough_f16",
-            "preserve" => "passthrough_f16",
+            "fp16" => "convert_f32_to_f16_bytes",
+            "preserve" => "convert_f32_to_f16_bytes",
             _ => "quantize_f32",
         };
         // Estimate default-covered tensors: total inventory minus explicit rules.
