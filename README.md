@@ -85,6 +85,15 @@ cargo run --features cli -- convert-grok1 --manifest dissect/grok-1/baseline.jso
 cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --checksums /tmp/grok1-artifact/checksums.json --output-root /tmp/grok1-validation
 ```
 
+## CUDA kernel ownership
+
+CUDA kernel ownership lives in the **`myelin-accelerator`** project, not in
+`grok-ozempic`. This repo is the Grok-1-specific quantization and orchestration
+layer, not a generic CUDA backend.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full dependency
+boundary and backend integration plan.
+
 ## Repository
 
 **https://github.com/rmems/grok-ozempic**
