@@ -246,9 +246,7 @@ pub fn validate_grok1_artifact(
                 first.category, first.message
             ));
         }
-        return Err(GrokOzempicError::ArtifactValidation(format!(
-            "{message}"
-        )));
+        return Err(GrokOzempicError::ArtifactValidation(format!("{message}")));
     }
     Ok(report)
 }
@@ -334,10 +332,7 @@ fn sha256_file(path: &Path) -> Result<String> {
 
 fn normalize_checksum(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    lower
-        .strip_prefix("sha256:")
-        .unwrap_or(&lower)
-        .to_string()
+    lower.strip_prefix("sha256:").unwrap_or(&lower).to_string()
 }
 
 fn resolve_checkpoint_checksum_entry_path(checkpoint: &Path, relative: &str) -> Result<PathBuf> {
@@ -779,7 +774,10 @@ fn build_validation_report(
         failures.push(failure(
             "schema_version_mismatch",
             None,
-            format!("artifact index schema_version must be 1, got {}", index.schema_version),
+            format!(
+                "artifact index schema_version must be 1, got {}",
+                index.schema_version
+            ),
         ));
     }
     if index.format != expected_format {
@@ -873,20 +871,14 @@ fn build_validation_report(
                 failures.push(failure(
                     "dtype_mismatch",
                     Some(entry.source_tensor_name.clone()),
-                    format!(
-                        "expected dtype {}, got {}",
-                        expected.dtype, entry.dtype
-                    ),
+                    format!("expected dtype {}, got {}", expected.dtype, entry.dtype),
                 ));
             }
             if entry.shape != expected.shape {
                 failures.push(failure(
                     "shape_mismatch",
                     Some(entry.source_tensor_name.clone()),
-                    format!(
-                        "expected shape {:?}, got {:?}",
-                        expected.shape, entry.shape
-                    ),
+                    format!("expected shape {:?}, got {:?}", expected.shape, entry.shape),
                 ));
             }
             if entry.byte_len != expected.byte_len {
@@ -919,7 +911,8 @@ fn build_validation_report(
                     ),
                 ));
             }
-            if normalize_checksum(&entry.output_checksum) != normalize_checksum(&expected.output_checksum)
+            if normalize_checksum(&entry.output_checksum)
+                != normalize_checksum(&expected.output_checksum)
             {
                 failures.push(failure(
                     "checksum_mismatch",
@@ -997,8 +990,8 @@ fn build_validation_report(
     let mut protected_norm_violations = 0usize;
     for norm in index
         .entries
-            .iter()
-            .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
+        .iter()
+        .filter(|entry| entry.kind == "block_norm" || entry.kind == "final_norm")
     {
         if norm.dtype != "f32" {
             failures.push(failure(
@@ -1163,7 +1156,10 @@ fn build_validation_report(
                 )),
             }
         }
-        for unexpected in checksums.keys().filter(|name| !actual_names.contains(*name)) {
+        for unexpected in checksums
+            .keys()
+            .filter(|name| !actual_names.contains(*name))
+        {
             failures.push(failure(
                 "checksum_mismatch",
                 Some(unexpected.clone()),
