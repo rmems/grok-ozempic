@@ -268,9 +268,27 @@ fn validate_checkpoint_checksums(checkpoint: &Path) -> Result<()> {
     if !checksums.exists() {
         return Ok(());
     }
+    let checkpoint_root = checkpoint.canonicalize().map_err(|e| {
+        GrokOzempicError::ArtifactValidation(format!(
+            "failed to canonicalize checkpoint root {}: {e}",
+            checkpoint.display()
+        ))
+    })?;
     let map = load_checksums_file(&checksums)?;
     for (relative, expected) in map {
         let path = resolve_checkpoint_checksum_entry_path(checkpoint, &relative)?;
+        let canonical_path = path.canonicalize().map_err(|e| {
+            GrokOzempicError::ArtifactValidation(format!(
+                "failed to canonicalize checksum entry {}: {e}",
+                path.display()
+            ))
+        })?;
+        if !canonical_path.starts_with(&checkpoint_root) {
+            return Err(GrokOzempicError::ArtifactValidation(format!(
+                "checksum entry resolves outside checkpoint root: {}",
+                path.display()
+            )));
+        }
         if !path.is_file() {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "checksum entry references missing file: {}",
@@ -747,6 +765,23 @@ fn build_validation_report(
         ));
     }
 
+    if index.schema != "grok-ozempic.artifact_index" {
+        failures.push(failure(
+            "schema_mismatch",
+            None,
+            format!(
+                "artifact index schema must be grok-ozempic.artifact_index, got {}",
+                index.schema
+            ),
+        ));
+    }
+    if index.schema_version != 1 {
+        failures.push(failure(
+            "schema_version_mismatch",
+            None,
+            format!("artifact index schema_version must be 1, got {}", index.schema_version),
+        ));
+    }
     if index.format != expected_format {
         failures.push(failure(
             "format_mismatch",
@@ -770,6 +805,25 @@ fn build_validation_report(
             None,
             format!(
                 "full artifact must contain exactly {GROK1_TENSOR_TOTAL} tensors, got {}",
+                index.entries.len()
+            ),
+        ));
+    }
+    match index.mode.as_str() {
+        "full" | "smoke" => {}
+        other => failures.push(failure(
+            "mode_mismatch",
+            None,
+            format!("artifact index mode must be full or smoke, got {other}"),
+        )),
+    }
+    if index.tensor_count != index.entries.len() {
+        failures.push(failure(
+            "count_mismatch",
+            None,
+            format!(
+                "artifact index tensor_count {} does not match {} entries",
+                index.tensor_count,
                 index.entries.len()
             ),
         ));
@@ -845,6 +899,26 @@ fn build_validation_report(
                     ),
                 ));
             }
+            if entry.artifact_path != expected.artifact_path {
+                failures.push(failure(
+                    "artifact_location_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected artifact_path {}, got {}",
+                        expected.artifact_path, entry.artifact_path
+                    ),
+                ));
+            }
+            if entry.artifact_offset != expected.artifact_offset {
+                failures.push(failure(
+                    "artifact_location_mismatch",
+                    Some(entry.source_tensor_name.clone()),
+                    format!(
+                        "expected artifact_offset {}, got {}",
+                        expected.artifact_offset, entry.artifact_offset
+                    ),
+                ));
+            }
             if normalize_checksum(&entry.output_checksum) != normalize_checksum(&expected.output_checksum)
             {
                 failures.push(failure(
@@ -874,6 +948,17 @@ fn build_validation_report(
             "router_count_mismatch",
             None,
             format!("expected {expected_routers} routers, got {}", routers.len()),
+        ));
+    }
+    if index.router_count != routers.len() {
+        failures.push(failure(
+            "count_mismatch",
+            None,
+            format!(
+                "artifact index router_count {} does not match {} router entries",
+                index.router_count,
+                routers.len()
+            ),
         ));
     }
     let mut protected_router_violations = 0usize;
@@ -1023,6 +1108,16 @@ fn build_validation_report(
     }
 
     let source_total_bytes: u64 = index.entries.iter().map(|entry| entry.byte_len).sum();
+    if index.source_total_bytes != source_total_bytes {
+        failures.push(failure(
+            "count_mismatch",
+            None,
+            format!(
+                "artifact index source_total_bytes {} does not match recomputed {}",
+                index.source_total_bytes, source_total_bytes
+            ),
+        ));
+    }
     if source_total_bytes != index.artifact_total_bytes {
         failures.push(failure(
             "byte_mismatch",
@@ -1497,6 +1592,32 @@ mod tests {
         validate_checkpoint_checksums(&checkpoint).expect("uppercase prefix should normalize");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn checkpoint_checksums_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let dir = temp_dir("checkpoint_symlink_escape");
+        let checkpoint = dir.join("ckpt");
+        let outside = dir.join("outside");
+        fs::create_dir_all(&checkpoint).expect("checkpoint dir");
+        fs::create_dir_all(&outside).expect("outside dir");
+        let target = outside.join("payload.bin");
+        fs::write(&target, b"grok-ozempic").expect("payload write");
+        symlink(&target, checkpoint.join("payload-link.bin")).expect("symlink");
+        let digest = sha256_file(&target).expect("digest");
+        fs::write(
+            checkpoint.join("checksums.json"),
+            serde_json::to_vec_pretty(&json!({
+                "payload-link.bin": format!("sha256:{digest}"),
+            }))
+            .expect("checksums json"),
+        )
+        .expect("checksums write");
+        let err = validate_checkpoint_checksums(&checkpoint).expect_err("symlink escape must fail");
+        assert!(err.to_string().contains("resolves outside checkpoint root"));
+    }
+
     #[test]
     fn validator_reports_negative_cases() {
         let dir = temp_dir("validate_neg");
@@ -1575,12 +1696,26 @@ mod tests {
         .expect("convert");
         let checksums = output_checksums(&index);
         index.format = "custom-grok1".to_string();
+        index.schema = "foreign.artifact_index".to_string();
+        index.schema_version = 9;
+        index.mode = "surprise".to_string();
+        index.tensor_count -= 1;
+        index.router_count -= 1;
+        index.source_total_bytes -= 1;
         if let Some(router) = index
             .entries
             .iter_mut()
             .find(|entry| entry.source_tensor_name == "block_000.slot_11.router")
         {
             router.block = Some(1);
+        }
+        if let Some(entry) = index
+            .entries
+            .iter_mut()
+            .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.unresolved")
+        {
+            entry.artifact_path = "tampered.meta".to_string();
+            entry.artifact_offset += 123;
         }
         if let Some(final_norm) = index
             .entries
@@ -1602,9 +1737,14 @@ mod tests {
             Some(&checksums),
         );
         for category in [
+            "schema_mismatch",
+            "schema_version_mismatch",
             "format_mismatch",
+            "mode_mismatch",
+            "count_mismatch",
             "missing_tensor",
             "manifest_artifact_mismatch",
+            "artifact_location_mismatch",
             "checksum_mismatch",
             "checksum_missing",
             "router_count_mismatch",
