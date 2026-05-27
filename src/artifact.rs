@@ -846,7 +846,8 @@ fn build_validation_report(
             let Some(expected) = expected_entries.get(&entry.source_tensor_name) else {
                 continue;
             };
-            if entry.block != expected.block
+            if entry.structural_name != expected.structural_name
+                || entry.block != expected.block
                 || entry.slot != expected.slot
                 || entry.kind != expected.kind
                 || entry.quant_policy_applied != expected.quant_policy_applied
@@ -855,11 +856,13 @@ fn build_validation_report(
                     "manifest_artifact_mismatch",
                     Some(entry.source_tensor_name.clone()),
                     format!(
-                        "expected block {:?} slot {:?} kind {} policy {}, got block {:?} slot {:?} kind {} policy {}",
+                        "expected structural_name {} block {:?} slot {:?} kind {} policy {}, got structural_name {} block {:?} slot {:?} kind {} policy {}",
+                        expected.structural_name,
                         expected.block,
                         expected.slot,
                         expected.kind,
                         expected.quant_policy_applied,
+                        entry.structural_name,
                         entry.block,
                         entry.slot,
                         entry.kind,
@@ -1708,6 +1711,13 @@ mod tests {
         if let Some(entry) = index
             .entries
             .iter_mut()
+            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_qkv")
+        {
+            entry.structural_name = "block_002.slot_03.tampered".to_string();
+        }
+        if let Some(entry) = index
+            .entries
+            .iter_mut()
             .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.unresolved")
         {
             entry.artifact_path = "tampered.meta".to_string();
@@ -1754,6 +1764,14 @@ mod tests {
                 report.failures
             );
         }
+        assert!(
+            report.failures.iter().any(|failure| {
+                failure.category == "manifest_artifact_mismatch"
+                    && failure.message.contains("expected structural_name")
+            }),
+            "missing structural_name mismatch failure: {:?}",
+            report.failures
+        );
     }
 
     #[test]
