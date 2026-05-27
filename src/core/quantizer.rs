@@ -59,7 +59,7 @@ pub fn decode_trit(bits: u8) -> f32 {
 ///
 /// The slice length does not need to be a multiple of 4; the final byte is
 /// zero-padded.
-fn pack_trits(ternary: &[f32]) -> Vec<u8> {
+pub fn pack_trits(ternary: &[f32]) -> Vec<u8> {
     let num_bytes = ternary.len().div_ceil(4);
     let mut packed = vec![0u8; num_bytes];
     for (i, &v) in ternary.iter().enumerate() {

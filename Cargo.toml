@@ -10,6 +10,10 @@ categories = ["science", "algorithms"]
 readme = "README.md"
 
 [dependencies]
+# Planned CUDA backend: myelin-accelerator
+# Uncomment and set `default-features = false` once the crate is published
+# and the FFI bridge in src/core/backend.rs is ready.
+# myelin-accelerator = { git = "https://github.com/rmems/myelin-accelerator", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
