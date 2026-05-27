@@ -88,12 +88,15 @@ impl DryRunPlanner {
         let mut covered_by_rules = 0usize;
 
         // 1. Preserve rules.
+        // Note: `convert_f32_to_f16_bytes` is reported because the source
+        // dtype may be F32 or BF16; `passthrough_f16` is only used when
+        // the source is already FP16 (see `encode_fp16_bytes` in stream.rs).
         for entry in &manifest.preserve {
             let class = TensorClass::Preserve {
                 reason: entry.reason.clone(),
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "passthrough_f16";
+            let method = "convert_f32_to_f16_bytes";
             let estimated = estimate_tensor_count(&entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
@@ -108,10 +111,14 @@ impl DryRunPlanner {
         }
 
         // 2. FP16 rules.
+        // Same as preserve: source may be F32/BF16, so report the conversion
+        // path rather than assuming FP16-at-rest.
         for entry in &manifest.fp16 {
-            let class = TensorClass::Fp16 { reason: None };
+            let class = TensorClass::Fp16 {
+                reason: entry.reason.clone(),
+            };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "passthrough_f16";
+            let method = "convert_f32_to_f16_bytes";
             let estimated = estimate_tensor_count(&entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
