@@ -246,7 +246,7 @@ pub fn validate_grok1_artifact(
                 first.category, first.message
             ));
         }
-        return Err(GrokOzempicError::ArtifactValidation(format!("{message}")));
+        return Err(GrokOzempicError::ArtifactValidation(message));
     }
     Ok(report)
 }
@@ -287,13 +287,13 @@ fn validate_checkpoint_checksums(checkpoint: &Path) -> Result<()> {
                 path.display()
             )));
         }
-        if !path.is_file() {
+        if !canonical_path.is_file() {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "checksum entry references missing file: {}",
                 path.display()
             )));
         }
-        let actual = sha256_file(&path)?;
+        let actual = sha256_file(&canonical_path)?;
         if normalize_checksum(&expected) != actual {
             return Err(GrokOzempicError::ArtifactValidation(format!(
                 "checksum mismatch for {}: expected {}, got sha256:{}",
