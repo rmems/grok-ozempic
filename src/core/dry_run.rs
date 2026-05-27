@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::core::manifest::DissectManifest;
 use crate::core::selection::TensorClass;
 use crate::error::Result;
-use crate::types::{QuantizationConfig, TensorPrecision, GROK1_TENSOR_TOTAL};
+use crate::types::{GROK1_TENSOR_TOTAL, QuantizationConfig, TensorPrecision};
 
 /// A single planned backend kernel invocation derived from a manifest rule.
 #[derive(Debug, Clone, PartialEq)]
@@ -206,7 +206,9 @@ impl DryRunPlanner {
 
     /// Produce a machine-readable JSON mapping from rule matcher to planned
     /// backend method, suitable for comparison with xai-dissect artifacts.
-    pub fn planned_backend_calls_json(report: &DryRunReport) -> BTreeMap<String, serde_json::Value> {
+    pub fn planned_backend_calls_json(
+        report: &DryRunReport,
+    ) -> BTreeMap<String, serde_json::Value> {
         let mut map = BTreeMap::new();
         for plan in &report.rule_plans {
             map.insert(
