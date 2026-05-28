@@ -39,6 +39,10 @@ pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
 /// [`crate::core::npy::npy_stem_to_tensor_name`]).
 pub const MANIFEST_NAME_CONVENTION_V1: &str = "blk.{L}.{role}.weight";
 
+/// Tensor name convention for xai-dissect structural naming (block_NNN.slot_SS.kind).
+/// Accepted alongside V1 so manifests can target the actual checkpoint tensor names.
+pub const MANIFEST_NAME_CONVENTION_V2: &str = "block_{NNN}.slot_{SS}.{kind}";
+
 /// Top-level manifest document.
 ///
 /// Unknown top-level fields are tolerated for forward compatibility.
@@ -204,10 +208,15 @@ pub fn parse_manifest_bytes(bytes: &[u8], label: &str) -> Result<DissectManifest
         });
     }
 
-    if manifest.model.tensor_name_convention != MANIFEST_NAME_CONVENTION_V1 {
+    if manifest.model.tensor_name_convention != MANIFEST_NAME_CONVENTION_V1
+        && manifest.model.tensor_name_convention != MANIFEST_NAME_CONVENTION_V2
+    {
         return Err(GrokOzempicError::ManifestNameConventionMismatch {
             got: manifest.model.tensor_name_convention.clone(),
-            expected: MANIFEST_NAME_CONVENTION_V1.to_string(),
+            expected: format!(
+                "{} or {}",
+                MANIFEST_NAME_CONVENTION_V1, MANIFEST_NAME_CONVENTION_V2
+            ),
         });
     }
 
@@ -418,10 +427,10 @@ mod tests {
         let manifest = load_manifest(&path).expect("baseline must load");
         assert_eq!(manifest.schema_version, 1);
         assert_eq!(manifest.model.family, "grok-1");
-        assert_eq!(
-            manifest.model.tensor_name_convention,
-            MANIFEST_NAME_CONVENTION_V1
-        );
+        assert!(matches!(
+            manifest.model.tensor_name_convention.as_str(),
+            MANIFEST_NAME_CONVENTION_V1 | MANIFEST_NAME_CONVENTION_V2
+        ));
     }
 
     #[test]

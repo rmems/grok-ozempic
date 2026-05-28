@@ -111,14 +111,18 @@ where
 
 /// Segment-anchored glob matcher.
 ///
-/// `*` matches **exactly one** dotted segment (the text between two `.`
-/// characters, or the text before the first `.` / after the last `.`).
-/// Pattern and name must have the same number of segments; each segment
-/// must equal `*` or match the literal.
+/// Each segment (text between `.` separators) is matched independently.
+/// Within a segment, the following wildcards are supported:
+/// - `*` as a complete segment matches any single segment value.
+/// - `prefix*` matches any segment starting with `prefix`.
+/// - `*suffix` matches any segment ending with `suffix`.
+///
+/// Pattern and name must have the same number of segments.
 ///
 /// Examples:
 /// - `glob_match("blk.*.attn_router.weight", "blk.0.attn_router.weight")` → `true`
 /// - `glob_match("blk.*.attn_router.weight", "blk.0.sub.attn_router.weight")` → `false`
+/// - `glob_match("block_*.slot_11.router", "block_000.slot_11.router")` → `true`
 /// - `glob_match("gate", "blk.0.ffn_gate.weight")` → `false`
 pub fn glob_match(pattern: &str, name: &str) -> bool {
     let p: Vec<&str> = pattern.split('.').collect();
@@ -126,7 +130,23 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
     if p.len() != n.len() {
         return false;
     }
-    p.iter().zip(n.iter()).all(|(a, b)| *a == "*" || a == b)
+    p.iter().zip(n.iter()).all(|(a, b)| segment_match(a, b))
+}
+
+fn segment_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if pattern == value {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return value.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return value.ends_with(suffix);
+    }
+    false
 }
 
 #[cfg(test)]
@@ -196,6 +216,34 @@ mod tests {
     fn glob_rejects_different_segment_counts() {
         assert!(!glob_match("a.b.c", "a.b"));
         assert!(!glob_match("a.b", "a.b.c"));
+    }
+
+    #[test]
+    fn glob_prefix_wildcard_matches_block_index() {
+        assert!(glob_match(
+            "block_*.slot_11.router",
+            "block_000.slot_11.router"
+        ));
+        assert!(glob_match(
+            "block_*.slot_11.router",
+            "block_63.slot_11.router"
+        ));
+    }
+
+    #[test]
+    fn glob_prefix_wildcard_requires_prefix() {
+        assert!(!glob_match(
+            "block_*.slot_11.router",
+            "blk_000.slot_11.router"
+        ));
+    }
+
+    #[test]
+    fn glob_prefix_wildcard_matches_expert_gate() {
+        assert!(glob_match(
+            "block_*.slot_00.moe_expert.gate",
+            "block_000.slot_00.moe_expert.gate"
+        ));
     }
 
     // -------- classify (manifest path) --------

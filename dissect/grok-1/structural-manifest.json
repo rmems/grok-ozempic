@@ -1,0 +1,39 @@
+{
+  "schema": "xai-dissect.manifest",
+  "schema_version": 1,
+  "model": {
+    "family": "grok-1",
+    "source": "xai-org/grok-1",
+    "tensor_name_convention": "block_{NNN}.slot_{SS}.{kind}"
+  },
+  "produced_by": {
+    "tool": "grok-ozempic (non-authoritative reference)",
+    "version": "0.2.0",
+    "commit": null
+  },
+  "defaults": {
+    "precision": "ternary_snn",
+    "gif_threshold": 0.05
+  },
+  "preserve": [
+    { "name": "block_*.slot_11.router", "reason": "routing-critical; quantization changes expert selection" },
+    { "name": "block_*.slot_07.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_08.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_09.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_10.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "final_norm.slot_00.final_norm", "reason": "normalization-critical; must remain FP32" }
+  ],
+  "fp16": [
+    { "name": "embedding.slot_00.token_embedding", "reason": "SAAQ candidate; only f32 embedding eligible for pilot quantization" }
+  ],
+  "ternary_candidates": [
+    { "name": "block_*.slot_00.moe_expert.gate" },
+    { "name": "block_*.slot_01.moe_expert.down" },
+    { "name": "block_*.slot_02.moe_expert.up" },
+    { "name": "block_*.slot_03.attn_proj_i8.narrow" },
+    { "name": "block_*.slot_04.attn_proj_i8.model_width" },
+    { "name": "block_*.slot_05.attn_proj_i8.model_width" },
+    { "name": "block_*.slot_06.attn_proj_i8.narrow" }
+  ],
+  "blocks": []
+}
