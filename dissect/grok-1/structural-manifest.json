@@ -34,5 +34,6 @@
     { "name": "block_*.slot_05.attn_proj_i8.model_width" },
     { "name": "block_*.slot_06.attn_proj_i8.narrow" }
   ],
+  "_i8_streaming_note": "These 7 patterns (plus the 3 moe) cover the 448 i8 tensors from xai-dissect inventory for *alignment verification only* (see grok1_inventory.rs NOTE and alignment.rs). Current stream.rs filters SourceDtype::Other (raw ckpt has no i8; parse_safetensors_dtype + npy only F32/F16/BF16). int8 enter via xai-dissect exports + wrap_existing_int8_* in src/artifact.rs + report validation. Do not remove patterns — would regress 770-tensor full coverage + classify_full_inventory test. Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.",
   "blocks": []
 }

@@ -378,6 +378,10 @@ fn quantize_safetensors_entry(
 
     let dtype = parse_safetensors_dtype(view.dtype());
     if dtype == SourceDtype::Other {
+        // i8/Other tensors from xai-dissect inventory are covered by structural manifest for alignment
+        // (see grok1_inventory.rs:NOTE and structural-manifest.json _i8_streaming_note); they arrive
+        // via artifact wrapping (wrap_existing_int8_*), not this float-only stream path.
+        // Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.
         return Err(GrokOzempicError::InvalidConfig(format!(
             "tensor {} has unsupported dtype",
             entry.tensor_name
@@ -503,6 +507,8 @@ fn build_manifest_safetensors(
         for (name, view) in tensors.tensors() {
             let dtype = parse_safetensors_dtype(view.dtype());
             if dtype == SourceDtype::Other {
+                // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
+                // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
                 continue;
             }
             let (_class, precision, gif_threshold) =
@@ -530,6 +536,9 @@ fn build_manifest_npy(
         let npy = MmapNpy::map_path(path)?;
         let dtype = npy_dtype_to_source(npy.dtype());
         if dtype == SourceDtype::Other {
+            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
+            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
+            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
             continue;
         }
         let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {

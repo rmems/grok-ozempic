@@ -49,6 +49,17 @@ impl Grok1Inventory {
             kind: "final_norm",
         });
 
+        // NOTE (addressing Codex review on PR #26): The 448 i8 tensors (192 moe_expert + 256 attn_proj_i8)
+        // are marked TernaryCandidate here + via the structural manifest globs to match the xai-dissect
+        // structural inventory *exactly*. Alignment + classify_full_inventory tests require 0 defaults
+        // and exact 448 ternary for full 770 coverage. The *streaming* path (build_manifest_* in stream.rs)
+        // skips SourceDtype::Other (see parse_safetensors_dtype + npy_dtype_to_source; only F32/F16/BF16).
+        // i8 data enters via xai-dissect "exports" + wrapping in src/artifact.rs (wrap_existing_int8_expert,
+        // wrap_existing_int8_unknown etc.) + report validation (reports/validator.rs etc.).
+        // This manifest declares *logical classification per xai-dissect*, not "all these will be
+        // float-streamed from raw ckpt". Removing the i8 patterns would regress the purpose of this PR
+        // (full inventory alignment verification). See also structural-manifest.json _i8_streaming_note.
+        // Kilo agent xAI/Grok Build 0.1
         for blk in 0..GROK1_BLOCKS {
             let b = blk;
 
