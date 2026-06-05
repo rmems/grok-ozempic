@@ -77,17 +77,17 @@ impl DryRunReport {
 pub struct DryRunPlanner;
 
 impl DryRunPlanner {
-/// Walk every classification rule in the manifest and produce a
-/// `DryRunReport` mapping each rule to its planned backend kernel call.
-///
-/// When the manifest uses the structural (V2) naming convention, per-rule
-/// tensor counts are taken exactly from `Grok1Inventory` (so e.g. the
-/// `block_*.slot_11.router` rule correctly reports 64 instead of the old
-/// heuristic's 8). For legacy V1 manifests the original heuristic is used.
-///
-/// When `blocks` are present in the manifest, the planner also accounts
-/// for per-block default tensors that fall through to the default
-/// precision tier.
+    /// Walk every classification rule in the manifest and produce a
+    /// `DryRunReport` mapping each rule to its planned backend kernel call.
+    ///
+    /// When the manifest uses the structural (V2) naming convention, per-rule
+    /// tensor counts are taken exactly from `Grok1Inventory` (so e.g. the
+    /// `block_*.slot_11.router` rule correctly reports 64 instead of the old
+    /// heuristic's 8). For legacy V1 manifests the original heuristic is used.
+    ///
+    /// When `blocks` are present in the manifest, the planner also accounts
+    /// for per-block default tensors that fall through to the default
+    /// precision tier.
     pub fn plan(manifest: &DissectManifest, config: &QuantizationConfig) -> Result<DryRunReport> {
         let mut rule_plans = Vec::new();
         let mut by_method: BTreeMap<String, usize> = BTreeMap::new();
@@ -315,7 +315,10 @@ mod tests {
             .find(|e| e.name.contains("router"))
             .expect("structural manifest has router preserve rule");
         let count = estimate_tensor_count_for_manifest(m, &router_rule.name);
-        assert_eq!(count, 64, "router rule should count 64 via inventory, got {count}");
+        assert_eq!(
+            count, 64,
+            "router rule should count 64 via inventory, got {count}"
+        );
     }
 
     #[test]
