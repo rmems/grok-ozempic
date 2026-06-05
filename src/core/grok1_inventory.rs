@@ -269,7 +269,7 @@ mod tests {
             let count = inv
                 .tensors
                 .iter()
-                .filter(|t| t.block == Some(blk as u32))
+                .filter(|t| t.block == Some(blk))
                 .count();
             assert_eq!(count, 12, "block {blk} should have 12 tensors, got {count}");
         }
