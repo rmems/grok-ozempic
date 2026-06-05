@@ -28,10 +28,9 @@ impl Grok1Inventory {
 
         tensors.push(InventoryTensor {
             structural_name: "embedding.slot_00.token_embedding".into(),
-            expected_class: TensorClass::Fp16 {
-                reason: Some(
-                    "SAAQ candidate; only f32 embedding eligible for pilot quantization".into(),
-                ),
+            expected_class: TensorClass::TernaryCandidate {
+                rank: None,
+                gif_threshold: None,
             },
             dtype: "f32",
             block: None,
@@ -213,10 +212,10 @@ mod tests {
             preserve, 321,
             "321 preserve: 64 routers + 256 block_norms + 1 final_norm"
         );
-        assert_eq!(fp16, 1, "1 fp16: token_embedding");
+        assert_eq!(fp16, 0, "no fp16 in structural manifest (embedding is ternary candidate per first-quantization-target.md)");
         assert_eq!(
-            ternary, 448,
-            "448 ternary: 192 MoE expert + 256 attn projections"
+            ternary, 449,
+            "449 ternary: 192 MoE expert + 256 attn projections + 1 token_embedding (first SAAQ target)"
         );
         assert_eq!(default, 0, "no tensors should fall to default");
     }

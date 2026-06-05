@@ -23,10 +23,9 @@
     { "name": "block_*.slot_10.block_norm", "reason": "normalization-critical; must remain FP32" },
     { "name": "final_norm.slot_00.final_norm", "reason": "normalization-critical; must remain FP32" }
   ],
-  "fp16": [
-    { "name": "embedding.slot_00.token_embedding", "reason": "SAAQ candidate; only f32 embedding eligible for pilot quantization" }
-  ],
+  "fp16": [],
   "ternary_candidates": [
+    { "name": "embedding.slot_00.token_embedding", "reason": "first SAAQ quantization target per docs/first-quantization-target.md; must flow through ternary path (candidate_saaq_embedding)" },
     { "name": "block_*.slot_00.moe_expert.gate" },
     { "name": "block_*.slot_01.moe_expert.down" },
     { "name": "block_*.slot_02.moe_expert.up" },

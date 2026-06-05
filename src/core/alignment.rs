@@ -274,8 +274,8 @@ mod tests {
             coverage.unclassified
         );
         assert_eq!(*coverage.by_class.get("preserve").unwrap_or(&0), 321);
-        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), 1);
-        assert_eq!(*coverage.by_class.get("ternary").unwrap_or(&0), 448);
+        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), 0);
+        assert_eq!(*coverage.by_class.get("ternary").unwrap_or(&0), 449);
         assert_eq!(*coverage.by_class.get("default").unwrap_or(&0), 0);
     }
 
@@ -284,7 +284,7 @@ mod tests {
         let m = embedded_grok1_structural_manifest();
         assert_eq!(m.model.family, "grok-1");
         assert_eq!(m.preserve.len(), 6);
-        assert_eq!(m.fp16.len(), 1);
-        assert_eq!(m.ternary_candidates.len(), 7);
+        assert_eq!(m.fp16.len(), 0);
+        assert_eq!(m.ternary_candidates.len(), 8);
     }
 }
