@@ -145,7 +145,16 @@ impl DryRunPlanner {
                 gif_threshold: entry.gif_threshold,
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "quantize_f32";
+            // For V2 structural manifests, some ternary_candidates are actually i8 tensors
+            // (the 192 moe_expert + 256 attn_proj_i8 from Grok1Inventory). Map them to the
+            // documented artifact wrap paths instead of f32 quantize (addresses Codex P2).
+            let method = if entry.name.contains("moe_expert") {
+                "wrap_existing_int8_expert"
+            } else if entry.name.contains("attn_proj_i8") {
+                "wrap_existing_int8_unknown"
+            } else {
+                "quantize_f32"
+            };
             let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
