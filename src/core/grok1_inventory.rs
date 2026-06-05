@@ -266,11 +266,7 @@ mod tests {
             "768 block tensors (64 blocks × 12)"
         );
         for blk in 0..GROK1_BLOCKS {
-            let count = inv
-                .tensors
-                .iter()
-                .filter(|t| t.block == Some(blk))
-                .count();
+            let count = inv.tensors.iter().filter(|t| t.block == Some(blk)).count();
             assert_eq!(count, 12, "block {blk} should have 12 tensors, got {count}");
         }
     }
