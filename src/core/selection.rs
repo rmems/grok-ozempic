@@ -125,12 +125,19 @@ where
 /// - `glob_match("block_*.slot_11.router", "block_000.slot_11.router")` → `true`
 /// - `glob_match("gate", "blk.0.ffn_gate.weight")` → `false`
 pub fn glob_match(pattern: &str, name: &str) -> bool {
-    let p: Vec<&str> = pattern.split('.').collect();
-    let n: Vec<&str> = name.split('.').collect();
-    if p.len() != n.len() {
-        return false;
+    let mut p_iter = pattern.split('.');
+    let mut n_iter = name.split('.');
+    loop {
+        match (p_iter.next(), n_iter.next()) {
+            (Some(p), Some(n)) => {
+                if !segment_match(p, n) {
+                    return false;
+                }
+            }
+            (None, None) => return true,
+            _ => return false,
+        }
     }
-    p.iter().zip(n.iter()).all(|(a, b)| segment_match(a, b))
 }
 
 fn segment_match(pattern: &str, value: &str) -> bool {

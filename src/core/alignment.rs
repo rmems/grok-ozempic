@@ -119,7 +119,7 @@ pub fn check_alignment(
             TensorClass::Default => default_act += 1,
         }
 
-        if expected == &actual {
+        if std::mem::discriminant(expected) == std::mem::discriminant(&actual) {
             matched += 1;
         } else {
             mismatched += 1;
@@ -176,7 +176,11 @@ pub fn classify_full_inventory(
             TensorClass::TernaryCandidate { .. } => "ternary",
             TensorClass::Default => "default",
         };
-        *by_class.entry(label.to_string()).or_insert(0) += 1;
+        if let Some(count) = by_class.get_mut(label) {
+            *count += 1;
+        } else {
+            by_class.insert(label.to_string(), 1);
+        }
         total_classified += 1;
         if matches!(class, TensorClass::Default) {
             unclassified.push(t.structural_name.clone());
