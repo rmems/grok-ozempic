@@ -24,7 +24,9 @@ use safetensors::SafeTensors;
 
 use crate::{
     core::{
-        manifest::{DissectManifest, embedded_grok1_baseline, load_manifest, MANIFEST_NAME_CONVENTION_V2},
+        manifest::{
+            DissectManifest, MANIFEST_NAME_CONVENTION_V2, embedded_grok1_baseline, load_manifest,
+        },
         npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
         precision::decide as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
