@@ -18,10 +18,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
+        # rustfmt + clippy components are required for the explicit "Format" and "Clippy" steps below.
+        # Without them, `cargo fmt` / `cargo clippy` subcommands are unavailable and the job fails
+        # with exit 101 (this was the root cause of the PR #26 "fmt / clippy / test" failure).
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
