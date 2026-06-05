@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::core::manifest::DissectManifest;
+use crate::core::grok1_inventory::Grok1Inventory;
+use crate::core::manifest::{DissectManifest, MANIFEST_NAME_CONVENTION_V2};
 use crate::core::selection::TensorClass;
 use crate::error::Result;
 use crate::types::{GROK1_TENSOR_TOTAL, QuantizationConfig, TensorPrecision};
@@ -79,6 +80,11 @@ impl DryRunPlanner {
     /// Walk every classification rule in the manifest and produce a
     /// `DryRunReport` mapping each rule to its planned backend kernel call.
     ///
+    /// When the manifest uses the structural (V2) naming convention, per-rule
+    /// tensor counts are taken exactly from `Grok1Inventory` (so e.g. the
+    /// `block_*.slot_11.router` rule correctly reports 64 instead of the old
+    /// heuristic's 8). For legacy V1 manifests the original heuristic is used.
+    ///
     /// When `blocks` are present in the manifest, the planner also accounts
     /// for per-block default tensors that fall through to the default
     /// precision tier.
@@ -97,7 +103,7 @@ impl DryRunPlanner {
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
             let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count(&entry.name);
+            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -119,7 +125,7 @@ impl DryRunPlanner {
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
             let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count(&entry.name);
+            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -139,8 +145,17 @@ impl DryRunPlanner {
                 gif_threshold: entry.gif_threshold,
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "quantize_f32";
-            let estimated = estimate_tensor_count(&entry.name);
+            // For V2 structural manifests, some ternary_candidates are actually i8 tensors
+            // (the 192 moe_expert + 256 attn_proj_i8 from Grok1Inventory). Map them to the
+            // documented artifact wrap paths instead of f32 quantize (addresses Codex P2).
+            let method = if entry.name.contains("moe_expert") {
+                "wrap_existing_int8_expert"
+            } else if entry.name.contains("attn_proj_i8") {
+                "wrap_existing_int8_unknown"
+            } else {
+                "quantize_f32"
+            };
+            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -260,17 +275,74 @@ fn resolve_precision(
 }
 
 /// Heuristically estimate how many concrete tensors a single glob pattern
-/// matches in the Grok-1 inventory.
+/// matches in the Grok-1 inventory (legacy V1 `blk.*` naming convention).
 ///
-/// This is a best-effort estimate. Exact matching requires loading a real
-/// checkpoint and running [`classify`](crate::core::selection::classify) on
-/// every tensor name.
+/// For the xai-dissect structural manifest (V2 `block_*.slot_*` convention)
+/// the planner uses exact counts from [`Grok1Inventory::count_matching_glob`]
+/// instead, so that dry-run coverage reports are accurate for the 770-tensor
+/// inventory (e.g. 64 for `block_*.slot_11.router`).
+///
+/// This legacy heuristic is retained only for backward compatibility with
+/// older V1 manifests. Exact matching for V2 is always preferred.
 fn estimate_tensor_count(pattern: &str) -> usize {
     // Wildcard patterns like "blk.*.ffn_up.weight" could match up to
     // GROK1_BLOCK_COUNT tensors (one per block).  Exact names count as 1.
+    // This is the legacy V1 heuristic. For structural V2 manifests the
+    // planner uses exact counts from Grok1Inventory instead (see
+    // estimate_tensor_count_for_manifest).
     let star_count = pattern.matches('*').count();
     match star_count {
         0 => 1,
         _ => 8 * star_count, // rough heuristic: each wildcard ~8x
+    }
+}
+
+fn estimate_tensor_count_for_manifest(manifest: &DissectManifest, pattern: &str) -> usize {
+    if manifest.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
+        Grok1Inventory::full().count_matching_glob(pattern)
+    } else {
+        estimate_tensor_count(pattern)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::alignment::embedded_grok1_structural_manifest;
+    use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
+    use crate::types::GROK1_TENSOR_TOTAL;
+
+    #[test]
+    fn structural_manifest_router_rule_counts_exactly_64() {
+        let m = embedded_grok1_structural_manifest();
+        assert_eq!(m.model.tensor_name_convention, MANIFEST_NAME_CONVENTION_V2);
+
+        // The single router rule must count 64 (one per block), not the legacy 8.
+        let router_rule = m
+            .preserve
+            .iter()
+            .find(|e| e.name.contains("router"))
+            .expect("structural manifest has router preserve rule");
+        let count = estimate_tensor_count_for_manifest(m, &router_rule.name);
+        assert_eq!(
+            count, 64,
+            "router rule should count 64 via inventory, got {count}"
+        );
+    }
+
+    #[test]
+    fn structural_manifest_dry_run_covers_all_770_or_reports_reasonable_default() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan with structural manifest");
+
+        // With exact counts, covered_by_rules should be much closer to 770 than the old
+        // heuristic (which produced ~8 per rule + 672+ in <defaults>).
+        let covered = report.coverage.covered_by_rules;
+        assert!(
+            covered >= 700,
+            "structural manifest dry-run should cover most of 770 via exact globs, got {covered}"
+        );
+        assert_eq!(report.coverage.inventory_total, GROK1_TENSOR_TOTAL);
     }
 }

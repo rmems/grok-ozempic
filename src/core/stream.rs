@@ -24,7 +24,9 @@ use safetensors::SafeTensors;
 
 use crate::{
     core::{
-        manifest::{DissectManifest, embedded_grok1_baseline, load_manifest},
+        manifest::{
+            DissectManifest, MANIFEST_NAME_CONVENTION_V2, embedded_grok1_baseline, load_manifest,
+        },
         npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
         precision::decide as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
@@ -107,13 +109,27 @@ pub const MANIFEST_ENV_VAR: &str = "GROK_OZEMPIC_MANIFEST";
 ///    [`crate::core::selection::classify`].
 fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifest>> {
     if let Some(path) = &config.manifest_path {
-        return Ok(Some(load_manifest(path)?));
+        let m = load_manifest(path)?;
+        if m.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
+            return Err(GrokOzempicError::ManifestNameConventionMismatch {
+                got: m.model.tensor_name_convention.clone(),
+                expected: "V1 only for runtime quantization (block_{NNN}.slot_{SS}.{kind} / V2 structural naming is accepted only for embedded alignment verification in core/alignment.rs until checkpoint-to-structural name translation is added in npy/stream build_manifest_*; see Codex P1 review on PR #26)".to_string(),
+            });
+        }
+        return Ok(Some(m));
     }
     if let Ok(env_path) = std::env::var(MANIFEST_ENV_VAR)
         && !env_path.is_empty()
     {
         let p = std::path::PathBuf::from(env_path);
-        return Ok(Some(load_manifest(&p)?));
+        let m = load_manifest(&p)?;
+        if m.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
+            return Err(GrokOzempicError::ManifestNameConventionMismatch {
+                got: m.model.tensor_name_convention.clone(),
+                expected: "V1 only for runtime quantization (block_{NNN}.slot_{SS}.{kind} / V2 structural naming is accepted only for embedded alignment verification in core/alignment.rs until checkpoint-to-structural name translation is added in npy/stream build_manifest_*; see Codex P1 review on PR #26)".to_string(),
+            });
+        }
+        return Ok(Some(m));
     }
     if config.use_embedded_baseline {
         // Embedded baseline: clone once so callers own a DissectManifest.
@@ -364,6 +380,10 @@ fn quantize_safetensors_entry(
 
     let dtype = parse_safetensors_dtype(view.dtype());
     if dtype == SourceDtype::Other {
+        // i8/Other tensors from xai-dissect inventory are covered by structural manifest for alignment
+        // (see grok1_inventory.rs:NOTE and structural-manifest.json _i8_streaming_note); they arrive
+        // via artifact wrapping (wrap_existing_int8_*), not this float-only stream path.
+        // Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.
         return Err(GrokOzempicError::InvalidConfig(format!(
             "tensor {} has unsupported dtype",
             entry.tensor_name
@@ -489,6 +509,8 @@ fn build_manifest_safetensors(
         for (name, view) in tensors.tensors() {
             let dtype = parse_safetensors_dtype(view.dtype());
             if dtype == SourceDtype::Other {
+                // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
+                // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
                 continue;
             }
             let (_class, precision, gif_threshold) =
@@ -516,6 +538,9 @@ fn build_manifest_npy(
         let npy = MmapNpy::map_path(path)?;
         let dtype = npy_dtype_to_source(npy.dtype());
         if dtype == SourceDtype::Other {
+            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
+            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
+            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
             continue;
         }
         let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {

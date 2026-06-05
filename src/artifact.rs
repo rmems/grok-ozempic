@@ -454,25 +454,25 @@ fn push_block_entries(
         ),
         (
             3,
-            "unknown_dense.narrow",
+            "attn_proj_i8.narrow",
             vec![GROK1_HIDDEN_DIM, 1024],
             ATTN_NARROW_BYTES,
         ),
         (
             4,
-            "unknown_dense.model_width",
+            "attn_proj_i8.model_width",
             vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
             ATTN_MODEL_WIDTH_BYTES,
         ),
         (
             5,
-            "unknown_dense.model_width",
+            "attn_proj_i8.model_width",
             vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
             ATTN_MODEL_WIDTH_BYTES,
         ),
         (
             6,
-            "unknown_dense.narrow",
+            "attn_proj_i8.narrow",
             vec![GROK1_HIDDEN_DIM, 1024],
             ATTN_NARROW_BYTES,
         ),
@@ -1087,16 +1087,16 @@ fn build_validation_report(
                 ),
             ));
         }
-        let unknown_dense_count = block_entries
+        let attn_proj_i8_count = block_entries
             .iter()
-            .filter(|entry| entry.kind.starts_with("unknown_dense"))
+            .filter(|entry| entry.kind.starts_with("attn_proj_i8"))
             .count();
-        if unknown_dense_count != GROK1_UNKNOWN_DENSE_PER_BLOCK {
+        if attn_proj_i8_count != GROK1_UNKNOWN_DENSE_PER_BLOCK {
             failures.push(failure(
                 "missing_tensor",
                 None,
                 format!(
-                    "block_{block:03} expected {GROK1_UNKNOWN_DENSE_PER_BLOCK} unknown dense tensors, got {unknown_dense_count}"
+                    "block_{block:03} expected {GROK1_UNKNOWN_DENSE_PER_BLOCK} attention projection (attn_proj_i8) tensors, got {attn_proj_i8_count}"
                 ),
             ));
         }
@@ -1227,9 +1227,9 @@ fn planned_warnings() -> Vec<WarningRecord> {
             message: "expert slot 02 is structurally preserved but projection label remains unresolved".to_string(),
         },
         WarningRecord {
-            category: "unknown_dense_slot".to_string(),
+            category: "attn_proj_i8_slot".to_string(),
             tensor: Some("*.slot_03/04/05/06".to_string()),
-            message: "dense attention slots are wrapped as existing int8 payloads unless shape/dtype/count drift occurs".to_string(),
+            message: "attention projection slots (attn_proj_i8.*) are wrapped as existing int8 payloads unless shape/dtype/count drift occurs".to_string(),
         },
     ]
 }

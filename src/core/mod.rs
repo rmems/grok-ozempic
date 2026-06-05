@@ -1,5 +1,7 @@
+pub mod alignment;
 pub mod backend;
 pub mod dry_run;
+pub mod grok1_inventory;
 pub mod manifest;
 pub mod npy;
 pub mod ozempic;

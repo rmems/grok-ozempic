@@ -1,0 +1,39 @@
+{
+  "schema": "xai-dissect.manifest",
+  "schema_version": 1,
+  "model": {
+    "family": "grok-1",
+    "source": "xai-org/grok-1",
+    "tensor_name_convention": "block_{NNN}.slot_{SS}.{kind}"
+  },
+  "produced_by": {
+    "tool": "grok-ozempic (non-authoritative reference)",
+    "version": "0.2.0",
+    "commit": null
+  },
+  "defaults": {
+    "precision": "ternary_snn",
+    "gif_threshold": 0.05
+  },
+  "preserve": [
+    { "name": "block_*.slot_11.router", "reason": "routing-critical; quantization changes expert selection" },
+    { "name": "block_*.slot_07.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_08.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_09.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "block_*.slot_10.block_norm", "reason": "normalization-critical; must remain FP32" },
+    { "name": "final_norm.slot_00.final_norm", "reason": "normalization-critical; must remain FP32" }
+  ],
+  "fp16": [],
+  "ternary_candidates": [
+    { "name": "embedding.slot_00.token_embedding", "reason": "first SAAQ quantization target per docs/first-quantization-target.md; must flow through ternary path (candidate_saaq_embedding)" },
+    { "name": "block_*.slot_00.moe_expert.gate" },
+    { "name": "block_*.slot_01.moe_expert.down" },
+    { "name": "block_*.slot_02.moe_expert.up" },
+    { "name": "block_*.slot_03.attn_proj_i8.narrow" },
+    { "name": "block_*.slot_04.attn_proj_i8.model_width" },
+    { "name": "block_*.slot_05.attn_proj_i8.model_width" },
+    { "name": "block_*.slot_06.attn_proj_i8.narrow" }
+  ],
+  "_i8_streaming_note": "These 7 patterns (plus the 3 moe) cover the 448 i8 tensors from xai-dissect inventory for *alignment verification only* (see grok1_inventory.rs NOTE and alignment.rs). Current stream.rs filters SourceDtype::Other (raw ckpt has no i8; parse_safetensors_dtype + npy only F32/F16/BF16). int8 enter via xai-dissect exports + wrap_existing_int8_* in src/artifact.rs + report validation. Do not remove patterns — would regress 770-tensor full coverage + classify_full_inventory test. Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.",
+  "blocks": []
+}
