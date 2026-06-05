@@ -1,4 +1,4 @@
-use crate::core::selection::{glob_match, TensorClass};
+use crate::core::selection::{TensorClass, glob_match};
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
 pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
