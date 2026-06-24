@@ -1,18 +1,20 @@
-FROM rust:1.85-slim AS builder
+FROM rust:1.96-slim AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 COPY dissect/ dissect/
-RUN cargo build --release --all-features
+RUN cargo build --release --all-features --locked
 
-FROM rust:1.85-slim AS tester
+FROM rust:1.96-slim AS tester
 WORKDIR /app
 COPY . .
-RUN cargo test --all-targets --all-features && \
-    cargo clippy --all-targets --all-features -- -D warnings && \
+RUN cargo test --all-targets --all-features --locked && \
+    cargo clippy --all-targets --all-features --locked -- -D warnings && \
     cargo fmt --all -- --check
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --shell /bin/bash appuser
 COPY --from=builder /app/target/release/grok-ozempic /usr/local/bin/
+USER appuser
 ENTRYPOINT ["grok-ozempic"]

@@ -3,6 +3,7 @@ services:
     build:
       context: .
       target: tester
+    command: bash -c "cargo test --all-targets --all-features --locked && cargo clippy --all-targets --all-features --locked -- -D warnings && cargo fmt --all -- --check"
   app:
     build:
       context: .

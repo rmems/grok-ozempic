@@ -18,18 +18,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5 # 93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Install Rust
         # rustfmt + clippy components are required for the explicit "Format" and "Clippy" steps below.
         # Without them, `cargo fmt` / `cargo clippy` subcommands are unavailable and the job fails
         # with exit 101 (this was the root cause of the PR #26 "fmt / clippy / test" failure).
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@stable # 67ef31d5b988238dd797d409d6f9574278e20537
         with:
           components: rustfmt, clippy
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2 # 42dc69e1aa15d09112580998cf2ef0119e2e91ae
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -53,13 +53,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5 # 93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3 # 8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Build tester image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v6 # 10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           target: tester
@@ -67,7 +67,7 @@ jobs:
           tags: grok-ozempic:test
 
       - name: Build runtime image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v6 # 10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           target: runtime
@@ -80,10 +80,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5 # 93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@stable # 67ef31d5b988238dd797d409d6f9574278e20537
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
