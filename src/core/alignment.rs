@@ -343,8 +343,10 @@ mod tests {
 
         for t in &inv.tensors {
             if t.kind == "router" {
+                let mut matched = false;
                 for plan in &report.rule_plans {
                     if glob_match(&plan.matcher, &t.structural_name) {
+                        matched = true;
                         assert!(
                             matches!(plan.class, TensorClass::Preserve { .. }),
                             "router tensor '{}' should be Preserve, got {:?}",
@@ -353,6 +355,11 @@ mod tests {
                         );
                     }
                 }
+                assert!(
+                    matched,
+                    "router tensor '{}' was not matched by any manifest rule",
+                    t.structural_name
+                );
             }
         }
     }
@@ -369,8 +376,10 @@ mod tests {
 
         for t in &inv.tensors {
             if t.kind.starts_with("moe_expert") || t.kind.starts_with("attn_proj_i8") {
+                let mut matched = false;
                 for plan in &report.rule_plans {
                     if glob_match(&plan.matcher, &t.structural_name) {
+                        matched = true;
                         assert!(
                             matches!(plan.class, TensorClass::TernaryCandidate { .. }),
                             "expert tensor '{}' should be TernaryCandidate, got {:?}",
@@ -379,6 +388,11 @@ mod tests {
                         );
                     }
                 }
+                assert!(
+                    matched,
+                    "expert tensor '{}' was not matched by any manifest rule",
+                    t.structural_name
+                );
             }
         }
     }
@@ -436,14 +450,17 @@ mod tests {
         let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
         let inv = Grok1Inventory::full();
 
+        let has_defaults = report.rule_plans.iter().any(|p| p.matcher == "<defaults>");
+
         for t in &inv.tensors {
-            let matched = report
+            let matched_explicit = report
                 .rule_plans
                 .iter()
+                .filter(|p| p.matcher != "<defaults>")
                 .any(|p| glob_match(&p.matcher, &t.structural_name));
             assert!(
-                matched,
-                "inventory tensor '{}' not matched by any manifest rule",
+                matched_explicit || has_defaults,
+                "inventory tensor '{}' not matched by any manifest rule (no explicit match and no <defaults> fallback)",
                 t.structural_name
             );
         }

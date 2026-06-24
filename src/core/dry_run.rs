@@ -421,12 +421,19 @@ mod tests {
         let config = QuantizationConfig::default();
         let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
 
-        if let Some(default_plan) = report.rule_plans.iter().find(|p| p.matcher == "<defaults>") {
+        let default_plan = report.rule_plans.iter().find(|p| p.matcher == "<defaults>");
+        if let Some(plan) = default_plan {
             assert!(
-                default_plan.kernel_method == "quantize_f32"
-                    || default_plan.kernel_method == "convert_f32_to_f16_bytes",
+                plan.kernel_method == "quantize_f32"
+                    || plan.kernel_method == "convert_f32_to_f16_bytes",
                 "default rule should use quantize_f32 or convert_f32_to_f16_bytes, got {}",
-                default_plan.kernel_method
+                plan.kernel_method
+            );
+        } else {
+            assert_eq!(
+                report.coverage.inventory_coverage,
+                CoverageStatus::Full,
+                "no <defaults> rule should only be absent when coverage is Full"
             );
         }
     }
