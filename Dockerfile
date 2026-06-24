@@ -7,6 +7,7 @@ RUN cargo build --release --all-features --locked
 
 FROM rust:1.96-slim AS tester
 WORKDIR /app
+RUN rustup component add clippy rustfmt
 COPY . .
 RUN cargo test --all-targets --all-features --locked && \
     cargo clippy --all-targets --all-features --locked -- -D warnings && \
