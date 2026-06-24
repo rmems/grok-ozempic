@@ -48,6 +48,9 @@ pub enum GrokOzempicError {
 
     #[error("artifact validation error: {0}")]
     ArtifactValidation(String),
+
+    #[error("backend not available: {0}")]
+    BackendNotAvailable(String),
 }
 
 pub type Result<T> = std::result::Result<T, GrokOzempicError>;

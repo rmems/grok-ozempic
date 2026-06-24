@@ -345,4 +345,128 @@ mod tests {
         );
         assert_eq!(report.coverage.inventory_total, GROK1_TENSOR_TOTAL);
     }
+
+    #[test]
+    fn preserve_rules_map_to_convert_f32_to_f16_bytes() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        for plan in &report.rule_plans {
+            if matches!(plan.class, TensorClass::Preserve { .. }) {
+                assert_eq!(
+                    plan.kernel_method, "convert_f32_to_f16_bytes",
+                    "preserve rule '{}' should use convert_f32_to_f16_bytes, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_moe_expert_rules_map_to_wrap_int8() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        for plan in &report.rule_plans {
+            if plan.matcher.contains("moe_expert") {
+                assert_eq!(
+                    plan.kernel_method, "wrap_existing_int8_expert",
+                    "moe_expert rule '{}' should use wrap_existing_int8_expert, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_attn_proj_i8_rules_map_to_wrap_int8() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        for plan in &report.rule_plans {
+            if plan.matcher.contains("attn_proj_i8") {
+                assert_eq!(
+                    plan.kernel_method, "wrap_existing_int8_unknown",
+                    "attn_proj_i8 rule '{}' should use wrap_existing_int8_unknown, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_embedding_maps_to_quantize_f32() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        let embedding_plan = report
+            .rule_plans
+            .iter()
+            .find(|p| p.matcher.contains("token_embedding"))
+            .expect("embedding rule should exist");
+        assert_eq!(
+            embedding_plan.kernel_method, "quantize_f32",
+            "embedding should use quantize_f32, got {}",
+            embedding_plan.kernel_method
+        );
+    }
+
+    #[test]
+    fn default_rule_uses_manifest_default_precision() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        if let Some(default_plan) = report.rule_plans.iter().find(|p| p.matcher == "<defaults>") {
+            assert!(
+                default_plan.kernel_method == "quantize_f32"
+                    || default_plan.kernel_method == "convert_f32_to_f16_bytes",
+                "default rule should use quantize_f32 or convert_f32_to_f16_bytes, got {}",
+                default_plan.kernel_method
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_full_when_rules_cover_all_770() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Full,
+            "structural manifest should produce CoverageStatus::Full"
+        );
+    }
+
+    #[test]
+    fn by_method_sums_to_backend_handled_total() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+
+        let sum: usize = report.coverage.by_method.values().sum();
+        assert_eq!(
+            sum, report.backend_handled_total,
+            "by_method values should sum to backend_handled_total"
+        );
+    }
+
+    #[test]
+    fn planned_backend_calls_json_contains_coverage_key() {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let json = DryRunPlanner::planned_backend_calls_json(&report);
+
+        assert!(
+            json.contains_key("__coverage__"),
+            "JSON output should contain __coverage__ key"
+        );
+    }
 }

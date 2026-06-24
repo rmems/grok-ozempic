@@ -1,0 +1,11 @@
+target/
+.git/
+.idea/
+.beads/
+.claude/
+.kilo/
+.vscode/
+reports/
+docs/
+*.md
+!README.md
