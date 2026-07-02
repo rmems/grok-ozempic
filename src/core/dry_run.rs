@@ -239,31 +239,7 @@ impl DryRunPlanner {
         let mut by_method: BTreeMap<String, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
 
-        plan_preserve_rules(
-            inventory,
-            manifest,
-            config,
-            &mut rule_plans,
-            &mut by_method,
-            &mut covered_by_rules,
-        )?;
-        plan_fp16_rules(
-            inventory,
-            manifest,
-            config,
-            &mut rule_plans,
-            &mut by_method,
-            &mut covered_by_rules,
-        )?;
-        plan_ternary_rules(
-            inventory,
-            manifest,
-            config,
-            &mut rule_plans,
-            &mut by_method,
-            &mut covered_by_rules,
-        )?;
-        plan_default_rule(
+        Self::plan_all_rules(
             inventory,
             manifest,
             config,
@@ -273,7 +249,6 @@ impl DryRunPlanner {
         )?;
 
         let inventory_coverage = calculate_coverage(covered_by_rules, inventory.total_tensors());
-
         let backend_handled_total = by_method.values().sum();
 
         Ok(DryRunReport {
@@ -286,6 +261,48 @@ impl DryRunPlanner {
             },
             backend_handled_total,
         })
+    }
+
+    fn plan_all_rules<I: ModelInventory>(
+        inventory: &I,
+        manifest: &DissectManifest,
+        config: &QuantizationConfig,
+        rule_plans: &mut Vec<PlannedKernelCall>,
+        by_method: &mut BTreeMap<String, usize>,
+        covered_by_rules: &mut usize,
+    ) -> Result<()> {
+        plan_preserve_rules(
+            inventory,
+            manifest,
+            config,
+            rule_plans,
+            by_method,
+            covered_by_rules,
+        )?;
+        plan_fp16_rules(
+            inventory,
+            manifest,
+            config,
+            rule_plans,
+            by_method,
+            covered_by_rules,
+        )?;
+        plan_ternary_rules(
+            inventory,
+            manifest,
+            config,
+            rule_plans,
+            by_method,
+            covered_by_rules,
+        )?;
+        plan_default_rule(
+            inventory,
+            manifest,
+            config,
+            rule_plans,
+            by_method,
+            covered_by_rules,
+        )
     }
 
     /// Produce a machine-readable JSON mapping from rule matcher to planned
