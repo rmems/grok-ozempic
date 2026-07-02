@@ -1,3 +1,4 @@
+use crate::core::grok1_data::build_grok1_tensors;
 use crate::core::inventory::{InventoryTensor, ModelInventory};
 use crate::core::selection::{TensorClass, glob_match};
 use crate::core::stream::GROK1_BLOCK_COUNT;
@@ -8,7 +9,6 @@ pub const GROK1_EXPERT_PROJECTIONS_PER_BLOCK: usize = 3;
 pub const GROK1_ATTN_PROJECTIONS_PER_BLOCK: usize = 4;
 pub const GROK1_ROUTERS_PER_BLOCK: usize = 1;
 
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grok1Inventory {
     pub tensors: Vec<InventoryTensor>,
@@ -16,154 +16,7 @@ pub struct Grok1Inventory {
 
 impl Grok1Inventory {
     pub fn full() -> Self {
-        let mut tensors = Vec::with_capacity(770);
-
-        tensors.push(InventoryTensor {
-            structural_name: "embedding.slot_00.token_embedding".into(),
-            expected_class: TensorClass::TernaryCandidate {
-                rank: None,
-                gif_threshold: None,
-            },
-            dtype: "f32",
-            block: None,
-            slot: None,
-            kind: "token_embedding",
-        });
-
-        tensors.push(InventoryTensor {
-            structural_name: "final_norm.slot_00.final_norm".into(),
-            expected_class: TensorClass::Preserve {
-                reason: Some("normalization-critical; must remain FP32".into()),
-            },
-            dtype: "f32",
-            block: None,
-            slot: None,
-            kind: "final_norm",
-        });
-
-        // NOTE (addressing Codex review on PR #26): The 448 i8 tensors (192 moe_expert + 256 attn_proj_i8)
-        // are marked TernaryCandidate here + via the structural manifest globs to match the xai-dissect
-        // structural inventory *exactly*. Alignment + classify_full_inventory tests require 0 defaults
-        // and exact 448 ternary for full 770 coverage. The *streaming* path (build_manifest_* in stream.rs)
-        // skips SourceDtype::Other (see parse_safetensors_dtype + npy_dtype_to_source; only F32/F16/BF16).
-        // i8 data enters via xai-dissect "exports" + wrapping in src/artifact.rs (wrap_existing_int8_expert,
-        // wrap_existing_int8_unknown etc.) + report validation (reports/validator.rs etc.).
-        // This manifest declares *logical classification per xai-dissect*, not "all these will be
-        // float-streamed from raw ckpt". Removing the i8 patterns would regress the purpose of this PR
-        // (full inventory alignment verification). See also structural-manifest.json _i8_streaming_note.
-        // Kilo agent xAI/Grok Build 0.1
-        for blk in 0..GROK1_BLOCKS {
-            let b = blk;
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_00.moe_expert.gate"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(0),
-                kind: "moe_expert.gate",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_01.moe_expert.down"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(1),
-                kind: "moe_expert.down",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_02.moe_expert.up"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(2),
-                kind: "moe_expert.up",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_03.attn_proj_i8.narrow"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(3),
-                kind: "attn_proj_i8.narrow",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_04.attn_proj_i8.model_width"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(4),
-                kind: "attn_proj_i8.model_width",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_05.attn_proj_i8.model_width"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(5),
-                kind: "attn_proj_i8.model_width",
-            });
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_06.attn_proj_i8.narrow"),
-                expected_class: TensorClass::TernaryCandidate {
-                    rank: None,
-                    gif_threshold: None,
-                },
-                dtype: "i8",
-                block: Some(b),
-                slot: Some(6),
-                kind: "attn_proj_i8.narrow",
-            });
-
-            for slot in 7..11 {
-                tensors.push(InventoryTensor {
-                    structural_name: format!("block_{blk:03}.slot_{slot:02}.block_norm"),
-                    expected_class: TensorClass::Preserve {
-                        reason: Some("normalization-critical; must remain FP32".into()),
-                    },
-                    dtype: "f32",
-                    block: Some(b),
-                    slot: Some(slot as u32),
-                    kind: "block_norm",
-                });
-            }
-
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_11.router"),
-                expected_class: TensorClass::Preserve {
-                    reason: Some("routing-critical; quantization changes expert selection".into()),
-                },
-                dtype: "f32",
-                block: Some(b),
-                slot: Some(11),
-                kind: "router",
-            });
-        }
-
+        let tensors = build_grok1_tensors();
         Self { tensors }
     }
 
