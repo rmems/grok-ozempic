@@ -1,9 +1,12 @@
 //! Auto-generated Grok-1 tensor inventory data.
 //! This file is included by grok1_inventory.rs to keep the main file small.
 
-use crate::core::grok1_inventory::GROK1_BLOCKS;
-use crate::core::inventory::InventoryTensor;
-use crate::core::selection::TensorClass;
+use crate::core::inventory::{InventoryTensor, ModelInventory};
+use crate::core::selection::{TensorClass, glob_match};
+use crate::core::stream::GROK1_BLOCK_COUNT;
+
+/// Number of blocks in the Grok-1 architecture (matches HF config.json).
+pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
 
 fn create_embedding_tensor() -> InventoryTensor {
     InventoryTensor {

@@ -27,6 +27,31 @@ pub trait ModelInventory {
             .filter(|t| crate::core::selection::glob_match(pattern, &t.structural_name))
             .count()
     }
+
+    /// Default: derive counts by iterating `tensors()`.
+    fn count_by_expected_class(&self) -> (usize, usize, usize, usize) {
+        let mut preserve = 0;
+        let mut fp16 = 0;
+        let mut ternary = 0;
+        let mut default = 0;
+        for t in self.tensors() {
+            match &t.expected_class {
+                TensorClass::Preserve { .. } => preserve += 1,
+                TensorClass::Fp16 { .. } => fp16 += 1,
+                TensorClass::TernaryCandidate { .. } => ternary += 1,
+                TensorClass::Default => default += 1,
+            }
+        }
+        (preserve, fp16, ternary, default)
+    }
+
+    /// Default: derive classification by iterating `tensors()`.
+    fn classify_tensor(&self, structural_name: &str) -> Option<TensorClass> {
+        self.tensors()
+            .iter()
+            .find(|t| t.structural_name == structural_name)
+            .map(|t| t.expected_class.clone())
+    }
 }
 
 /// A single tensor entry in a model inventory.

@@ -168,9 +168,8 @@ fn plan_default_rule<I: ModelInventory>(
         "preserve" => "convert_f32_to_f16_bytes",
         _ => "quantize_f32",
     };
-    let explicit_covered: usize = rule_plans.iter().map(|p| p.estimated_tensor_count).sum();
     let inventory_total = inventory.total_tensors();
-    let default_estimated = inventory_total.saturating_sub(explicit_covered);
+    let default_estimated = inventory_total.saturating_sub(*covered_by_rules);
     if default_estimated > 0 {
         rule_plans.push(PlannedKernelCall {
             matcher: "<defaults>".to_string(),
