@@ -1,11 +1,9 @@
 //! Auto-generated Grok-1 tensor inventory data.
 //! This file is included by grok1_inventory.rs to keep the main file small.
 
+use crate::core::grok1_inventory::GROK1_BLOCKS;
 use crate::core::inventory::InventoryTensor;
 use crate::core::selection::TensorClass;
-
-/// Number of blocks in the Grok-1 architecture (matches HF config.json).
-pub const GROK1_BLOCKS: u32 = 64;
 
 fn create_embedding_tensor() -> InventoryTensor {
     InventoryTensor {
@@ -125,16 +123,18 @@ fn create_attn_proj_i8_tensors(blk: u32) -> Vec<InventoryTensor> {
 
 fn create_block_norm_tensors(blk: u32) -> Vec<InventoryTensor> {
     let b = blk;
-    (7..11).map(|slot| InventoryTensor {
-        structural_name: format!("block_{blk:03}.slot_{slot:02}.block_norm"),
-        expected_class: TensorClass::Preserve {
-            reason: Some("normalization-critical; must remain FP32".into()),
-        },
-        dtype: "f32",
-        block: Some(b),
-        slot: Some(slot as u32),
-        kind: "block_norm",
-    }).collect()
+    (7..11)
+        .map(|slot| InventoryTensor {
+            structural_name: format!("block_{blk:03}.slot_{slot:02}.block_norm"),
+            expected_class: TensorClass::Preserve {
+                reason: Some("normalization-critical; must remain FP32".into()),
+            },
+            dtype: "f32",
+            block: Some(b),
+            slot: Some(slot as u32),
+            kind: "block_norm",
+        })
+        .collect()
 }
 
 fn create_router_tensor(blk: u32) -> InventoryTensor {

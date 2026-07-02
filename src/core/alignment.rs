@@ -195,6 +195,19 @@ pub fn classify_full_inventory<I: ModelInventory>(
 }
 
 #[cfg(test)]
+/// Helper to create a standard test setup: load structural manifest + default config + run plan
+pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
+    let m = embedded_grok1_structural_manifest();
+    let config = QuantizationConfig::default();
+    crate::core::dry_run::DryRunPlanner::plan(
+        &crate::core::grok1_inventory::Grok1Inventory::full(),
+        m,
+        &config,
+    )
+    .expect("plan should succeed")
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::grok1_inventory::Grok1Inventory;
@@ -295,18 +308,6 @@ mod tests {
         assert_eq!(m.preserve.len(), 6);
         assert_eq!(m.fp16.len(), 0);
         assert_eq!(m.ternary_candidates.len(), 8);
-    }
-
-    /// Helper to create a standard test setup: load structural manifest + default config + run plan
-    pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        crate::core::dry_run::DryRunPlanner::plan(
-            &crate::core::grok1_inventory::Grok1Inventory::full(),
-            m,
-            &config,
-        )
-        .expect("plan should succeed")
     }
 
     #[test]

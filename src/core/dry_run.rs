@@ -187,9 +187,30 @@ impl DryRunPlanner {
         let mut by_method: BTreeMap<String, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
 
-        plan_preserve_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
-        plan_fp16_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
-        plan_ternary_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
+        plan_preserve_rules(
+            inventory,
+            manifest,
+            config,
+            &mut rule_plans,
+            &mut by_method,
+            &mut covered_by_rules,
+        )?;
+        plan_fp16_rules(
+            inventory,
+            manifest,
+            config,
+            &mut rule_plans,
+            &mut by_method,
+            &mut covered_by_rules,
+        )?;
+        plan_ternary_rules(
+            inventory,
+            manifest,
+            config,
+            &mut rule_plans,
+            &mut by_method,
+            &mut covered_by_rules,
+        )?;
 
         // 4. Default rule — tensors not matched by any explicit list fall
         //    through to the manifest defaults or the pipeline default.
@@ -336,16 +357,10 @@ fn estimate_tensor_count_for_manifest<I: ModelInventory>(
 mod tests {
     use super::*;
     use crate::core::alignment::embedded_grok1_structural_manifest;
+    use crate::core::alignment::plan_structural_manifest;
     use crate::core::grok1_inventory::Grok1Inventory;
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::GROK1_TENSOR_TOTAL;
-
-    /// Helper to create a standard test setup: load structural manifest + default config + run plan
-    pub(crate) fn plan_structural_manifest() -> DryRunReport {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        DryRunPlanner::plan(&Grok1Inventory::full(), m, &config).expect("plan should succeed")
-    }
 
     #[test]
     fn structural_manifest_router_rule_counts_exactly_64() {
