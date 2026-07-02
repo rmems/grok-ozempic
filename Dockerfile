@@ -3,7 +3,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 COPY dissect/ dissect/
-RUN cargo build --release --all-features --locked
+RUN cargo build --release --features cli --locked
 
 FROM rust:1.96-slim AS tester
 WORKDIR /app
