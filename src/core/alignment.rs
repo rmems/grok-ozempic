@@ -287,4 +287,218 @@ mod tests {
         assert_eq!(m.fp16.len(), 0);
         assert_eq!(m.ternary_candidates.len(), 8);
     }
+
+    #[test]
+    fn dry_run_structural_manifest_coverage_is_full() {
+        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Full,
+            "structural manifest dry-run should produce CoverageStatus::Full"
+        );
+        assert_eq!(report.coverage.covered_by_rules, GROK1_TENSOR_TOTAL);
+    }
+
+    #[test]
+    fn dry_run_no_tensor_double_counted() {
+        use crate::core::dry_run::DryRunPlanner;
+        use crate::core::selection::glob_match;
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let inv = Grok1Inventory::full();
+
+        for t in &inv.tensors {
+            let matching_rules: Vec<&str> = report
+                .rule_plans
+                .iter()
+                .filter(|p| glob_match(&p.matcher, &t.structural_name))
+                .map(|p| p.matcher.as_str())
+                .collect();
+            assert!(
+                matching_rules.len() <= 1,
+                "tensor '{}' matched by {} rules: {:?}",
+                t.structural_name,
+                matching_rules.len(),
+                matching_rules
+            );
+        }
+    }
+
+    #[test]
+    fn dry_run_router_tensors_are_preserve() {
+        use crate::core::dry_run::DryRunPlanner;
+        use crate::core::selection::glob_match;
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let inv = Grok1Inventory::full();
+
+        for t in &inv.tensors {
+            if t.kind == "router" {
+                let mut matched = false;
+                for plan in &report.rule_plans {
+                    if glob_match(&plan.matcher, &t.structural_name) {
+                        matched = true;
+                        assert!(
+                            matches!(plan.class, TensorClass::Preserve { .. }),
+                            "router tensor '{}' should be Preserve, got {:?}",
+                            t.structural_name,
+                            plan.class
+                        );
+                    }
+                }
+                assert!(
+                    matched,
+                    "router tensor '{}' was not matched by any manifest rule",
+                    t.structural_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dry_run_expert_tensors_are_ternary() {
+        use crate::core::dry_run::DryRunPlanner;
+        use crate::core::selection::glob_match;
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let inv = Grok1Inventory::full();
+
+        for t in &inv.tensors {
+            if t.kind.starts_with("moe_expert") || t.kind.starts_with("attn_proj_i8") {
+                let mut matched = false;
+                for plan in &report.rule_plans {
+                    if glob_match(&plan.matcher, &t.structural_name) {
+                        matched = true;
+                        assert!(
+                            matches!(plan.class, TensorClass::TernaryCandidate { .. }),
+                            "expert tensor '{}' should be TernaryCandidate, got {:?}",
+                            t.structural_name,
+                            plan.class
+                        );
+                    }
+                }
+                assert!(
+                    matched,
+                    "expert tensor '{}' was not matched by any manifest rule",
+                    t.structural_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dry_run_overcomplete_never_triggered_by_valid_manifest() {
+        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+
+        assert!(
+            !matches!(
+                report.coverage.inventory_coverage,
+                CoverageStatus::OverComplete { .. }
+            ),
+            "valid structural manifest should never produce OverComplete"
+        );
+    }
+
+    #[test]
+    fn every_manifest_rule_matches_at_least_one_inventory_tensor() {
+        use crate::core::dry_run::DryRunPlanner;
+        use crate::core::selection::glob_match;
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let inv = Grok1Inventory::full();
+
+        for plan in &report.rule_plans {
+            if plan.matcher == "<defaults>" {
+                continue;
+            }
+            let matched = inv
+                .tensors
+                .iter()
+                .any(|t| glob_match(&plan.matcher, &t.structural_name));
+            assert!(
+                matched,
+                "manifest rule '{}' matches no inventory tensors (orphan rule)",
+                plan.matcher
+            );
+        }
+    }
+
+    #[test]
+    fn every_inventory_tensor_matched_by_manifest_rule() {
+        use crate::core::dry_run::DryRunPlanner;
+        use crate::core::selection::glob_match;
+
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let inv = Grok1Inventory::full();
+
+        let has_defaults = report.rule_plans.iter().any(|p| p.matcher == "<defaults>");
+
+        for t in &inv.tensors {
+            let matched_explicit = report
+                .rule_plans
+                .iter()
+                .filter(|p| p.matcher != "<defaults>")
+                .any(|p| glob_match(&p.matcher, &t.structural_name));
+            assert!(
+                matched_explicit || has_defaults,
+                "inventory tensor '{}' not matched by any manifest rule (no explicit match and no <defaults> fallback)",
+                t.structural_name
+            );
+        }
+    }
+
+    #[test]
+    fn preserve_fp16_ternary_boundaries_match_xai_dissect() {
+        let inv = Grok1Inventory::full();
+        let (preserve, fp16, ternary, default) = inv.count_by_expected_class();
+
+        assert_eq!(
+            preserve, 321,
+            "321 preserve: 64 routers + 256 block_norms + 1 final_norm"
+        );
+        assert_eq!(fp16, 0, "no fp16 tensors in structural manifest");
+        assert_eq!(
+            ternary, 449,
+            "449 ternary: 192 MoE expert + 256 attn_proj_i8 + 1 token_embedding"
+        );
+        assert_eq!(default, 0, "no tensors should fall to default");
+    }
+
+    #[test]
+    fn no_router_tensor_classified_as_ternary() {
+        let inv = Grok1Inventory::full();
+        let manifest = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+
+        for t in &inv.tensors {
+            if t.kind == "router" {
+                let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
+                assert!(
+                    !matches!(actual, TensorClass::TernaryCandidate { .. }),
+                    "router tensor '{}' must not be TernaryCandidate, got {:?}",
+                    t.structural_name,
+                    actual
+                );
+            }
+        }
+    }
 }

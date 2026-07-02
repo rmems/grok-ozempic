@@ -1,0 +1,15 @@
+---
+engines:
+  complexity:
+    exclude_paths:
+      - "Cargo.lock"
+  duplication:
+    exclude_paths:
+      - "Cargo.lock"
+      - "src/**/*_test.rs"
+      - "src/**/tests.rs"
+      - ".kilo/"
+exclude_paths:
+  - "Cargo.lock"
+  - "target/"
+  - ".kilo/"

@@ -312,6 +312,13 @@ mod tests {
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::GROK1_TENSOR_TOTAL;
 
+    /// Helper to create a standard test setup: load structural manifest + default config + run plan
+    fn plan_structural_manifest() -> DryRunReport {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        DryRunPlanner::plan(m, &config).expect("plan should succeed")
+    }
+
     #[test]
     fn structural_manifest_router_rule_counts_exactly_64() {
         let m = embedded_grok1_structural_manifest();
@@ -332,9 +339,7 @@ mod tests {
 
     #[test]
     fn structural_manifest_dry_run_covers_all_770_or_reports_reasonable_default() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan with structural manifest");
+        let report = plan_structural_manifest();
 
         // With exact counts, covered_by_rules should be much closer to 770 than the old
         // heuristic (which produced ~8 per rule + 672+ in <defaults>).
@@ -344,5 +349,120 @@ mod tests {
             "structural manifest dry-run should cover most of 770 via exact globs, got {covered}"
         );
         assert_eq!(report.coverage.inventory_total, GROK1_TENSOR_TOTAL);
+    }
+
+    #[test]
+    fn preserve_rules_map_to_convert_f32_to_f16_bytes() {
+        let report = plan_structural_manifest();
+
+        for plan in &report.rule_plans {
+            if matches!(plan.class, TensorClass::Preserve { .. }) {
+                assert_eq!(
+                    plan.kernel_method, "convert_f32_to_f16_bytes",
+                    "preserve rule '{}' should use convert_f32_to_f16_bytes, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_moe_expert_rules_map_to_wrap_int8() {
+        let report = plan_structural_manifest();
+
+        for plan in &report.rule_plans {
+            if plan.matcher.contains("moe_expert") {
+                assert_eq!(
+                    plan.kernel_method, "wrap_existing_int8_expert",
+                    "moe_expert rule '{}' should use wrap_existing_int8_expert, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_attn_proj_i8_rules_map_to_wrap_int8() {
+        let report = plan_structural_manifest();
+
+        for plan in &report.rule_plans {
+            if plan.matcher.contains("attn_proj_i8") {
+                assert_eq!(
+                    plan.kernel_method, "wrap_existing_int8_unknown",
+                    "attn_proj_i8 rule '{}' should use wrap_existing_int8_unknown, got {}",
+                    plan.matcher, plan.kernel_method
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ternary_embedding_maps_to_quantize_f32() {
+        let report = plan_structural_manifest();
+
+        let embedding_plan = report
+            .rule_plans
+            .iter()
+            .find(|p| p.matcher.contains("token_embedding"))
+            .expect("embedding rule should exist");
+        assert_eq!(
+            embedding_plan.kernel_method, "quantize_f32",
+            "embedding should use quantize_f32, got {}",
+            embedding_plan.kernel_method
+        );
+    }
+
+    #[test]
+    fn default_rule_uses_manifest_default_precision() {
+        let report = plan_structural_manifest();
+
+        let default_plan = report.rule_plans.iter().find(|p| p.matcher == "<defaults>");
+        if let Some(plan) = default_plan {
+            assert!(
+                plan.kernel_method == "quantize_f32"
+                    || plan.kernel_method == "convert_f32_to_f16_bytes",
+                "default rule should use quantize_f32 or convert_f32_to_f16_bytes, got {}",
+                plan.kernel_method
+            );
+        } else {
+            assert_eq!(
+                report.coverage.inventory_coverage,
+                CoverageStatus::Full,
+                "no <defaults> rule should only be absent when coverage is Full"
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_full_when_rules_cover_all_770() {
+        let report = plan_structural_manifest();
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Full,
+            "structural manifest should produce CoverageStatus::Full"
+        );
+    }
+
+    #[test]
+    fn by_method_sums_to_backend_handled_total() {
+        let report = plan_structural_manifest();
+
+        let sum: usize = report.coverage.by_method.values().sum();
+        assert_eq!(
+            sum, report.backend_handled_total,
+            "by_method values should sum to backend_handled_total"
+        );
+    }
+
+    #[test]
+    fn planned_backend_calls_json_contains_coverage_key() {
+        let report = plan_structural_manifest();
+        let json = DryRunPlanner::planned_backend_calls_json(&report);
+
+        assert!(
+            json.contains_key("__coverage__"),
+            "JSON output should contain __coverage__ key"
+        );
     }
 }
