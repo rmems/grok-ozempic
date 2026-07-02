@@ -1,6 +1,5 @@
 use crate::core::grok1_data::build_grok1_tensors;
 use crate::core::inventory::{InventoryTensor, ModelInventory};
-use crate::core::selection::TensorClass;
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
 pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
