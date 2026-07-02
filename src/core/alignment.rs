@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use crate::core::grok1_inventory::Grok1Inventory;
+use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::selection::{TensorClass, classify};
 use crate::types::QuantizationConfig;
@@ -84,8 +85,8 @@ impl AlignmentReport {
     }
 }
 
-pub fn check_alignment(
-    inventory: &Grok1Inventory,
+pub fn check_alignment<I: ModelInventory>(
+    inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
 ) -> AlignmentReport {
@@ -102,7 +103,7 @@ pub fn check_alignment(
     let mut mismatches = Vec::new();
     let mut boundary_summary: BTreeMap<String, usize> = BTreeMap::new();
 
-    for t in &inventory.tensors {
+    for t in inventory.tensors() {
         let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
         let expected = &t.expected_class;
 
@@ -137,7 +138,7 @@ pub fn check_alignment(
     }
 
     AlignmentReport {
-        total_inventory_tensors: inventory.len(),
+        total_inventory_tensors: inventory.tensors().len(),
         matched,
         mismatched,
         preserve_expected_count: preserve_exp,
@@ -301,7 +302,12 @@ mod tests {
     pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
         let m = embedded_grok1_structural_manifest();
         let config = QuantizationConfig::default();
-        crate::core::dry_run::DryRunPlanner::plan(m, &config).expect("plan should succeed")
+        crate::core::dry_run::DryRunPlanner::plan(
+            &crate::core::grok1_inventory::Grok1Inventory::full(),
+            m,
+            &config,
+        )
+        .expect("plan should succeed")
     }
 
     #[test]

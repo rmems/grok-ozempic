@@ -1,3 +1,4 @@
+use crate::core::inventory::{InventoryTensor, ModelInventory};
 use crate::core::selection::{TensorClass, glob_match};
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
@@ -7,15 +8,6 @@ pub const GROK1_EXPERT_PROJECTIONS_PER_BLOCK: usize = 3;
 pub const GROK1_ATTN_PROJECTIONS_PER_BLOCK: usize = 4;
 pub const GROK1_ROUTERS_PER_BLOCK: usize = 1;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InventoryTensor {
-    pub structural_name: String,
-    pub expected_class: TensorClass,
-    pub dtype: &'static str,
-    pub block: Option<u32>,
-    pub slot: Option<u32>,
-    pub kind: &'static str,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grok1Inventory {
@@ -212,6 +204,41 @@ impl Grok1Inventory {
             .iter()
             .filter(|t| glob_match(pattern, &t.structural_name))
             .count()
+    }
+}
+
+impl ModelInventory for Grok1Inventory {
+    fn total_tensors(&self) -> usize {
+        self.tensors.len()
+    }
+
+    fn tensors(&self) -> &[InventoryTensor] {
+        &self.tensors
+    }
+
+    fn count_by_expected_class(&self) -> (usize, usize, usize, usize) {
+        let mut preserve = 0;
+        let mut fp16 = 0;
+        let mut ternary = 0;
+        let mut default = 0;
+
+        for t in &self.tensors {
+            match &t.expected_class {
+                TensorClass::Preserve { .. } => preserve += 1,
+                TensorClass::Fp16 { .. } => fp16 += 1,
+                TensorClass::TernaryCandidate { .. } => ternary += 1,
+                TensorClass::Default => default += 1,
+            }
+        }
+
+        (preserve, fp16, ternary, default)
+    }
+
+    fn classify_tensor(&self, structural_name: &str) -> Option<TensorClass> {
+        self.tensors
+            .iter()
+            .find(|t| t.structural_name == structural_name)
+            .map(|t| t.expected_class.clone())
     }
 }
 

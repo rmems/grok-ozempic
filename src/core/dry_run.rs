@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::core::grok1_inventory::Grok1Inventory;
+use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, MANIFEST_NAME_CONVENTION_V2};
 use crate::core::selection::TensorClass;
 use crate::error::Result;
@@ -80,15 +80,15 @@ impl DryRunPlanner {
     /// Walk every classification rule in the manifest and produce a
     /// `DryRunReport` mapping each rule to its planned backend kernel call.
     ///
-    /// When the manifest uses the structural (V2) naming convention, per-rule
-    /// tensor counts are taken exactly from `Grok1Inventory` (so e.g. the
-    /// `block_*.slot_11.router` rule correctly reports 64 instead of the old
-    /// heuristic's 8). For legacy V1 manifests the original heuristic is used.
-    ///
-    /// When `blocks` are present in the manifest, the planner also accounts
-    /// for per-block default tensors that fall through to the default
-    /// precision tier.
-    pub fn plan(manifest: &DissectManifest, config: &QuantizationConfig) -> Result<DryRunReport> {
+    /// The `inventory` parameter provides model-specific tensor counts for
+    /// accurate per-rule estimates. For V2 structural manifests, counts are
+    /// taken exactly from the inventory; for legacy V1 manifests, a heuristic
+    /// is used.
+    pub fn plan<I: ModelInventory>(
+        inventory: &I,
+        manifest: &DissectManifest,
+        config: &QuantizationConfig,
+    ) -> Result<DryRunReport> {
         let mut rule_plans = Vec::new();
         let mut by_method: BTreeMap<String, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
@@ -103,7 +103,7 @@ impl DryRunPlanner {
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
             let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
+            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -125,7 +125,7 @@ impl DryRunPlanner {
             };
             let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
             let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
+            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -155,7 +155,7 @@ impl DryRunPlanner {
             } else {
                 "quantize_f32"
             };
-            let estimated = estimate_tensor_count_for_manifest(manifest, &entry.name);
+            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
             rule_plans.push(PlannedKernelCall {
                 matcher: entry.name.clone(),
                 kernel_method: method,
@@ -297,9 +297,13 @@ fn estimate_tensor_count(pattern: &str) -> usize {
     }
 }
 
-fn estimate_tensor_count_for_manifest(manifest: &DissectManifest, pattern: &str) -> usize {
+fn estimate_tensor_count_for_manifest<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    pattern: &str,
+) -> usize {
     if manifest.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
-        Grok1Inventory::full().count_matching_glob(pattern)
+        inventory.count_matching(pattern)
     } else {
         estimate_tensor_count(pattern)
     }
@@ -309,6 +313,7 @@ fn estimate_tensor_count_for_manifest(manifest: &DissectManifest, pattern: &str)
 mod tests {
     use super::*;
     use crate::core::alignment::embedded_grok1_structural_manifest;
+    use crate::core::grok1_inventory::Grok1Inventory;
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::GROK1_TENSOR_TOTAL;
 
@@ -316,7 +321,7 @@ mod tests {
     pub(crate) fn plan_structural_manifest() -> DryRunReport {
         let m = embedded_grok1_structural_manifest();
         let config = QuantizationConfig::default();
-        DryRunPlanner::plan(m, &config).expect("plan should succeed")
+        DryRunPlanner::plan(&Grok1Inventory::full(), m, &config).expect("plan should succeed")
     }
 
     #[test]
@@ -330,7 +335,11 @@ mod tests {
             .iter()
             .find(|e| e.name.contains("router"))
             .expect("structural manifest has router preserve rule");
-        let count = estimate_tensor_count_for_manifest(m, &router_rule.name);
+        let count = estimate_tensor_count_for_manifest(
+            &Grok1Inventory::full(),
+            m,
+            &router_rule.name,
+        );
         assert_eq!(
             count, 64,
             "router rule should count 64 via inventory, got {count}"
