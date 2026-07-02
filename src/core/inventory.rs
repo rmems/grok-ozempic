@@ -13,12 +13,6 @@ pub trait ModelInventory {
     /// Returns a slice of all tensors in this inventory.
     fn tensors(&self) -> &[InventoryTensor];
 
-    /// Returns counts of tensors by expected class: (preserve, fp16, ternary, default).
-    fn count_by_expected_class(&self) -> (usize, usize, usize, usize);
-
-    /// Classify a tensor by its structural name, if present in this inventory.
-    fn classify_tensor(&self, structural_name: &str) -> Option<TensorClass>;
-
     /// Count how many tensors in this inventory match the given glob pattern.
     /// Default implementation iterates and uses `glob_match`.
     fn count_matching(&self, pattern: &str) -> usize {

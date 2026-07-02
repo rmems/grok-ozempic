@@ -2,11 +2,12 @@ name: Rust
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, refactor-tests-docs]
   push:
     branches:
       - main
       - narrow-crest
+      - refactor-tests-docs
 
 permissions:
   contents: read

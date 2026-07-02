@@ -1,8 +1,8 @@
 //! Auto-generated Grok-1 tensor inventory data.
 //! This file is included by grok1_inventory.rs to keep the main file small.
 
-use crate::core::inventory::{InventoryTensor, ModelInventory};
-use crate::core::selection::{TensorClass, glob_match};
+use crate::core::inventory::InventoryTensor;
+use crate::core::selection::TensorClass;
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
 /// Number of blocks in the Grok-1 architecture (matches HF config.json).

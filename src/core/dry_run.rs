@@ -141,9 +141,13 @@ fn calculate_coverage(covered: usize, total: usize) -> CoverageStatus {
     if covered == total {
         CoverageStatus::Full
     } else if covered < total {
-        CoverageStatus::Partial { missing: total - covered }
+        CoverageStatus::Partial {
+            missing: total - covered,
+        }
     } else {
-        CoverageStatus::OverComplete { extra: covered - total }
+        CoverageStatus::OverComplete {
+            extra: covered - total,
+        }
     }
 }
 
