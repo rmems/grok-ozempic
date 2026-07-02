@@ -43,6 +43,100 @@ pub enum CoverageStatus {
     OverComplete { extra: usize },
 }
 
+fn plan_preserve_rules<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rule_plans: &mut Vec<PlannedKernelCall>,
+    by_method: &mut BTreeMap<String, usize>,
+    covered_by_rules: &mut usize,
+) -> Result<()> {
+    for entry in &manifest.preserve {
+        let class = TensorClass::Preserve {
+            reason: entry.reason.clone(),
+        };
+        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        let method = "convert_f32_to_f16_bytes";
+        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        rule_plans.push(PlannedKernelCall {
+            matcher: entry.name.clone(),
+            kernel_method: method,
+            class,
+            precision: TensorPrecision::Preserve,
+            gif_threshold,
+            estimated_tensor_count: estimated,
+        });
+        *by_method.entry(method.to_string()).or_insert(0) += estimated;
+        *covered_by_rules += estimated;
+    }
+    Ok(())
+}
+
+fn plan_fp16_rules<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rule_plans: &mut Vec<PlannedKernelCall>,
+    by_method: &mut BTreeMap<String, usize>,
+    covered_by_rules: &mut usize,
+) -> Result<()> {
+    for entry in &manifest.fp16 {
+        let class = TensorClass::Fp16 {
+            reason: entry.reason.clone(),
+        };
+        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        let method = "convert_f32_to_f16_bytes";
+        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        rule_plans.push(PlannedKernelCall {
+            matcher: entry.name.clone(),
+            kernel_method: method,
+            class,
+            precision: TensorPrecision::Fp16,
+            gif_threshold,
+            estimated_tensor_count: estimated,
+        });
+        *by_method.entry(method.to_string()).or_insert(0) += estimated;
+        *covered_by_rules += estimated;
+    }
+    Ok(())
+}
+
+fn plan_ternary_rules<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rule_plans: &mut Vec<PlannedKernelCall>,
+    by_method: &mut BTreeMap<String, usize>,
+    covered_by_rules: &mut usize,
+) -> Result<()> {
+    for entry in &manifest.ternary_candidates {
+        let class = TensorClass::TernaryCandidate {
+            rank: entry.rank,
+            gif_threshold: entry.gif_threshold,
+        };
+        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        let method = if entry.name.contains("moe_expert") {
+            "wrap_existing_int8_expert"
+        } else if entry.name.contains("attn_proj_i8") {
+            "wrap_existing_int8_unknown"
+        } else {
+            "quantize_f32"
+        };
+        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        rule_plans.push(PlannedKernelCall {
+            matcher: entry.name.clone(),
+            kernel_method: method,
+            class,
+            precision: TensorPrecision::TernarySnN,
+            gif_threshold,
+            estimated_tensor_count: estimated,
+        });
+        *by_method.entry(method.to_string()).or_insert(0) += estimated;
+        *covered_by_rules += estimated;
+    }
+    Ok(())
+}
+
 /// Top-level dry-run output.
 #[derive(Debug, Clone)]
 pub struct DryRunReport {
@@ -93,80 +187,9 @@ impl DryRunPlanner {
         let mut by_method: BTreeMap<String, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
 
-        // 1. Preserve rules.
-        // Note: `convert_f32_to_f16_bytes` is reported because the source
-        // dtype may be F32 or BF16; `passthrough_f16` is only used when
-        // the source is already FP16 (see `encode_fp16_bytes` in stream.rs).
-        for entry in &manifest.preserve {
-            let class = TensorClass::Preserve {
-                reason: entry.reason.clone(),
-            };
-            let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-            rule_plans.push(PlannedKernelCall {
-                matcher: entry.name.clone(),
-                kernel_method: method,
-                class,
-                precision: TensorPrecision::Preserve,
-                gif_threshold,
-                estimated_tensor_count: estimated,
-            });
-            *by_method.entry(method.to_string()).or_insert(0) += estimated;
-            covered_by_rules += estimated;
-        }
-
-        // 2. FP16 rules.
-        // Same as preserve: source may be F32/BF16, so report the conversion
-        // path rather than assuming FP16-at-rest.
-        for entry in &manifest.fp16 {
-            let class = TensorClass::Fp16 {
-                reason: entry.reason.clone(),
-            };
-            let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            let method = "convert_f32_to_f16_bytes";
-            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-            rule_plans.push(PlannedKernelCall {
-                matcher: entry.name.clone(),
-                kernel_method: method,
-                class,
-                precision: TensorPrecision::Fp16,
-                gif_threshold,
-                estimated_tensor_count: estimated,
-            });
-            *by_method.entry(method.to_string()).or_insert(0) += estimated;
-            covered_by_rules += estimated;
-        }
-
-        // 3. Ternary candidate rules.
-        for entry in &manifest.ternary_candidates {
-            let class = TensorClass::TernaryCandidate {
-                rank: entry.rank,
-                gif_threshold: entry.gif_threshold,
-            };
-            let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            // For V2 structural manifests, some ternary_candidates are actually i8 tensors
-            // (the 192 moe_expert + 256 attn_proj_i8 from Grok1Inventory). Map them to the
-            // documented artifact wrap paths instead of f32 quantize (addresses Codex P2).
-            let method = if entry.name.contains("moe_expert") {
-                "wrap_existing_int8_expert"
-            } else if entry.name.contains("attn_proj_i8") {
-                "wrap_existing_int8_unknown"
-            } else {
-                "quantize_f32"
-            };
-            let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-            rule_plans.push(PlannedKernelCall {
-                matcher: entry.name.clone(),
-                kernel_method: method,
-                class,
-                precision: TensorPrecision::TernarySnN,
-                gif_threshold,
-                estimated_tensor_count: estimated,
-            });
-            *by_method.entry(method.to_string()).or_insert(0) += estimated;
-            covered_by_rules += estimated;
-        }
+        plan_preserve_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
+        plan_fp16_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
+        plan_ternary_rules(inventory, manifest, config, &mut rule_plans, &mut by_method, &mut covered_by_rules)?;
 
         // 4. Default rule — tensors not matched by any explicit list fall
         //    through to the manifest defaults or the pipeline default.

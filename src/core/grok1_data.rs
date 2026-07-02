@@ -7,10 +7,8 @@ use crate::core::selection::TensorClass;
 /// Number of blocks in the Grok-1 architecture (matches HF config.json).
 pub const GROK1_BLOCKS: u32 = 64;
 
-pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
-    let mut tensors = Vec::with_capacity(770);
-
-    tensors.push(InventoryTensor {
+fn create_embedding_tensor() -> InventoryTensor {
+    InventoryTensor {
         structural_name: "embedding.slot_00.token_embedding".into(),
         expected_class: TensorClass::TernaryCandidate {
             rank: None,
@@ -20,9 +18,11 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
         block: None,
         slot: None,
         kind: "token_embedding",
-    });
+    }
+}
 
-    tensors.push(InventoryTensor {
+fn create_final_norm_tensor() -> InventoryTensor {
+    InventoryTensor {
         structural_name: "final_norm.slot_00.final_norm".into(),
         expected_class: TensorClass::Preserve {
             reason: Some("normalization-critical; must remain FP32".into()),
@@ -31,12 +31,13 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
         block: None,
         slot: None,
         kind: "final_norm",
-    });
+    }
+}
 
-    for blk in 0..GROK1_BLOCKS {
-        let b = blk;
-
-        tensors.push(InventoryTensor {
+fn create_moe_expert_tensors(blk: u32) -> Vec<InventoryTensor> {
+    let b = blk;
+    vec![
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_00.moe_expert.gate"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -46,9 +47,8 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(0),
             kind: "moe_expert.gate",
-        });
-
-        tensors.push(InventoryTensor {
+        },
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_01.moe_expert.down"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -58,9 +58,8 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(1),
             kind: "moe_expert.down",
-        });
-
-        tensors.push(InventoryTensor {
+        },
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_02.moe_expert.up"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -70,9 +69,14 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(2),
             kind: "moe_expert.up",
-        });
+        },
+    ]
+}
 
-        tensors.push(InventoryTensor {
+fn create_attn_proj_i8_tensors(blk: u32) -> Vec<InventoryTensor> {
+    let b = blk;
+    vec![
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_03.attn_proj_i8.narrow"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -82,9 +86,8 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(3),
             kind: "attn_proj_i8.narrow",
-        });
-
-        tensors.push(InventoryTensor {
+        },
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_04.attn_proj_i8.model_width"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -94,9 +97,8 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(4),
             kind: "attn_proj_i8.model_width",
-        });
-
-        tensors.push(InventoryTensor {
+        },
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_05.attn_proj_i8.model_width"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -106,9 +108,8 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(5),
             kind: "attn_proj_i8.model_width",
-        });
-
-        tensors.push(InventoryTensor {
+        },
+        InventoryTensor {
             structural_name: format!("block_{blk:03}.slot_06.attn_proj_i8.narrow"),
             expected_class: TensorClass::TernaryCandidate {
                 rank: None,
@@ -118,31 +119,48 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
             block: Some(b),
             slot: Some(6),
             kind: "attn_proj_i8.narrow",
-        });
+        },
+    ]
+}
 
-        for slot in 7..11 {
-            tensors.push(InventoryTensor {
-                structural_name: format!("block_{blk:03}.slot_{slot:02}.block_norm"),
-                expected_class: TensorClass::Preserve {
-                    reason: Some("normalization-critical; must remain FP32".into()),
-                },
-                dtype: "f32",
-                block: Some(b),
-                slot: Some(slot as u32),
-                kind: "block_norm",
-            });
-        }
+fn create_block_norm_tensors(blk: u32) -> Vec<InventoryTensor> {
+    let b = blk;
+    (7..11).map(|slot| InventoryTensor {
+        structural_name: format!("block_{blk:03}.slot_{slot:02}.block_norm"),
+        expected_class: TensorClass::Preserve {
+            reason: Some("normalization-critical; must remain FP32".into()),
+        },
+        dtype: "f32",
+        block: Some(b),
+        slot: Some(slot as u32),
+        kind: "block_norm",
+    }).collect()
+}
 
-        tensors.push(InventoryTensor {
-            structural_name: format!("block_{blk:03}.slot_11.router"),
-            expected_class: TensorClass::Preserve {
-                reason: Some("routing-critical; quantization changes expert selection".into()),
-            },
-            dtype: "f32",
-            block: Some(b),
-            slot: Some(11),
-            kind: "router",
-        });
+fn create_router_tensor(blk: u32) -> InventoryTensor {
+    InventoryTensor {
+        structural_name: format!("block_{blk:03}.slot_11.router"),
+        expected_class: TensorClass::Preserve {
+            reason: Some("routing-critical; quantization changes expert selection".into()),
+        },
+        dtype: "f32",
+        block: Some(blk),
+        slot: Some(11),
+        kind: "router",
+    }
+}
+
+pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
+    let mut tensors = Vec::with_capacity(770);
+
+    tensors.push(create_embedding_tensor());
+    tensors.push(create_final_norm_tensor());
+
+    for blk in 0..GROK1_BLOCKS {
+        tensors.extend(create_moe_expert_tensors(blk));
+        tensors.extend(create_attn_proj_i8_tensors(blk));
+        tensors.extend(create_block_norm_tensors(blk));
+        tensors.push(create_router_tensor(blk));
     }
 
     tensors
