@@ -4,7 +4,7 @@ use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, MANIFEST_NAME_CONVENTION_V2};
 use crate::core::selection::TensorClass;
 use crate::error::Result;
-use crate::types::{GROK1_TENSOR_TOTAL, QuantizationConfig, TensorPrecision};
+use crate::types::{QuantizationConfig, TensorPrecision};
 
 /// A single planned backend kernel invocation derived from a manifest rule.
 #[derive(Debug, Clone, PartialEq)]

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use crate::core::grok1_inventory::Grok1Inventory;
 use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::selection::{TensorClass, classify};
