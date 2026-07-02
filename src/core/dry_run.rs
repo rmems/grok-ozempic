@@ -137,6 +137,55 @@ fn plan_ternary_rules<I: ModelInventory>(
     Ok(())
 }
 
+fn calculate_coverage(covered: usize, total: usize) -> CoverageStatus {
+    if covered == total {
+        CoverageStatus::Full
+    } else if covered < total {
+        CoverageStatus::Partial { missing: total - covered }
+    } else {
+        CoverageStatus::OverComplete { extra: covered - total }
+    }
+}
+
+fn plan_default_rule<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rule_plans: &mut Vec<PlannedKernelCall>,
+    by_method: &mut BTreeMap<String, usize>,
+    covered_by_rules: &mut usize,
+) -> Result<()> {
+    let default_precision = manifest
+        .defaults
+        .precision
+        .as_deref()
+        .unwrap_or("ternary_snn");
+    let default_class = TensorClass::Default;
+    let (_precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
+    let default_method = match default_precision {
+        "ternary_snn" => "quantize_f32",
+        "fp16" => "convert_f32_to_f16_bytes",
+        "preserve" => "convert_f32_to_f16_bytes",
+        _ => "quantize_f32",
+    };
+    let explicit_covered: usize = rule_plans.iter().map(|p| p.estimated_tensor_count).sum();
+    let inventory_total = inventory.total_tensors();
+    let default_estimated = inventory_total.saturating_sub(explicit_covered);
+    if default_estimated > 0 {
+        rule_plans.push(PlannedKernelCall {
+            matcher: "<defaults>".to_string(),
+            kernel_method: default_method,
+            class: default_class,
+            precision: _precision,
+            gif_threshold,
+            estimated_tensor_count: default_estimated,
+        });
+        *by_method.entry(default_method.to_string()).or_insert(0) += default_estimated;
+        *covered_by_rules += default_estimated;
+    }
+    Ok(())
+}
+
 /// Top-level dry-run output.
 #[derive(Debug, Clone)]
 pub struct DryRunReport {
@@ -211,54 +260,16 @@ impl DryRunPlanner {
             &mut by_method,
             &mut covered_by_rules,
         )?;
+        plan_default_rule(
+            inventory,
+            manifest,
+            config,
+            &mut rule_plans,
+            &mut by_method,
+            &mut covered_by_rules,
+        )?;
 
-        // 4. Default rule — tensors not matched by any explicit list fall
-        //    through to the manifest defaults or the pipeline default.
-        //
-        // For default fp16/preserve tiers, the source dtype may be F32 or
-        // BF16, so report the conversion path (same reasoning as the explicit
-        // preserve/fp16 loops above).
-        let default_precision = manifest
-            .defaults
-            .precision
-            .as_deref()
-            .unwrap_or("ternary_snn");
-        let default_class = TensorClass::Default;
-        let (_precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
-        let default_method = match default_precision {
-            "ternary_snn" => "quantize_f32",
-            "fp16" => "convert_f32_to_f16_bytes",
-            "preserve" => "convert_f32_to_f16_bytes",
-            _ => "quantize_f32",
-        };
-        // Estimate default-covered tensors: total inventory minus explicit rules.
-        let explicit_covered: usize = rule_plans.iter().map(|p| p.estimated_tensor_count).sum();
-        let inventory_total = inventory.total_tensors();
-        let default_estimated = inventory_total.saturating_sub(explicit_covered);
-        if default_estimated > 0 {
-            rule_plans.push(PlannedKernelCall {
-                matcher: "<defaults>".to_string(),
-                kernel_method: default_method,
-                class: default_class,
-                precision: _precision,
-                gif_threshold,
-                estimated_tensor_count: default_estimated,
-            });
-            *by_method.entry(default_method.to_string()).or_insert(0) += default_estimated;
-            covered_by_rules += default_estimated;
-        }
-
-        let inventory_coverage = if covered_by_rules == inventory_total {
-            CoverageStatus::Full
-        } else if covered_by_rules < inventory_total {
-            CoverageStatus::Partial {
-                missing: inventory_total - covered_by_rules,
-            }
-        } else {
-            CoverageStatus::OverComplete {
-                extra: covered_by_rules - inventory_total,
-            }
-        };
+        let inventory_coverage = calculate_coverage(covered_by_rules, inventory.total_tensors());
 
         let backend_handled_total = by_method.values().sum();
 
@@ -267,7 +278,7 @@ impl DryRunPlanner {
             coverage: CoverageSummary {
                 by_method,
                 covered_by_rules,
-                inventory_total,
+                inventory_total: inventory.total_tensors(),
                 inventory_coverage,
             },
             backend_handled_total,
