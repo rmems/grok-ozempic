@@ -312,6 +312,13 @@ mod tests {
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::GROK1_TENSOR_TOTAL;
 
+    /// Helper to create a standard test setup: load structural manifest + default config + run plan
+    fn plan_structural_manifest() -> DryRunReport {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        DryRunPlanner::plan(m, &config).expect("plan should succeed")
+    }
+
     #[test]
     fn structural_manifest_router_rule_counts_exactly_64() {
         let m = embedded_grok1_structural_manifest();
@@ -332,9 +339,7 @@ mod tests {
 
     #[test]
     fn structural_manifest_dry_run_covers_all_770_or_reports_reasonable_default() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan with structural manifest");
+        let report = plan_structural_manifest();
 
         // With exact counts, covered_by_rules should be much closer to 770 than the old
         // heuristic (which produced ~8 per rule + 672+ in <defaults>).
@@ -348,9 +353,7 @@ mod tests {
 
     #[test]
     fn preserve_rules_map_to_convert_f32_to_f16_bytes() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         for plan in &report.rule_plans {
             if matches!(plan.class, TensorClass::Preserve { .. }) {
@@ -365,9 +368,7 @@ mod tests {
 
     #[test]
     fn ternary_moe_expert_rules_map_to_wrap_int8() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         for plan in &report.rule_plans {
             if plan.matcher.contains("moe_expert") {
@@ -382,9 +383,7 @@ mod tests {
 
     #[test]
     fn ternary_attn_proj_i8_rules_map_to_wrap_int8() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         for plan in &report.rule_plans {
             if plan.matcher.contains("attn_proj_i8") {
@@ -399,9 +398,7 @@ mod tests {
 
     #[test]
     fn ternary_embedding_maps_to_quantize_f32() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         let embedding_plan = report
             .rule_plans
@@ -417,9 +414,7 @@ mod tests {
 
     #[test]
     fn default_rule_uses_manifest_default_precision() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         let default_plan = report.rule_plans.iter().find(|p| p.matcher == "<defaults>");
         if let Some(plan) = default_plan {
@@ -440,9 +435,7 @@ mod tests {
 
     #[test]
     fn coverage_full_when_rules_cover_all_770() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         assert_eq!(
             report.coverage.inventory_coverage,
@@ -453,9 +446,7 @@ mod tests {
 
     #[test]
     fn by_method_sums_to_backend_handled_total() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         let sum: usize = report.coverage.by_method.values().sum();
         assert_eq!(
@@ -466,9 +457,7 @@ mod tests {
 
     #[test]
     fn planned_backend_calls_json_contains_coverage_key() {
-        let m = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(m, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let json = DryRunPlanner::planned_backend_calls_json(&report);
 
         assert!(
