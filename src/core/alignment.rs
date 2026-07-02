@@ -273,10 +273,19 @@ mod tests {
             "no tensors should fall to default; unclassified: {:?}",
             coverage.unclassified
         );
-        assert_eq!(*coverage.by_class.get("preserve").unwrap_or(&0), 321);
-        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), 0);
-        assert_eq!(*coverage.by_class.get("ternary").unwrap_or(&0), 449);
-        assert_eq!(*coverage.by_class.get("default").unwrap_or(&0), 0);
+        assert_eq!(
+            *coverage.by_class.get("preserve").unwrap_or(&0),
+            EXPECTED_PRESERVE
+        );
+        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), EXPECTED_FP16);
+        assert_eq!(
+            *coverage.by_class.get("ternary").unwrap_or(&0),
+            EXPECTED_TERNARY
+        );
+        assert_eq!(
+            *coverage.by_class.get("default").unwrap_or(&0),
+            EXPECTED_DEFAULT
+        );
     }
 
     #[test]
@@ -289,7 +298,7 @@ mod tests {
     }
 
     /// Helper to create a standard test setup: load structural manifest + default config + run plan
-    fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
+    pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
         let m = embedded_grok1_structural_manifest();
         let config = QuantizationConfig::default();
         crate::core::dry_run::DryRunPlanner::plan(m, &config).expect("plan should succeed")

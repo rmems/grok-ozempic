@@ -313,7 +313,7 @@ mod tests {
     use crate::types::GROK1_TENSOR_TOTAL;
 
     /// Helper to create a standard test setup: load structural manifest + default config + run plan
-    fn plan_structural_manifest() -> DryRunReport {
+    pub(crate) fn plan_structural_manifest() -> DryRunReport {
         let m = embedded_grok1_structural_manifest();
         let config = QuantizationConfig::default();
         DryRunPlanner::plan(m, &config).expect("plan should succeed")
