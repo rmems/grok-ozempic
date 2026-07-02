@@ -301,7 +301,7 @@ fn resolve_precision(
 /// matches in the Grok-1 inventory (legacy V1 `blk.*` naming convention).
 ///
 /// For the xai-dissect structural manifest (V2 `block_*.slot_*` convention)
-/// the planner uses exact counts from [`Grok1Inventory::count_matching_glob`]
+/// the planner uses exact counts from [`ModelInventory::count_matching`]
 /// instead, so that dry-run coverage reports are accurate for the 770-tensor
 /// inventory (e.g. 64 for `block_*.slot_11.router`).
 ///

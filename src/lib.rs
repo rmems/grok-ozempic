@@ -17,6 +17,7 @@ pub use core::backend::{BackendKernel, LocalBackend, MyelinBackend};
 pub use core::dry_run::{
     CoverageStatus, CoverageSummary, DryRunPlanner, DryRunReport, PlannedKernelCall,
 };
+pub use core::inventory::{InventoryTensor, ModelInventory};
 pub use types::{
     GROK1_HIDDEN_DIM, HybridConfig, HybridOutput, QuantizationConfig, QuantizationInputFormat,
     TelemetrySnapshot, TensorPrecision,

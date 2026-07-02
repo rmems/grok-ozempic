@@ -1,6 +1,6 @@
 use crate::core::grok1_data::build_grok1_tensors;
 use crate::core::inventory::{InventoryTensor, ModelInventory};
-use crate::core::selection::{TensorClass, glob_match};
+use crate::core::selection::TensorClass;
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
 pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
@@ -26,21 +26,6 @@ impl Grok1Inventory {
 
     pub fn is_empty(&self) -> bool {
         self.tensors.is_empty()
-    }
-
-    /// Count how many tensors in the full Grok-1 inventory match the given
-    /// (structural) glob pattern using the same `glob_match` logic as
-    /// classification. This gives exact counts (e.g. 64 for `block_*.slot_11.router`)
-    /// instead of the legacy `estimate_tensor_count` heuristic.
-    ///
-    /// Intended for DryRunPlanner (and similar) when operating against the
-    /// xai-dissect structural (V2) manifest so that coverage summaries are
-    /// accurate for the 770-tensor inventory.
-    pub fn count_matching_glob(&self, pattern: &str) -> usize {
-        self.tensors
-            .iter()
-            .filter(|t| glob_match(pattern, &t.structural_name))
-            .count()
     }
 }
 
