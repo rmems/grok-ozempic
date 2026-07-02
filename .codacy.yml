@@ -1,0 +1,10 @@
+---
+engines:
+  complexity:
+    exclude_paths:
+      - "Cargo.lock"
+  duplication:
+    exclude_paths:
+      - "Cargo.lock"
+exclude_paths:
+  - "Cargo.lock"
