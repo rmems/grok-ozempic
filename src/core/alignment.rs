@@ -288,13 +288,18 @@ mod tests {
         assert_eq!(m.ternary_candidates.len(), 8);
     }
 
+    /// Helper to create a standard test setup: load structural manifest + default config + run plan
+    fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
+        let m = embedded_grok1_structural_manifest();
+        let config = QuantizationConfig::default();
+        crate::core::dry_run::DryRunPlanner::plan(m, &config).expect("plan should succeed")
+    }
+
     #[test]
     fn dry_run_structural_manifest_coverage_is_full() {
-        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+        use crate::core::dry_run::CoverageStatus;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         assert_eq!(
             report.coverage.inventory_coverage,
@@ -306,12 +311,9 @@ mod tests {
 
     #[test]
     fn dry_run_no_tensor_double_counted() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -333,12 +335,9 @@ mod tests {
 
     #[test]
     fn dry_run_router_tensors_are_preserve() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -366,12 +365,9 @@ mod tests {
 
     #[test]
     fn dry_run_expert_tensors_are_ternary() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -399,11 +395,9 @@ mod tests {
 
     #[test]
     fn dry_run_overcomplete_never_triggered_by_valid_manifest() {
-        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+        use crate::core::dry_run::CoverageStatus;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         assert!(
             !matches!(
@@ -416,12 +410,9 @@ mod tests {
 
     #[test]
     fn every_manifest_rule_matches_at_least_one_inventory_tensor() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for plan in &report.rule_plans {
@@ -442,12 +433,9 @@ mod tests {
 
     #[test]
     fn every_inventory_tensor_matched_by_manifest_rule() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         let has_defaults = report.rule_plans.iter().any(|p| p.matcher == "<defaults>");
@@ -466,21 +454,32 @@ mod tests {
         }
     }
 
+    const EXPECTED_PRESERVE: usize = 321;
+    const EXPECTED_FP16: usize = 0;
+    const EXPECTED_TERNARY: usize = 449;
+    const EXPECTED_DEFAULT: usize = 0;
+
     #[test]
     fn preserve_fp16_ternary_boundaries_match_xai_dissect() {
         let inv = Grok1Inventory::full();
         let (preserve, fp16, ternary, default) = inv.count_by_expected_class();
 
         assert_eq!(
-            preserve, 321,
-            "321 preserve: 64 routers + 256 block_norms + 1 final_norm"
+            preserve, EXPECTED_PRESERVE,
+            "{EXPECTED_PRESERVE} preserve: 64 routers + 256 block_norms + 1 final_norm"
         );
-        assert_eq!(fp16, 0, "no fp16 tensors in structural manifest");
         assert_eq!(
-            ternary, 449,
-            "449 ternary: 192 MoE expert + 256 attn_proj_i8 + 1 token_embedding"
+            fp16, EXPECTED_FP16,
+            "no fp16 tensors in structural manifest"
         );
-        assert_eq!(default, 0, "no tensors should fall to default");
+        assert_eq!(
+            ternary, EXPECTED_TERNARY,
+            "{EXPECTED_TERNARY} ternary: 192 MoE expert + 256 attn_proj_i8 + 1 token_embedding"
+        );
+        assert_eq!(
+            default, EXPECTED_DEFAULT,
+            "no tensors should fall to default"
+        );
     }
 
     #[test]
