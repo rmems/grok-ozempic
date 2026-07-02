@@ -8,7 +8,7 @@ engines:
       - "Cargo.lock"
       - "src/**/*_test.rs"
       - "src/**/tests.rs"
-      - "src/**/*"
+      - ".kilo/"
 exclude_paths:
   - "Cargo.lock"
   - "target/"
