@@ -160,8 +160,8 @@ pub struct ConcreteCoverage {
     pub unclassified: Vec<String>,
 }
 
-pub fn classify_full_inventory(
-    inventory: &Grok1Inventory,
+pub fn classify_full_inventory<I: ModelInventory>(
+    inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
 ) -> ConcreteCoverage {
@@ -169,7 +169,7 @@ pub fn classify_full_inventory(
     let mut total_classified = 0;
     let mut unclassified = Vec::new();
 
-    for t in &inventory.tensors {
+    for t in inventory.tensors() {
         let class = classify(&t.structural_name, Some(manifest), &config.router_patterns);
         let label = match &class {
             TensorClass::Preserve { .. } => "preserve",

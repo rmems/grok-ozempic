@@ -4,6 +4,9 @@
 use crate::core::inventory::InventoryTensor;
 use crate::core::selection::TensorClass;
 
+/// Number of blocks in the Grok-1 architecture (matches HF config.json).
+pub const GROK1_BLOCKS: u32 = 64;
+
 pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
     let mut tensors = Vec::with_capacity(770);
 
@@ -30,7 +33,7 @@ pub fn build_grok1_tensors() -> Vec<InventoryTensor> {
         kind: "final_norm",
     });
 
-    for blk in 0..64 {
+    for blk in 0..GROK1_BLOCKS {
         let b = blk;
 
         tensors.push(InventoryTensor {

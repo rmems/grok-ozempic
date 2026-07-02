@@ -189,7 +189,8 @@ impl DryRunPlanner {
         };
         // Estimate default-covered tensors: total inventory minus explicit rules.
         let explicit_covered: usize = rule_plans.iter().map(|p| p.estimated_tensor_count).sum();
-        let default_estimated = GROK1_TENSOR_TOTAL.saturating_sub(explicit_covered);
+        let inventory_total = inventory.total_tensors();
+        let default_estimated = inventory_total.saturating_sub(explicit_covered);
         if default_estimated > 0 {
             rule_plans.push(PlannedKernelCall {
                 matcher: "<defaults>".to_string(),
@@ -203,7 +204,6 @@ impl DryRunPlanner {
             covered_by_rules += default_estimated;
         }
 
-        let inventory_total = GROK1_TENSOR_TOTAL;
         let inventory_coverage = if covered_by_rules == inventory_total {
             CoverageStatus::Full
         } else if covered_by_rules < inventory_total {

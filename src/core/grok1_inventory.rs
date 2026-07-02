@@ -28,22 +28,6 @@ impl Grok1Inventory {
         self.tensors.is_empty()
     }
 
-    pub fn count_by_expected_class(&self) -> (usize, usize, usize, usize) {
-        let mut preserve = 0;
-        let mut fp16 = 0;
-        let mut ternary = 0;
-        let mut default = 0;
-        for t in &self.tensors {
-            match &t.expected_class {
-                TensorClass::Preserve { .. } => preserve += 1,
-                TensorClass::Fp16 { .. } => fp16 += 1,
-                TensorClass::TernaryCandidate { .. } => ternary += 1,
-                TensorClass::Default => default += 1,
-            }
-        }
-        (preserve, fp16, ternary, default)
-    }
-
     /// Count how many tensors in the full Grok-1 inventory match the given
     /// (structural) glob pattern using the same `glob_match` logic as
     /// classification. This gives exact counts (e.g. 64 for `block_*.slot_11.router`)
