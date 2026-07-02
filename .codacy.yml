@@ -6,5 +6,6 @@ engines:
   duplication:
     exclude_paths:
       - "Cargo.lock"
+      - "src/**/*"
 exclude_paths:
   - "Cargo.lock"
