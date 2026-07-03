@@ -1,8 +1,5 @@
 use crate::core::grok1_data::build_grok1_tensors;
 use crate::core::inventory::{InventoryTensor, ModelInventory};
-use crate::core::stream::GROK1_BLOCK_COUNT;
-
-pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
 pub const GROK1_NORMS_PER_BLOCK: usize = 4;
 pub const GROK1_EXPERT_PROJECTIONS_PER_BLOCK: usize = 3;
 pub const GROK1_ATTN_PROJECTIONS_PER_BLOCK: usize = 4;
@@ -41,6 +38,7 @@ impl ModelInventory for Grok1Inventory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::grok1_data::GROK1_BLOCKS;
     use crate::types::GROK1_TENSOR_TOTAL;
 
     #[test]

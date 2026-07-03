@@ -194,8 +194,8 @@ pub fn classify_full_inventory<I: ModelInventory>(
     }
 }
 
-/// Helper to create a standard test setup: load structural manifest + default config + run plan
 #[cfg(test)]
+/// Helper to create a standard test setup: load structural manifest + default config + run plan
 pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
     let m = embedded_grok1_structural_manifest();
     let config = QuantizationConfig::default();
