@@ -29,7 +29,7 @@ jobs:
 
       - name: Run Aikido CLI (Rust)
         run: |
-          npm install -g @aikido-security/cli
+          npm install -g @aikido-security/cli@1.2.3
           aikido scan --language=rust --fail-on high
         env:
           AIKIDO_API_KEY: ${{ secrets.AIKIDO_API_KEY }}
