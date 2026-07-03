@@ -31,6 +31,7 @@ jobs:
       - name: Run Aikido CI API Client
         run: |
           npm install -g @aikidosec/ci-api-client@1.0.16
+          aikido-api-client apikey "$AIKIDO_API_KEY"
           aikido-api-client scan \
             "${{ github.repository_id }}" \
             "${{ github.event.pull_request.base.sha || github.event.before }}" \
