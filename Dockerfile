@@ -31,7 +31,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --mount=type=cache,target=/usr/local/cargo/git \
         cargo test --all-targets --all-features --locked && \
         cargo clippy --all-targets --all-features --locked -- -D warnings && \
-cargo fmt --all -- --check
+        cargo fmt --all -- --check
 
 FROM debian:bookworm-slim AS runtime
 # hadolint ignore=DL3008

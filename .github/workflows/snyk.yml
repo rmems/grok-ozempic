@@ -30,10 +30,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
-      - name: Install Snyk CLI
-        uses: snyk/actions/setup@8e119fbb6c251787721d34ba683ed48eba792766 # master as of 2026-07-02
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
 
-      - name: Run Snyk to check for Rust vulnerabilities
-        run: snyk test --severity-threshold=high --package-manager=cargo
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      - name: Run cargo audit
+        run: cargo audit
