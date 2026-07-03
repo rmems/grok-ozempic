@@ -357,9 +357,7 @@ fn resolve_precision(
 /// instead, so that dry-run coverage reports are accurate for the 770-tensor
 /// inventory (e.g. 64 for `block_*.slot_11.router`).
 ///
-/// This legacy heuristic is retained only for backward compatibility with
-/// older V1 manifests. Exact matching for V2 is always preferred.
-fn estimate_tensor_count(pattern: &str) -> usize {
+fn estimate_tensor_count<I: ModelInventory>(inventory: &I, pattern: &str) -> usize {
     // Wildcard patterns like "blk.*.ffn_up.weight" could match up to
     // GROK1_BLOCK_COUNT tensors (one per block).  Exact names count as 1.
     // This is the legacy V1 heuristic. For structural V2 manifests the
@@ -368,7 +366,23 @@ fn estimate_tensor_count(pattern: &str) -> usize {
     let star_count = pattern.matches('*').count();
     match star_count {
         0 => 1,
-        _ => 8 * star_count, // rough heuristic: each wildcard ~8x
+        _ => {
+            // Scale the wildcard multiplier dynamically based on the number of blocks in the inventory.
+            // For Grok-1 (64 blocks), this results in 64 / 8 = 8, matching the legacy heuristic.
+            let mut unique_blocks = std::collections::HashSet::new();
+            for t in inventory.tensors() {
+                if let Some(b) = t.block {
+                    unique_blocks.insert(b);
+                }
+            }
+            let num_blocks = unique_blocks.len();
+            let multiplier = if num_blocks > 0 {
+                (num_blocks / 8).max(1)
+            } else {
+                8
+            };
+            multiplier * star_count
+        }
     }
 }
 
@@ -380,7 +394,7 @@ fn estimate_tensor_count_for_manifest<I: ModelInventory>(
     if manifest.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
         inventory.count_matching(pattern)
     } else {
-        estimate_tensor_count(pattern)
+        estimate_tensor_count(inventory, pattern)
     }
 }
 
