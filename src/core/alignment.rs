@@ -285,7 +285,10 @@ mod tests {
         let config = QuantizationConfig::default();
         let coverage = classify_full_inventory(&inv, manifest, &config);
 
-        assert_eq!(coverage.total_classified, EXPECTED_PRESERVE + EXPECTED_FP16 + EXPECTED_TERNARY + EXPECTED_DEFAULT);
+        assert_eq!(
+            coverage.total_classified,
+            EXPECTED_PRESERVE + EXPECTED_FP16 + EXPECTED_TERNARY + EXPECTED_DEFAULT
+        );
         assert!(
             coverage.unclassified.is_empty(),
             "no tensors should fall to default; unclassified: {:?}",
