@@ -8,3 +8,9 @@
 # Agent / Editor directories
 .kilo/
 .vscode/
+
+# Generated docs and dependencies (ignore for Codacy analysis)
+target/
+node_modules/
+*.sarif
+.codacy/
