@@ -137,7 +137,7 @@ pub fn check_alignment<I: ModelInventory>(
     }
 
     AlignmentReport {
-        total_inventory_tensors: inventory.tensors().len(),
+        total_inventory_tensors: inventory.total_tensors(),
         matched,
         mismatched,
         preserve_expected_count: preserve_exp,
@@ -194,8 +194,8 @@ pub fn classify_full_inventory<I: ModelInventory>(
     }
 }
 
-#[cfg(test)]
 /// Helper to create a standard test setup: load structural manifest + default config + run plan
+#[cfg(test)]
 pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
     let m = embedded_grok1_structural_manifest();
     let config = QuantizationConfig::default();

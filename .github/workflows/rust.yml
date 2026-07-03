@@ -9,6 +9,10 @@ on:
       - narrow-crest
       - refactor-tests-docs
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
