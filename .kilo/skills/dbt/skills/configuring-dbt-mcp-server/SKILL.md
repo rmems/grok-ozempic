@@ -73,7 +73,7 @@ flowchart TB
 
 ## Prerequisites
 
-### Local Server
+### Local Server Prerequisites
 1. **Install `uv`**: https://docs.astral.sh/uv/getting-started/installation/
 2. **Have a dbt project** (for CLI commands)
 3. **Find paths:**
@@ -84,7 +84,7 @@ flowchart TB
      - macOS/Linux: `which dbt`
      - Windows: `where dbt`
 
-### Remote Server
+### Remote Server Prerequisites
 1. **dbt Cloud account** with AI features enabled
 2. **Production environment ID** (from Orchestration page)
 3. **Personal access token** or service token
@@ -181,7 +181,7 @@ DBT_PROJECT_DIR=/path/to/project
 DBT_PATH=/path/to/dbt
 ```
 
-### Remote Server
+### Remote Server Configuration
 
 ```json
 {

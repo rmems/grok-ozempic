@@ -59,7 +59,7 @@ Err(GrokOzempicError::BackendNotAvailable(
 
 Search for direct calls to `BackendKernel` methods. The `DryRunPlanner` references methods by string name only (`kernel_method: &'static str`), so no breakage there. Fix any other callers found.
 
-### Validation
+### Validation (Phase 1)
 
 ```bash
 cargo test --all-targets --all-features
@@ -117,7 +117,7 @@ Each asserts `matches!(result, Err(GrokOzempicError::BackendNotAvailable(_)))`.
 3. `by_method_sums_to_backend_handled_total` — verify `by_method.values().sum() == backend_handled_total`
 4. `planned_backend_calls_json_contains_coverage_key` — verify `__coverage__` key exists in JSON output
 
-### Validation
+### Validation (Phase 2)
 
 ```bash
 cargo test --all-targets --all-features
@@ -150,7 +150,7 @@ cargo test --all-targets --all-features
    - 0 fp16, 0 default
 2. `no_router_tensor_classified_as_ternary` — invariant: routing-critical tensors never quantized
 
-### Validation
+### Validation (Phase 3)
 
 ```bash
 cargo test --all-targets --all-features
@@ -228,7 +228,7 @@ Add jobs:
 2. **Security audit** — run `cargo audit` (add `actions-rs/audit-check` or equivalent)
 3. **Coverage** — optional: add `cargo-tarpaulin` or `grcov` for test coverage reporting
 
-### Validation
+### Validation (Phase 4)
 
 ```bash
 docker build --target tester .
