@@ -6,7 +6,7 @@ use crate::core::selection::TensorClass;
 use crate::core::stream::GROK1_BLOCK_COUNT;
 
 /// Number of blocks in the Grok-1 architecture (matches HF config.json).
-pub const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
+pub(crate) const GROK1_BLOCKS: u32 = GROK1_BLOCK_COUNT;
 
 fn create_embedding_tensor() -> InventoryTensor {
     InventoryTensor {
