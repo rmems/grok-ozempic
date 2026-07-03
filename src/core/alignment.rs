@@ -273,6 +273,11 @@ mod tests {
         }
     }
 
+    const EXPECTED_PRESERVE: usize = 321;
+    const EXPECTED_FP16: usize = 0;
+    const EXPECTED_TERNARY: usize = 449;
+    const EXPECTED_DEFAULT: usize = 0;
+
     #[test]
     fn concrete_coverage_has_no_unclassified_tensors() {
         let inv = Grok1Inventory::full();
@@ -280,7 +285,7 @@ mod tests {
         let config = QuantizationConfig::default();
         let coverage = classify_full_inventory(&inv, manifest, &config);
 
-        assert_eq!(coverage.total_classified, 770);
+        assert_eq!(coverage.total_classified, EXPECTED_PRESERVE + EXPECTED_FP16 + EXPECTED_TERNARY + EXPECTED_DEFAULT);
         assert!(
             coverage.unclassified.is_empty(),
             "no tensors should fall to default; unclassified: {:?}",
@@ -468,11 +473,6 @@ mod tests {
             );
         }
     }
-
-    const EXPECTED_PRESERVE: usize = 321;
-    const EXPECTED_FP16: usize = 0;
-    const EXPECTED_TERNARY: usize = 449;
-    const EXPECTED_DEFAULT: usize = 0;
 
     #[test]
     fn preserve_fp16_ternary_boundaries_match_xai_dissect() {
