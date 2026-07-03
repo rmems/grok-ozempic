@@ -1,4 +1,4 @@
-name: Snyk Security
+name: Aikido Security
 
 on:
   pull_request:
@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    name: Security audit
+  aikido:
+    name: Aikido Security Scan
     runs-on: ubuntu-latest
 
     steps:
@@ -27,11 +27,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-
-      - name: Run cargo audit
-        run: cargo audit
+      - name: Run Aikido CI API Client (Rust)
+        run: |
+          npm install -g @aikidosec/ci-api-client@1.0.16
+          aikido-ci-client scan --language=rust
+        env:
+          AIKIDO_API_KEY: ${{ secrets.AIKIDO_API_KEY }}
