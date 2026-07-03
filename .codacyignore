@@ -1,0 +1,8 @@
+# Ignore generated and dependency files for Codacy analysis
+target/
+node_modules/
+.kilo/
+.vscode/
+*.sarif
+.codacy/
+docs/

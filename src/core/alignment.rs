@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use crate::core::grok1_inventory::Grok1Inventory;
+use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::selection::{TensorClass, classify};
 use crate::types::QuantizationConfig;
@@ -84,8 +84,8 @@ impl AlignmentReport {
     }
 }
 
-pub fn check_alignment(
-    inventory: &Grok1Inventory,
+pub fn check_alignment<I: ModelInventory>(
+    inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
 ) -> AlignmentReport {
@@ -102,7 +102,7 @@ pub fn check_alignment(
     let mut mismatches = Vec::new();
     let mut boundary_summary: BTreeMap<String, usize> = BTreeMap::new();
 
-    for t in &inventory.tensors {
+    for t in inventory.tensors() {
         let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
         let expected = &t.expected_class;
 
@@ -137,7 +137,7 @@ pub fn check_alignment(
     }
 
     AlignmentReport {
-        total_inventory_tensors: inventory.len(),
+        total_inventory_tensors: inventory.total_tensors(),
         matched,
         mismatched,
         preserve_expected_count: preserve_exp,
@@ -159,8 +159,8 @@ pub struct ConcreteCoverage {
     pub unclassified: Vec<String>,
 }
 
-pub fn classify_full_inventory(
-    inventory: &Grok1Inventory,
+pub fn classify_full_inventory<I: ModelInventory>(
+    inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
 ) -> ConcreteCoverage {
@@ -168,7 +168,7 @@ pub fn classify_full_inventory(
     let mut total_classified = 0;
     let mut unclassified = Vec::new();
 
-    for t in &inventory.tensors {
+    for t in inventory.tensors() {
         let class = classify(&t.structural_name, Some(manifest), &config.router_patterns);
         let label = match &class {
             TensorClass::Preserve { .. } => "preserve",
@@ -192,6 +192,19 @@ pub fn classify_full_inventory(
         total_classified,
         unclassified,
     }
+}
+
+#[cfg(test)]
+/// Helper to create a standard test setup: load structural manifest + default config + run plan
+pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
+    let m = embedded_grok1_structural_manifest();
+    let config = QuantizationConfig::default();
+    crate::core::dry_run::DryRunPlanner::plan(
+        &crate::core::grok1_inventory::Grok1Inventory::full(),
+        m,
+        &config,
+    )
+    .expect("plan should succeed")
 }
 
 #[cfg(test)]
@@ -260,6 +273,11 @@ mod tests {
         }
     }
 
+    const EXPECTED_PRESERVE: usize = 321;
+    const EXPECTED_FP16: usize = 0;
+    const EXPECTED_TERNARY: usize = 449;
+    const EXPECTED_DEFAULT: usize = 0;
+
     #[test]
     fn concrete_coverage_has_no_unclassified_tensors() {
         let inv = Grok1Inventory::full();
@@ -267,16 +285,28 @@ mod tests {
         let config = QuantizationConfig::default();
         let coverage = classify_full_inventory(&inv, manifest, &config);
 
-        assert_eq!(coverage.total_classified, 770);
+        assert_eq!(
+            coverage.total_classified,
+            EXPECTED_PRESERVE + EXPECTED_FP16 + EXPECTED_TERNARY + EXPECTED_DEFAULT
+        );
         assert!(
             coverage.unclassified.is_empty(),
             "no tensors should fall to default; unclassified: {:?}",
             coverage.unclassified
         );
-        assert_eq!(*coverage.by_class.get("preserve").unwrap_or(&0), 321);
-        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), 0);
-        assert_eq!(*coverage.by_class.get("ternary").unwrap_or(&0), 449);
-        assert_eq!(*coverage.by_class.get("default").unwrap_or(&0), 0);
+        assert_eq!(
+            *coverage.by_class.get("preserve").unwrap_or(&0),
+            EXPECTED_PRESERVE
+        );
+        assert_eq!(*coverage.by_class.get("fp16").unwrap_or(&0), EXPECTED_FP16);
+        assert_eq!(
+            *coverage.by_class.get("ternary").unwrap_or(&0),
+            EXPECTED_TERNARY
+        );
+        assert_eq!(
+            *coverage.by_class.get("default").unwrap_or(&0),
+            EXPECTED_DEFAULT
+        );
     }
 
     #[test]
@@ -290,11 +320,9 @@ mod tests {
 
     #[test]
     fn dry_run_structural_manifest_coverage_is_full() {
-        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+        use crate::core::dry_run::CoverageStatus;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         assert_eq!(
             report.coverage.inventory_coverage,
@@ -306,12 +334,9 @@ mod tests {
 
     #[test]
     fn dry_run_no_tensor_double_counted() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -333,12 +358,9 @@ mod tests {
 
     #[test]
     fn dry_run_router_tensors_are_preserve() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -366,12 +388,9 @@ mod tests {
 
     #[test]
     fn dry_run_expert_tensors_are_ternary() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for t in &inv.tensors {
@@ -399,11 +418,9 @@ mod tests {
 
     #[test]
     fn dry_run_overcomplete_never_triggered_by_valid_manifest() {
-        use crate::core::dry_run::{CoverageStatus, DryRunPlanner};
+        use crate::core::dry_run::CoverageStatus;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
 
         assert!(
             !matches!(
@@ -416,12 +433,9 @@ mod tests {
 
     #[test]
     fn every_manifest_rule_matches_at_least_one_inventory_tensor() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         for plan in &report.rule_plans {
@@ -442,12 +456,9 @@ mod tests {
 
     #[test]
     fn every_inventory_tensor_matched_by_manifest_rule() {
-        use crate::core::dry_run::DryRunPlanner;
         use crate::core::selection::glob_match;
 
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = DryRunPlanner::plan(manifest, &config).expect("plan should succeed");
+        let report = plan_structural_manifest();
         let inv = Grok1Inventory::full();
 
         let has_defaults = report.rule_plans.iter().any(|p| p.matcher == "<defaults>");
@@ -472,15 +483,21 @@ mod tests {
         let (preserve, fp16, ternary, default) = inv.count_by_expected_class();
 
         assert_eq!(
-            preserve, 321,
-            "321 preserve: 64 routers + 256 block_norms + 1 final_norm"
+            preserve, EXPECTED_PRESERVE,
+            "{EXPECTED_PRESERVE} preserve: 64 routers + 256 block_norms + 1 final_norm"
         );
-        assert_eq!(fp16, 0, "no fp16 tensors in structural manifest");
         assert_eq!(
-            ternary, 449,
-            "449 ternary: 192 MoE expert + 256 attn_proj_i8 + 1 token_embedding"
+            fp16, EXPECTED_FP16,
+            "no fp16 tensors in structural manifest"
         );
-        assert_eq!(default, 0, "no tensors should fall to default");
+        assert_eq!(
+            ternary, EXPECTED_TERNARY,
+            "{EXPECTED_TERNARY} ternary: 192 MoE expert + 256 attn_proj_i8 + 1 token_embedding"
+        );
+        assert_eq!(
+            default, EXPECTED_DEFAULT,
+            "no tensors should fall to default"
+        );
     }
 
     #[test]
