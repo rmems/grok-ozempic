@@ -1,0 +1,35 @@
+name: Aikido Security
+
+on:
+  pull_request:
+    branches: [main, refactor-tests-docs]
+  push:
+    branches:
+      - main
+      - narrow-crest
+      - refactor-tests-docs
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  aikido:
+    name: Aikido Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Run Aikido CLI (Rust)
+        run: |
+          npm install -g @aikidosec/cli
+          aikido scan --language=rust --fail-on high
+        env:
+          AIKIDO_API_KEY: ${{ secrets.AIKIDO_API_KEY }}
