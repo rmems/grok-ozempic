@@ -20,6 +20,7 @@ jobs:
   aikido:
     name: Aikido Security Scan
     runs-on: ubuntu-latest
+    if: ${{ vars.AIKIDO_CI_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -31,11 +32,11 @@ jobs:
       - name: Run Aikido CI API Client
         run: |
           npm install -g @aikidosec/ci-api-client@1.0.16
-          aikido-api-client apikey "$AIKIDO_API_KEY"
+          aikido-api-client apikey "$AIKIDO_CI_KEY"
           aikido-api-client scan \
             "${{ github.repository_id }}" \
             "${{ github.event.pull_request.base.sha || github.event.before }}" \
             "${{ github.sha }}" \
             "${{ github.head_ref || github.ref_name }}"
         env:
-          AIKIDO_API_KEY: ${{ secrets.AIKIDO_API_KEY }}
+          AIKIDO_CI_KEY: ${{ vars.AIKIDO_CI_KEY }}
