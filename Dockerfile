@@ -25,12 +25,13 @@ COPY . .
 # The tester stage builds with `--all-features` to run clippy/tests against all features
 # (including the async feature for tokio / myelin) for comprehensive code quality check.
 # We also use BuildKit cache mounts (Issue #31) here to preserve build artifacts.
+# Note: /app/target is NOT cached in tester stage to ensure deterministic test results
+# (avoids stale artifacts masking failures when files are removed/renamed).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
-    cargo test --all-targets --all-features --locked && \
-    cargo clippy --all-targets --all-features --locked -- -D warnings && \
-    cargo fmt --all -- --check
+        --mount=type=cache,target=/usr/local/cargo/git \
+        cargo test --all-targets --all-features --locked && \
+        cargo clippy --all-targets --all-features --locked -- -D warnings && \
+cargo fmt --all -- --check
 
 FROM debian:bookworm-slim AS runtime
 # hadolint ignore=DL3008
