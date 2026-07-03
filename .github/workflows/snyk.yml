@@ -32,4 +32,4 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          command: snyk test --severity-threshold=high --package-manager=cargo
+          command: test --severity-threshold=high --package-manager=cargo
