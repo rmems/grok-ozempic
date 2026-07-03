@@ -4,3 +4,7 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Agent / Editor directories
+.kilo/
+.vscode/
