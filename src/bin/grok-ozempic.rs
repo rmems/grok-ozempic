@@ -428,6 +428,43 @@ fn path_key(path: &Path) -> PathBuf {
     }
 }
 
+fn is_quantize_weight_file(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.ends_with(".npy") || name.ends_with(".safetensors")
+}
+
+fn reject_manifest_collision(output_key: &Path, manifest: &Path) -> anyhow::Result<()> {
+    if path_key(manifest) == output_key {
+        anyhow::bail!(
+            "--output collides with --manifest ({}); refuse to overwrite classification input",
+            manifest.display()
+        );
+    }
+    Ok(())
+}
+
+fn reject_input_weight_collisions(input_dir: &Path, output_key: &Path) -> anyhow::Result<()> {
+    let rd = std::fs::read_dir(input_dir)
+        .map_err(|e| anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display()))?;
+    for entry in rd {
+        let entry = entry.map_err(|e| {
+            anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
+        })?;
+        let path = entry.path();
+        if path.is_file() && is_quantize_weight_file(&path) && path_key(&path) == output_key {
+            anyhow::bail!(
+                "--output collides with input weight file {}; refuse to truncate quantization input",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Reject `--output` when it would overwrite an input weight file or the manifest.
 fn reject_output_path_collisions(
     input_dir: &Path,
@@ -436,40 +473,9 @@ fn reject_output_path_collisions(
 ) -> anyhow::Result<()> {
     let out_key = path_key(output);
     if let Some(m) = manifest {
-        let m_key = path_key(m);
-        if m_key == out_key {
-            anyhow::bail!(
-                "--output collides with --manifest ({}); refuse to overwrite classification input",
-                m.display()
-            );
-        }
+        reject_manifest_collision(&out_key, m)?;
     }
-    let rd = std::fs::read_dir(input_dir)
-        .map_err(|e| anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display()))?;
-    for entry in rd {
-        let entry = entry.map_err(|e| {
-            anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
-        })?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if !(name.ends_with(".npy") || name.ends_with(".safetensors")) {
-            continue;
-        }
-        if path_key(&path) == out_key {
-            anyhow::bail!(
-                "--output collides with input weight file {}; refuse to truncate quantization input",
-                path.display()
-            );
-        }
-    }
-    Ok(())
+    reject_input_weight_collisions(input_dir, &out_key)
 }
 
 fn load_manifest_ir(
