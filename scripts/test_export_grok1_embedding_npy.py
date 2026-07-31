@@ -244,13 +244,17 @@ class WriteNpyGuardTests(unittest.TestCase):
                 exp.write_npy_f32(path, shape, memoryview(b"\x00" * 4))
             self.assertIn("65535", str(ctx.exception))
 
-    def test_published_mode_not_owner_only(self) -> None:
+    def test_published_mode_follows_umask(self) -> None:
+        import os
+
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "out.npy"
+            umask = os.umask(0o022)
+            os.umask(umask)
+            expected = 0o666 & ~umask
             exp.write_npy_f32(path, (2, 2), memoryview(struct.pack("<4f", 0, 1, 2, 3)))
             mode = path.stat().st_mode & 0o777
-            # Must not remain mkstemp's 0o600; group/other may still be 0 under umask.
-            self.assertNotEqual(mode, 0o600)
+            self.assertEqual(mode, expected)
 
 
 if __name__ == "__main__":

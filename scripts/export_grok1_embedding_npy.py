@@ -454,8 +454,7 @@ def validate_stem(stem: str) -> str:
     return stem
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description=__doc__)
+def _add_path_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--shard",
         type=Path,
@@ -480,6 +479,9 @@ def build_parser() -> argparse.ArgumentParser:
             "required for any other shard)"
         ),
     )
+
+
+def _add_layout_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--offset",
         type=lambda s: int(s, 0),
@@ -505,6 +507,12 @@ def build_parser() -> argparse.ArgumentParser:
             f"shard is {DEFAULT_SHARD_NAME}"
         ),
     )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    _add_path_args(p)
+    _add_layout_args(p)
     return p
 
 
@@ -569,7 +577,7 @@ def _resolve_stem(shard: Path, stem_arg: str | None) -> str:
     """Default stem only for the embedding shard; require --stem otherwise."""
     if stem_arg is not None:
         return validate_stem(stem_arg)
-    if shard.name == DEFAULT_SHARD_NAME:
+    if _can_use_embedding_defaults(shard):
         return DEFAULT_STEM
     raise LayoutError(
         f"--stem is required when --shard basename is not {DEFAULT_SHARD_NAME!r} "

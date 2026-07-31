@@ -8,7 +8,7 @@ on:
       - "releases/*"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -24,5 +24,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Unit tests (stdlib only)
+      - name: Install NumPy (round-trip load check)
+        run: python3 -m pip install --user 'numpy>=1.26,<3'
+
+      - name: Unit tests
         run: python3 -m unittest scripts.test_export_grok1_embedding_npy -v
