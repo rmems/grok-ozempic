@@ -185,6 +185,30 @@ mod quantize_goz1_config_tests {
         assert!((cfg.gif_threshold - 0.1).abs() < f32::EPSILON);
         assert!(cfg.use_embedded_baseline);
     }
+
+    #[test]
+    fn quantize_goz1_config_omitted_gif_keeps_default() {
+        let cfg = quantize_goz1_config(
+            "/tmp/in",
+            "/tmp/out.goz1",
+            QuantizationInputFormat::NpyDir,
+            None,
+            None,
+            false,
+        );
+        assert!((cfg.gif_threshold - 0.05).abs() < f32::EPSILON);
+        assert!(!cfg.use_embedded_baseline);
+        assert!(cfg.manifest_path.is_none());
+    }
+
+    #[test]
+    fn validate_gif_threshold_rejects_nan_and_negative() {
+        assert!(validate_gif_threshold(0.0).is_ok());
+        assert!(validate_gif_threshold(0.05).is_ok());
+        assert!(validate_gif_threshold(f32::NAN).is_err());
+        assert!(validate_gif_threshold(f32::INFINITY).is_err());
+        assert!(validate_gif_threshold(-0.1).is_err());
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
