@@ -31,6 +31,58 @@ pub(crate) fn cmd_quantize_goz1(
     maybe_verify_goz1(&output, verify)
 }
 
+fn require_input_dir(input_dir: &Path) -> anyhow::Result<()> {
+    if input_dir.is_dir() {
+        return Ok(());
+    }
+    anyhow::bail!("--input-dir is not a directory: {}", input_dir.display())
+}
+
+fn optional_gif_ok(gif_threshold: Option<f32>) -> anyhow::Result<()> {
+    match gif_threshold {
+        Some(t) => validate_gif_threshold(t).map_err(anyhow::Error::msg),
+        None => Ok(()),
+    }
+}
+
+fn goz1_config_from_cli(
+    input_dir_s: String,
+    output_s: String,
+    input_format: CliInputFormat,
+    manifest: Option<PathBuf>,
+    gif_threshold: Option<f32>,
+    use_embedded_baseline: bool,
+) -> QuantizationConfig {
+    quantize_goz1_config(
+        input_dir_s,
+        output_s,
+        QuantizationInputFormat::from(input_format),
+        manifest,
+        gif_threshold,
+        use_embedded_baseline,
+    )
+}
+
+fn utf8_io_paths(input_dir: &Path, output: &Path) -> anyhow::Result<(String, String)> {
+    Ok((
+        path_to_utf8_string(input_dir, "--input-dir")?,
+        path_to_utf8_string(output, "--output")?,
+    ))
+}
+
+/// Path UTF-8 checks, GIF flag, and output collision preflight (hard links + env manifest).
+fn validate_goz1_cli_paths(
+    input_dir: &Path,
+    output: &Path,
+    manifest: Option<&Path>,
+    gif_threshold: Option<f32>,
+) -> anyhow::Result<(String, String)> {
+    require_input_dir(input_dir)?;
+    optional_gif_ok(gif_threshold)?;
+    reject_output_path_collisions(input_dir, output, manifest)?;
+    utf8_io_paths(input_dir, output)
+}
+
 /// Validate CLI paths/flags and build a [`QuantizationConfig`] for quantize-goz1.
 fn prepare_quantize_goz1(
     input_dir: &Path,
@@ -40,23 +92,13 @@ fn prepare_quantize_goz1(
     gif_threshold: Option<f32>,
     use_embedded_baseline: bool,
 ) -> anyhow::Result<QuantizationConfig> {
-    if !input_dir.is_dir() {
-        anyhow::bail!("--input-dir is not a directory: {}", input_dir.display());
-    }
-    let input_dir_s = path_to_utf8_string(input_dir, "--input-dir")?;
-    let output_s = path_to_utf8_string(output, "--output")?;
-    if let Some(t) = gif_threshold {
-        validate_gif_threshold(t).map_err(anyhow::Error::msg)?;
-    }
-    // Prevent File::create(output) from truncating an input shard or the
-    // classification manifest (Codex P1 on #43), including hard-link aliases
-    // and GROK_OZEMPIC_MANIFEST when --manifest is omitted.
-    reject_output_path_collisions(input_dir, output, manifest.as_deref())?;
+    let (input_dir_s, output_s) =
+        validate_goz1_cli_paths(input_dir, output, manifest.as_deref(), gif_threshold)?;
     note_manifest_policy(manifest.is_none() && !use_embedded_baseline);
-    Ok(quantize_goz1_config(
+    Ok(goz1_config_from_cli(
         input_dir_s,
         output_s,
-        QuantizationInputFormat::from(input_format),
+        input_format,
         manifest,
         gif_threshold,
         use_embedded_baseline,
@@ -182,6 +224,10 @@ fn reject_manifest_collision(output: &Path, manifest: &Path) -> anyhow::Result<(
     Ok(())
 }
 
+fn weight_collides_with_output(path: &Path, output: &Path) -> bool {
+    path.is_file() && is_quantize_weight_file(path) && same_file_identity(path, output)
+}
+
 fn reject_input_weight_collisions(input_dir: &Path, output: &Path) -> anyhow::Result<()> {
     let rd = std::fs::read_dir(input_dir)
         .map_err(|e| anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display()))?;
@@ -190,7 +236,7 @@ fn reject_input_weight_collisions(input_dir: &Path, output: &Path) -> anyhow::Re
             anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
         })?;
         let path = entry.path();
-        if path.is_file() && is_quantize_weight_file(&path) && same_file_identity(&path, output) {
+        if weight_collides_with_output(&path, output) {
             anyhow::bail!(
                 "--output collides with input weight file {}; refuse to truncate quantization input",
                 path.display()
