@@ -76,6 +76,9 @@ The combined sprint path for ingest validation, one-block smoke validation,
 full `saaq-g1-v0` metadata conversion, and final structural validation is
 documented in [`docs/grok1-saaq-artifact-flow.md`](docs/grok1-saaq-artifact-flow.md).
 
+These commands write **metadata / structural indexes only** — they do not
+stream or ternary-quantize weight payloads.
+
 Key CLI entry points are available behind the `cli` feature:
 
 ```bash
@@ -84,6 +87,29 @@ cargo run --features cli -- smoke-grok1 --manifest dissect/grok-1/baseline.json 
 cargo run --features cli -- convert-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-artifact --dry-run
 cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --checksums /tmp/grok1-artifact/checksums.json --output-root /tmp/grok1-validation
 ```
+
+### Export Grok-1 embedding for GOZ1 (pickle → `.npy`)
+
+Official `xai-org/grok-1` `ckpt-0` shards are JAX **pickle** frames.
+`run_quantization` only accepts **safetensors** or a flat **`.npy`** directory
+(`QuantizationInputFormat::NpyDir`). For the first real embedding quant
+([#37](https://github.com/rmems/grok-ozempic/issues/37) / Linear
+[RM-189](https://linear.app/rpd-34/issue/RM-189)):
+
+```bash
+# Customize CKPT / OUT for your machine (defaults also use ~/.models/xai-grok-1/...)
+CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
+OUT="${OUT:-$HOME/.models/xai-grok-1/export-npy}"
+python3 scripts/export_grok1_embedding_npy.py \
+  --shard "$CKPT/tensor00000_000" \
+  --output-dir "$OUT"
+```
+
+This writes `embedding__slot_00__token_embedding.npy` (logical name
+`embedding.slot_00.token_embedding` after `__` → `.` stem mapping). Use that
+directory as `--input-dir` for GOZ1 packing once the `quantize-goz1` CLI is
+available ([#38](https://github.com/rmems/grok-ozempic/issues/38) /
+[RM-193](https://linear.app/rpd-34/issue/RM-193)).
 
 ## CUDA kernel ownership
 

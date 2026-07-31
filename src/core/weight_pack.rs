@@ -16,7 +16,7 @@ use std::{
 use crate::error::{GrokOzempicError, Result};
 
 /// File magic: ASCII `GOZ1` (grok-ozempic container version 1), little-endian.
-const OZ1_MAGIC: u32 = u32::from_le_bytes([b'G', b'O', b'Z', b'1']);
+const OZ1_MAGIC: u32 = u32::from_le_bytes(*b"GOZ1");
 const OZ1_VERSION: u32 = 1;
 
 /// Tensor blob alignment in bytes.

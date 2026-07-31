@@ -13,7 +13,7 @@ use crate::{
     error::{GrokOzempicError, Result},
 };
 
-const OZ1_MAGIC: u32 = u32::from_le_bytes([b'G', b'O', b'Z', b'1']);
+const OZ1_MAGIC: u32 = u32::from_le_bytes(*b"GOZ1");
 
 const META_U32: u32 = 0;
 const META_STR: u32 = 1;

@@ -1,0 +1,12 @@
+# Qodana for Rust (EAP) — see https://www.jetbrains.com/help/qodana/rust.html
+version: "1.0"
+linter: qodana-rust
+
+# Skip build artifacts and local tool caches.
+exclude:
+  - name: All
+    paths:
+      - target
+      - .codacy
+      - .kilo
+      - .beads

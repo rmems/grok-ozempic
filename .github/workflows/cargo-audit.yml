@@ -1,13 +1,11 @@
-name: Snyk Security
+name: Cargo audit
 
 on:
   pull_request:
-    branches: [main, refactor-tests-docs]
+    branches: [main]
   push:
     branches:
       - main
-      - narrow-crest
-      - refactor-tests-docs
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
