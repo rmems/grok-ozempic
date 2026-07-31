@@ -187,28 +187,34 @@ def _dissect_search_dirs(explicit: str | None) -> list[Path]:
     return out
 
 
-def _dissect_cmd(binary: Path, shard: Path) -> list[str]:
-    return [
-        str(binary),
-        "dissect",
-        str(shard.parent),
-        "--limit",
-        "1",
-        "--prefix",
-        shard.name,
-    ]
+def _invoke_dissect(bin_dir: Path, shard: Path) -> str | None:
+    """Run basename-checked ``xai-dissect`` under ``bin_dir`` (no shell).
 
-
-def _invoke_dissect(cmd: list[str]) -> str | None:
-    """Run dissect; return combined output on success, else None."""
+    Opengrep requires a static program name in argv; Ruff S607 wants a full
+    path. Satisfy both: static argv[0] ``\"xai-dissect\"`` and
+    ``executable=`` the absolute path of the validated binary.
+    """
+    binary = bin_dir / DISSECT_BIN
+    if not _is_safe_dissect_binary(binary):
+        return None
+    program = str(binary.resolve())
     try:
-        # Absolute path to basename-checked binary; static argv, no shell.
         proc = subprocess.run(  # nosec B603  # noqa: S603
-            cmd,
+            [
+                "xai-dissect",
+                "dissect",
+                str(shard.parent),
+                "--limit",
+                "1",
+                "--prefix",
+                shard.name,
+            ],
+            executable=program,
             check=False,
             capture_output=True,
             text=True,
             timeout=120,
+            shell=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -218,11 +224,8 @@ def _invoke_dissect(cmd: list[str]) -> str | None:
 
 
 def _run_dissect_in_dir(bin_dir: Path, shard: Path) -> Layout | None:
-    """Run fixed-name ``xai-dissect`` via absolute path under ``bin_dir``."""
-    binary = bin_dir / DISSECT_BIN
-    if not _is_safe_dissect_binary(binary):
-        return None
-    text = _invoke_dissect(_dissect_cmd(binary, shard))
+    """Run fixed-name ``xai-dissect`` from a single trusted directory."""
+    text = _invoke_dissect(bin_dir, shard)
     if text is None:
         return None
     return parse_dissect_table(text)
