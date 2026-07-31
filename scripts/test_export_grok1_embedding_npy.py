@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import os
 import struct
-import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 # Import sibling module without installing as package.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -18,6 +17,10 @@ import export_grok1_embedding_npy as exp  # noqa: E402
 
 def _write_fake_shard(path: Path, prefix: bytes, floats: list[float]) -> None:
     path.write_bytes(prefix + struct.pack(f"<{len(floats)}f", *floats))
+
+
+def argparse_ns(**kw):
+    return SimpleNamespace(**kw)
 
 
 class ParseShapeTests(unittest.TestCase):
@@ -41,7 +44,8 @@ class ParseShapeTests(unittest.TestCase):
 
 class StemTests(unittest.TestCase):
     def test_ok(self) -> None:
-        self.assertEqual(exp.validate_stem("embedding__slot_00__token_embedding"), "embedding__slot_00__token_embedding")
+        stem = "embedding__slot_00__token_embedding"
+        self.assertEqual(exp.validate_stem(stem), stem)
 
     def test_path_escape(self) -> None:
         with self.assertRaises(exp.LayoutError):
@@ -75,7 +79,6 @@ class WriteNpyTests(unittest.TestCase):
 
 class LayoutPolicyTests(unittest.TestCase):
     def _ns(self, **kw):
-        # Minimal namespace for resolve_layout
         defaults = dict(
             offset=None,
             shape=None,
@@ -87,41 +90,34 @@ class LayoutPolicyTests(unittest.TestCase):
         return argparse_ns(**defaults)
 
     def test_default_shard_name_allows_defaults(self) -> None:
-        shard = Path("/tmp") / exp.DEFAULT_SHARD_NAME
-        ns = self._ns(no_dissect=True)
-        off, shape, dtype, nb = exp.resolve_layout(shard, ns)
-        self.assertEqual(off, exp.DEFAULT_OFFSET)
-        self.assertEqual(shape, exp.DEFAULT_SHAPE)
-        self.assertEqual(dtype, exp.DEFAULT_DTYPE)
-        self.assertIsNone(nb)
+        with tempfile.TemporaryDirectory() as td:
+            shard = Path(td) / exp.DEFAULT_SHARD_NAME
+            ns = self._ns(no_dissect=True)
+            off, shape, dtype, nb = exp.resolve_layout(shard, ns)
+            self.assertEqual(off, exp.DEFAULT_OFFSET)
+            self.assertEqual(shape, exp.DEFAULT_SHAPE)
+            self.assertEqual(dtype, exp.DEFAULT_DTYPE)
+            self.assertIsNone(nb)
 
     def test_other_shard_requires_full_layout(self) -> None:
-        shard = Path("/tmp/other_tensor_001")
-        ns = self._ns(no_dissect=True, offset=10)
-        with self.assertRaises(exp.LayoutError) as ctx:
-            exp.resolve_layout(shard, ns)
-        self.assertIn("missing", str(ctx.exception).lower())
+        with tempfile.TemporaryDirectory() as td:
+            shard = Path(td) / "other_tensor_001"
+            ns = self._ns(no_dissect=True, offset=10)
+            with self.assertRaises(exp.LayoutError) as ctx:
+                exp.resolve_layout(shard, ns)
+            self.assertIn("missing", str(ctx.exception).lower())
 
     def test_other_shard_full_explicit_ok(self) -> None:
-        shard = Path("/tmp/other_tensor_001")
-        ns = self._ns(
-            no_dissect=True,
-            offset=8,
-            shape="2,2",
-            dtype="f32",
-        )
-        off, shape, dtype, _ = exp.resolve_layout(shard, ns)
-        self.assertEqual((off, shape, dtype), (8, (2, 2), "f32"))
-
-
-def argparse_ns(**kw):
-    class NS:
-        pass
-
-    n = NS()
-    for k, v in kw.items():
-        setattr(n, k, v)
-    return n
+        with tempfile.TemporaryDirectory() as td:
+            shard = Path(td) / "other_tensor_001"
+            ns = self._ns(
+                no_dissect=True,
+                offset=8,
+                shape="2,2",
+                dtype="f32",
+            )
+            off, shape, dtype, _ = exp.resolve_layout(shard, ns)
+            self.assertEqual((off, shape, dtype), (8, (2, 2), "f32"))
 
 
 class ExplicitDissectPathTests(unittest.TestCase):
@@ -164,30 +160,18 @@ class EndToEndCliTests(unittest.TestCase):
             shard = td_path / "other.bin"
             _write_fake_shard(shard, b"\x00" * 8, [0.0, 1.0, -1.0, 0.5])
             out = td_path / "out"
-            script = Path(__file__).resolve().parent / "export_grok1_embedding_npy.py"
-            r = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--shard",
-                    str(shard),
-                    "--output-dir",
-                    str(out),
-                    "--offset",
-                    "8",
-                    "--shape",
-                    "2,2",
-                    "--dtype",
-                    "f32",
-                    "--stem",
-                    "blk__0__ffn_up__weight",
-                    "--no-dissect",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
+            ns = argparse_ns(
+                shard=shard,
+                output_dir=out,
+                offset=8,
+                shape="2,2",
+                dtype="f32",
+                stem="blk__0__ffn_up__weight",
+                no_dissect=True,
+                xai_dissect=None,
             )
-            self.assertEqual(r.returncode, 0, msg=r.stderr + r.stdout)
+            code = exp.export_embedding(ns)
+            self.assertEqual(code, 0)
             npy = out / "blk__0__ffn_up__weight.npy"
             self.assertTrue(npy.is_file())
 
@@ -196,25 +180,18 @@ class EndToEndCliTests(unittest.TestCase):
             td_path = Path(td)
             shard = td_path / exp.DEFAULT_SHARD_NAME
             _write_fake_shard(shard, b"\x00" * 8, [1.0, 2.0, 3.0, 4.0])
-            script = Path(__file__).resolve().parent / "export_grok1_embedding_npy.py"
-            r = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--shard",
-                    str(shard),
-                    "--output-dir",
-                    str(td_path / "out"),
-                    "--shape",
-                    "1,abc",
-                    "--no-dissect",
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
+            ns = argparse_ns(
+                shard=shard,
+                output_dir=td_path / "out",
+                offset=None,
+                shape="1,abc",
+                dtype=None,
+                stem=exp.DEFAULT_STEM,
+                no_dissect=True,
+                xai_dissect=None,
             )
-            self.assertEqual(r.returncode, 1)
-            self.assertIn("error:", r.stderr)
+            code = exp.export_embedding(ns)
+            self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

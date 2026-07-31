@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Export a Grok-1 official pickle shard payload to a stream-compatible .npy file.
+r"""
+Export a Grok-1 official pickle shard payload to a stream-compatible .npy file.
 
 Official ``xai-org/grok-1`` ckpt-0 shards are JAX/pickle frames. ``grok-ozempic``
 ``stream::run_quantization`` only accepts ``*.safetensors`` or flat ``*.npy``
@@ -27,7 +28,7 @@ import os
 import re
 import shutil
 import struct
-import subprocess  # nosec B404 — only invokes fixed basename xai-dissect via PATH
+import subprocess  # nosec B404
 import sys
 import tempfile
 from pathlib import Path
@@ -47,10 +48,12 @@ Layout = tuple[int, int, tuple[int, ...], str]
 
 
 class LayoutError(ValueError):
+
     """Invalid layout / CLI input for export."""
 
 
 def expected_nbytes(shape: tuple[int, ...], dtype: str) -> int:
+    """Return payload size for shape and dtype, or raise LayoutError."""
     if dtype not in ITEMSIZE:
         raise LayoutError(
             f"unsupported dtype: {dtype!r}; supported: {sorted(ITEMSIZE)}"
@@ -65,21 +68,24 @@ def _parse_hex_or_int(s: str) -> int:
     return int(s, 16) if s.lower().startswith("0x") else int(s)
 
 
+def _parse_one_dim(p: str) -> int:
+    try:
+        d = int(p, 0)
+    except ValueError as e:
+        raise LayoutError(f"invalid shape component {p!r}: not an integer") from e
+    if d <= 0:
+        raise LayoutError(f"invalid shape component {d}: must be > 0")
+    return d
+
+
 def _parse_shape_csv(inner: str) -> tuple[int, ...]:
     """Parse comma-separated positive dimensions; empty or non-int is an error."""
     parts = [x.strip() for x in inner.split(",") if x.strip()]
     if not parts:
-        raise LayoutError("shape must be a non-empty comma-separated list of positive ints")
-    dims: list[int] = []
-    for p in parts:
-        try:
-            d = int(p, 0)
-        except ValueError as e:
-            raise LayoutError(f"invalid shape component {p!r}: not an integer") from e
-        if d <= 0:
-            raise LayoutError(f"invalid shape component {d}: must be > 0")
-        dims.append(d)
-    return tuple(dims)
+        raise LayoutError(
+            "shape must be a non-empty comma-separated list of positive ints"
+        )
+    return tuple(_parse_one_dim(p) for p in parts)
 
 
 def _parse_pretty_dissect_row(text: str) -> Layout | None:
@@ -128,70 +134,87 @@ def _is_safe_dissect_binary(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
+def _append_unique(dirs: list[Path], seen: set[Path], d: Path) -> None:
+    if d not in seen:
+        seen.add(d)
+        dirs.append(d)
+
+
+def _optional_install_dirs() -> list[Path]:
+    """Portable optional install locations (no username hardcoding)."""
+    found: list[Path] = []
+    for rel in (
+        Path.home() / "rmems" / "xai-dissect" / "target" / "release",
+        Path.home() / "xai-dissect" / "target" / "release",
+    ):
+        if _is_safe_dissect_binary(rel / DISSECT_BIN):
+            found.append(rel.resolve())
+    return found
+
+
 def _dissect_search_dirs(explicit: str | None) -> list[Path]:
-    """Directories to put on PATH so we can exec the fixed ``xai-dissect`` name.
+    """
+    Directories to put on PATH so we can exec the fixed ``xai-dissect`` name.
 
     If ``explicit`` is set, it must resolve to a safe binary; otherwise raises
     LayoutError (never silently ignored).
     """
-    dirs: list[Path] = []
     if explicit:
         p = Path(explicit).expanduser()
         if not _is_safe_dissect_binary(p):
             raise LayoutError(
                 f"--xai-dissect path is not a usable {DISSECT_BIN!r} binary: {p}"
             )
-        dirs.append(p.parent.resolve())
-        return dirs
+        return [p.parent.resolve()]
 
+    out: list[Path] = []
+    seen: set[Path] = set()
     which = shutil.which(DISSECT_BIN)
     if which:
-        dirs.append(Path(which).resolve().parent)
-    # Portable optional install locations (no username hardcoding).
-    for rel in (
-        Path.home() / "rmems" / "xai-dissect" / "target" / "release",
-        Path.home() / "xai-dissect" / "target" / "release",
-    ):
-        cand = rel / DISSECT_BIN
-        if _is_safe_dissect_binary(cand):
-            dirs.append(rel.resolve())
-    # Deduplicate while preserving order.
-    seen: set[Path] = set()
-    out: list[Path] = []
-    for d in dirs:
-        if d not in seen:
-            seen.add(d)
-            out.append(d)
+        _append_unique(out, seen, Path(which).resolve().parent)
+    for d in _optional_install_dirs():
+        _append_unique(out, seen, d)
     return out
 
 
-def _run_dissect_in_dir(bin_dir: Path, shard: Path) -> Layout | None:
-    """Run fixed-name ``xai-dissect`` with PATH restricted to ``bin_dir`` (+ system)."""
-    env = os.environ.copy()
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+def _dissect_cmd(binary: Path, shard: Path) -> list[str]:
+    return [
+        str(binary),
+        "dissect",
+        str(shard.parent),
+        "--limit",
+        "1",
+        "--prefix",
+        shard.name,
+    ]
+
+
+def _invoke_dissect(cmd: list[str]) -> str | None:
+    """Run dissect; return combined output on success, else None."""
     try:
-        # Fixed basename + static flags; PATH resolve + basename check above.
-        proc = subprocess.run(  # noqa: S603  # nosec B603
-            [
-                DISSECT_BIN,
-                "dissect",
-                str(shard.parent),
-                "--limit",
-                "1",
-                "--prefix",
-                shard.name,
-            ],
+        # Absolute path to basename-checked binary; static argv, no shell.
+        proc = subprocess.run(  # nosec B603  # noqa: S603
+            cmd,
             check=False,
             capture_output=True,
             text=True,
             timeout=120,
-            env=env,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
         return None
-    text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    return (proc.stdout or "") + "\n" + (proc.stderr or "")
+
+
+def _run_dissect_in_dir(bin_dir: Path, shard: Path) -> Layout | None:
+    """Run fixed-name ``xai-dissect`` via absolute path under ``bin_dir``."""
+    binary = bin_dir / DISSECT_BIN
+    if not _is_safe_dissect_binary(binary):
+        return None
+    text = _invoke_dissect(_dissect_cmd(binary, shard))
+    if text is None:
+        return None
     return parse_dissect_table(text)
 
 
@@ -203,28 +226,44 @@ def try_dissect(shard: Path, xai_dissect: str | None) -> Layout | None:
     return None
 
 
+def _npy_shape_str(shape: tuple[int, ...]) -> str:
+    if len(shape) == 1:
+        return f"({shape[0]},)"
+    return "(" + ", ".join(str(d) for d in shape) + ")"
+
+
+def _write_npy_body(f, dict_str: str, pad: int, payload: memoryview) -> None:
+    magic = b"\x93NUMPY"
+    header_len = len(dict_str) + 1 + pad
+    f.write(magic)
+    f.write(bytes([1, 0]))
+    f.write(struct.pack("<H", header_len))
+    f.write(dict_str.encode("ascii"))
+    f.write(b" " * pad)
+    f.write(b"\n")
+    chunk = 64 * 1024 * 1024
+    for i in range(0, len(payload), chunk):
+        f.write(payload[i : i + chunk])
+
+
 def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> None:
-    """Write little-endian C-order float32 .npy (NumPy v1.0 header).
+    r"""
+    Write little-endian C-order float32 .npy (NumPy v1.0 header).
 
     Header is space-padded so (preamble + header_len) is a multiple of 64, then
-    terminated by ``\\n`` (pad-then-newline). Write is atomic via temp + os.replace.
+    terminated by ``\n`` (pad-then-newline). Write is atomic via temp + os.replace.
     """
     exp = expected_nbytes(shape, "f32")
     if exp != len(payload):
         raise LayoutError(
             f"payload length {len(payload)} != expected {exp} for shape {shape}"
         )
-    if len(shape) == 1:
-        shape_str = f"({shape[0]},)"
-    else:
-        shape_str = "(" + ", ".join(str(d) for d in shape) + ")"
+    shape_str = _npy_shape_str(shape)
     dict_str = f"{{'descr': '<f4', 'fortran_order': False, 'shape': {shape_str}, }}"
-    magic = b"\x93NUMPY"
     preamble_len = 6 + 1 + 1 + 2
     raw_header_len = len(dict_str) + 1
     total_unpadded = preamble_len + raw_header_len
     pad = (64 - (total_unpadded % 64)) % 64
-    header_len = raw_header_len + pad
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix=path.name + ".",
@@ -234,15 +273,7 @@ def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> No
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(magic)
-            f.write(bytes([1, 0]))
-            f.write(struct.pack("<H", header_len))
-            f.write(dict_str.encode("ascii"))
-            f.write(b" " * pad)
-            f.write(b"\n")
-            chunk = 64 * 1024 * 1024
-            for i in range(0, len(payload), chunk):
-                f.write(payload[i : i + chunk])
+            _write_npy_body(f, dict_str, pad, payload)
         os.replace(tmp_path, path)
     except BaseException:
         try:
@@ -271,93 +302,131 @@ def _can_use_embedding_defaults(shard: Path) -> bool:
     return shard.name == DEFAULT_SHARD_NAME
 
 
+def _cli_layout(
+    args: argparse.Namespace,
+) -> tuple[int | None, tuple[int, ...] | None, str | None]:
+    shape: tuple[int, ...] | None = None
+    if args.shape is not None:
+        shape = _parse_shape_csv(args.shape)
+    return args.offset, shape, args.dtype
+
+
+def _try_dissect_fill(
+    shard: Path,
+    args: argparse.Namespace,
+    offset: int | None,
+    shape: tuple[int, ...] | None,
+    dtype: str | None,
+) -> tuple[int | None, tuple[int, ...] | None, str | None, int | None]:
+    parsed = try_dissect(shard, args.xai_dissect)
+    if not parsed:
+        print(
+            "warning: xai-dissect unavailable or failed; "
+            "falling back only if layout is fully specified or "
+            f"shard is {DEFAULT_SHARD_NAME}",
+            file=sys.stderr,
+        )
+        return offset, shape, dtype, None
+    offset, shape, dtype, nbytes = _apply_dissect_defaults(
+        offset, shape, dtype, parsed
+    )
+    print(
+        f"xai-dissect: offset={offset} nbytes={nbytes} "
+        f"dtype={dtype} shape={shape}"
+    )
+    return offset, shape, dtype, nbytes
+
+
+def _apply_embedding_defaults(
+    offset: int | None,
+    shape: tuple[int, ...] | None,
+    dtype: str | None,
+) -> tuple[int, tuple[int, ...], str]:
+    if offset is None:
+        offset = DEFAULT_OFFSET
+    if shape is None:
+        shape = DEFAULT_SHAPE
+    if dtype is None:
+        dtype = DEFAULT_DTYPE
+    print(
+        f"warning: using hard-coded layout for {DEFAULT_SHARD_NAME}: "
+        f"offset={offset} shape={shape} dtype={dtype}",
+        file=sys.stderr,
+    )
+    return offset, shape, dtype
+
+
+def _missing_layout_error(shard: Path, offset, shape, dtype) -> LayoutError:
+    missing = [
+        n
+        for n, v in (
+            ("--offset", offset),
+            ("--shape", shape),
+            ("--dtype", dtype),
+        )
+        if v is None
+    ]
+    return LayoutError(
+        f"cannot resolve layout for shard {shard.name!r}: missing "
+        f"{', '.join(missing)}. Run with working xai-dissect, pass full "
+        f"--offset/--shape/--dtype, or use --no-dissect only with a "
+        f"complete layout (defaults apply only to {DEFAULT_SHARD_NAME})"
+    )
+
+
+def _layout_complete(
+    offset: int | None, shape: tuple[int, ...] | None, dtype: str | None
+) -> bool:
+    return offset is not None and shape is not None and dtype is not None
+
+
+def _fill_missing_layout(
+    shard: Path,
+    offset: int | None,
+    shape: tuple[int, ...] | None,
+    dtype: str | None,
+) -> tuple[int, tuple[int, ...], str]:
+    if _layout_complete(offset, shape, dtype):
+        # Narrowed by _layout_complete.
+        return offset, shape, dtype  # type: ignore[return-value]
+    if _can_use_embedding_defaults(shard):
+        return _apply_embedding_defaults(offset, shape, dtype)
+    raise _missing_layout_error(shard, offset, shape, dtype)
+
+
 def resolve_layout(
     shard: Path,
     args: argparse.Namespace,
 ) -> tuple[int, tuple[int, ...], str, int | None]:
-    """Resolve offset/shape/dtype/nbytes for export.
-
-    Policy:
-    - Prefer ``xai-dissect`` when any of offset/shape/dtype is missing (unless
-      ``--no-dissect``).
-    - Hard-coded embedding defaults only when the shard basename is
-      ``tensor00000_000`` (or all of offset/shape/dtype are explicit).
-    - Never silently mix partial CLI overrides with defaults for other shards.
     """
-    offset = args.offset
-    shape: tuple[int, ...] | None = None
-    if args.shape is not None:
-        shape = _parse_shape_csv(args.shape)
-    dtype = args.dtype
+    Resolve offset/shape/dtype/nbytes for export.
+
+    Prefer xai-dissect when layout is incomplete (unless --no-dissect). Hard-coded
+    embedding defaults only for shard basename tensor00000_000.
+    """
+    offset, shape, dtype = _cli_layout(args)
     nbytes: int | None = None
-
-    complete = offset is not None and shape is not None and dtype is not None
-    need_dissect = not args.no_dissect and not complete
-
-    if need_dissect:
-        parsed = try_dissect(shard, args.xai_dissect)
-        if parsed:
-            offset, shape, dtype, nbytes = _apply_dissect_defaults(
-                offset, shape, dtype, parsed
-            )
-            print(
-                f"xai-dissect: offset={offset} nbytes={nbytes} "
-                f"dtype={dtype} shape={shape}"
-            )
-        else:
-            print(
-                "warning: xai-dissect unavailable or failed; "
-                "falling back only if layout is fully specified or "
-                f"shard is {DEFAULT_SHARD_NAME}",
-                file=sys.stderr,
-            )
-
-    still_missing = offset is None or shape is None or dtype is None
-    if still_missing:
-        if _can_use_embedding_defaults(shard):
-            if offset is None:
-                offset = DEFAULT_OFFSET
-            if shape is None:
-                shape = DEFAULT_SHAPE
-            if dtype is None:
-                dtype = DEFAULT_DTYPE
-            print(
-                f"warning: using hard-coded layout for {DEFAULT_SHARD_NAME}: "
-                f"offset={offset} shape={shape} dtype={dtype}",
-                file=sys.stderr,
-            )
-        else:
-            missing = [
-                n
-                for n, v in (
-                    ("--offset", offset),
-                    ("--shape", shape),
-                    ("--dtype", dtype),
-                )
-                if v is None
-            ]
-            raise LayoutError(
-                f"cannot resolve layout for shard {shard.name!r}: missing "
-                f"{', '.join(missing)}. Run with working xai-dissect, pass full "
-                f"--offset/--shape/--dtype, or use --no-dissect only with a "
-                f"complete layout (defaults apply only to {DEFAULT_SHARD_NAME})"
-            )
-
-    assert offset is not None and shape is not None and dtype is not None
+    if not args.no_dissect and not _layout_complete(offset, shape, dtype):
+        offset, shape, dtype, nbytes = _try_dissect_fill(
+            shard, args, offset, shape, dtype
+        )
+    offset, shape, dtype = _fill_missing_layout(shard, offset, shape, dtype)
     return offset, shape, dtype, nbytes
+
+
+def _stem_is_single_segment(stem: str) -> bool:
+    p = Path(stem)
+    return (not p.is_absolute()) and len(p.parts) == 1 and p.name == stem
 
 
 def validate_stem(stem: str) -> str:
     """Reject path separators / absolute paths so stem cannot escape output-dir."""
-    if not stem or stem in (".", ".."):
-        raise LayoutError("--stem must be a non-empty filename stem")
-    p = Path(stem)
-    if p.is_absolute() or len(p.parts) != 1 or p.name != stem:
+    if not stem or stem in (".", "..") or stem.endswith(".npy"):
+        raise LayoutError("--stem must be a non-empty filename stem without .npy")
+    if not _stem_is_single_segment(stem):
         raise LayoutError(
             f"--stem must be a single path segment without separators (got {stem!r})"
         )
-    if stem.endswith(".npy"):
-        raise LayoutError("--stem should not include the .npy suffix")
     return stem
 
 
@@ -411,6 +480,27 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _check_payload_bounds(
+    exp: int, nbytes: int | None, offset: int, file_size: int
+) -> bool:
+    if nbytes is not None and nbytes != exp:
+        print(
+            f"error: dissect nbytes={nbytes} != shape*itemsize={exp}",
+            file=sys.stderr,
+        )
+        return False
+    if offset < 0:
+        print(f"error: offset must be >= 0 (got {offset})", file=sys.stderr)
+        return False
+    if offset + exp > file_size:
+        print(
+            f"error: offset+payload ({offset}+{exp}) exceeds file size {file_size}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def _validate_export(
     dtype: str, shape: tuple[int, ...], nbytes: int | None, offset: int, file_size: int
 ) -> int | None:
@@ -426,22 +516,23 @@ def _validate_export(
     except LayoutError as e:
         print(f"error: {e}", file=sys.stderr)
         return None
-    if nbytes is not None and nbytes != exp:
-        print(
-            f"error: dissect nbytes={nbytes} != shape*itemsize={exp}",
-            file=sys.stderr,
-        )
-        return None
-    if offset < 0:
-        print(f"error: offset must be >= 0 (got {offset})", file=sys.stderr)
-        return None
-    if offset + exp > file_size:
-        print(
-            f"error: offset+payload ({offset}+{exp}) exceeds file size {file_size}",
-            file=sys.stderr,
-        )
+    if not _check_payload_bounds(exp, nbytes, offset, file_size):
         return None
     return exp
+
+
+def _export_payload(
+    shard: Path, out_path: Path, offset: int, exp: int, shape: tuple[int, ...]
+) -> None:
+    with (
+        shard.open("rb") as f,
+        mmap_mod.mmap(f.fileno(), 0, access=mmap_mod.ACCESS_READ) as mm,
+    ):
+        payload = memoryview(mm)[offset : offset + exp]
+        try:
+            write_npy_f32(out_path, shape, payload)
+        finally:
+            del payload
 
 
 def export_embedding(args: argparse.Namespace) -> int:
@@ -458,15 +549,7 @@ def export_embedding(args: argparse.Namespace) -> int:
             return 1
 
         out_path = args.output_dir.expanduser().resolve() / f"{stem}.npy"
-        with (
-            shard.open("rb") as f,
-            mmap_mod.mmap(f.fileno(), 0, access=mmap_mod.ACCESS_READ) as mm,
-        ):
-            payload = memoryview(mm)[offset : offset + exp]
-            try:
-                write_npy_f32(out_path, shape, payload)
-            finally:
-                del payload
+        _export_payload(shard, out_path, offset, exp, shape)
 
         logical = stem.replace("__", ".")
         print(f"wrote {out_path}")
