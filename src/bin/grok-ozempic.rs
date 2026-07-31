@@ -313,14 +313,21 @@ fn main() -> anyhow::Result<()> {
             if let Some(t) = gif_threshold {
                 validate_gif_threshold(t).map_err(anyhow::Error::msg)?;
             }
+            // Prevent File::create(output) from truncating an input shard or the
+            // classification manifest (Codex P1 on #43).
+            reject_output_path_collisions(&input_dir, &output, manifest.as_deref())?;
             if manifest.is_none() && !use_embedded_baseline {
-                if std::env::var_os("GROK_OZEMPIC_MANIFEST").is_some() {
+                // Match resolve_manifest(): only nonempty UTF-8 env paths count.
+                let env_manifest_active = std::env::var("GROK_OZEMPIC_MANIFEST")
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                if env_manifest_active {
                     eprintln!(
                         "note: using GROK_OZEMPIC_MANIFEST for classification (no --manifest flag)"
                     );
                 } else {
                     eprintln!(
-                        "warning: no --manifest, no --use-embedded-baseline, and GROK_OZEMPIC_MANIFEST unset;                          using legacy router_patterns heuristic only"
+                        "warning: no --manifest, no --use-embedded-baseline, and GROK_OZEMPIC_MANIFEST unset or empty; using legacy router_patterns heuristic only"
                     );
                 }
             }
@@ -404,6 +411,65 @@ fn main() -> anyhow::Result<()> {
         },
     }
 
+    Ok(())
+}
+
+/// Absolute path key for collision checks (canonicalize when possible).
+fn path_key(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+/// Reject `--output` when it would overwrite an input weight file or the manifest.
+fn reject_output_path_collisions(
+    input_dir: &Path,
+    output: &Path,
+    manifest: Option<&Path>,
+) -> anyhow::Result<()> {
+    let out_key = path_key(output);
+    if let Some(m) = manifest {
+        let m_key = path_key(m);
+        if m_key == out_key {
+            anyhow::bail!(
+                "--output collides with --manifest ({}); refuse to overwrite classification input",
+                m.display()
+            );
+        }
+    }
+    let rd = std::fs::read_dir(input_dir).map_err(|e| {
+        anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
+    })?;
+    for entry in rd {
+        let entry = entry.map_err(|e| {
+            anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !(name.ends_with(".npy") || name.ends_with(".safetensors")) {
+            continue;
+        }
+        if path_key(&path) == out_key {
+            anyhow::bail!(
+                "--output collides with input weight file {}; refuse to truncate quantization input",
+                path.display()
+            );
+        }
+    }
     Ok(())
 }
 
