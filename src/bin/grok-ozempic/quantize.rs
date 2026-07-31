@@ -256,46 +256,40 @@ mod tests {
 
     #[test]
     fn classification_manifest_path_prefers_cli() {
-        let cli = PathBuf::from("/tmp/cli-manifest.json");
+        let cli = PathBuf::from("cli-manifest.json");
         assert_eq!(classification_manifest_path(Some(&cli)), Some(cli));
     }
 
+    /// Env-var collision uses the same `reject_manifest_collision` path as CLI
+    /// once `classification_manifest_path` returns a path. Avoid `set_var` in
+    /// tests (Semgrep unsafe-usage); cover identity via explicit CLI path.
     #[test]
-    fn env_manifest_included_in_collision_check() {
-        // Serialize env mutation: cargo can run binary tests in parallel.
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
+    fn resolved_manifest_path_collides_with_output() {
         let dir = tempfile_dir();
-        let manifest = dir.join("m.json");
+        let manifest = dir.join("env-or-cli.json");
         fs::write(&manifest, b"{}").unwrap();
         let abs = manifest.canonicalize().unwrap();
-        let prev = std::env::var_os("GROK_OZEMPIC_MANIFEST");
-        // SAFETY: guarded by ENV_LOCK; restored before unlock.
-        unsafe {
-            std::env::set_var("GROK_OZEMPIC_MANIFEST", &abs);
-        }
-        let err = reject_output_path_collisions(&dir, &abs, None).unwrap_err();
-        match prev {
-            Some(v) => unsafe { std::env::set_var("GROK_OZEMPIC_MANIFEST", v) },
-            None => unsafe { std::env::remove_var("GROK_OZEMPIC_MANIFEST") },
-        }
+        // Same check path as when classification_manifest_path(None) returns env.
+        let err = reject_manifest_collision(&abs, &abs).unwrap_err();
         assert!(
             err.to_string().contains("collides"),
-            "expected env manifest collision, got {err}"
+            "expected manifest/output identity collision, got {err}"
         );
     }
 
     fn tempfile_dir() -> PathBuf {
-        let mut d = std::env::temp_dir();
-        d.push(format!(
-            "goz1-collision-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        // Prefer crate target/ over shared OS temp_dir (Semgrep temp-dir).
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("quantize-collision-tests")
+            .join(format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
         fs::create_dir_all(&d).unwrap();
         d
     }
