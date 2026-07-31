@@ -238,9 +238,11 @@ class WriteNpyGuardTests(unittest.TestCase):
     def test_header_overflow_raises(self) -> None:
         # Rank large enough that the v1 header exceeds u16.
         shape = tuple([1] * 30_000)
-        with self.assertRaises(exp.LayoutError) as ctx:
-            exp.write_npy_f32(Path("/tmp/unused.npy"), shape, memoryview(b"\x00" * 4))
-        self.assertIn("65535", str(ctx.exception))
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "unused.npy"
+            with self.assertRaises(exp.LayoutError) as ctx:
+                exp.write_npy_f32(path, shape, memoryview(b"\x00" * 4))
+            self.assertIn("65535", str(ctx.exception))
 
     def test_published_mode_not_owner_only(self) -> None:
         with tempfile.TemporaryDirectory() as td:
