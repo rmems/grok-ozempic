@@ -69,6 +69,8 @@ def _parse_hex_or_int(s: str) -> int:
 
 
 def _parse_one_dim(p: str) -> int:
+    if not (p.isascii() and p.isdigit()):
+        raise LayoutError(f"invalid shape component {p!r}: not an integer")
     try:
         d = int(p, 10)
     except ValueError as e:
@@ -81,10 +83,6 @@ def _parse_one_dim(p: str) -> int:
 def _parse_shape_csv(inner: str) -> tuple[int, ...]:
     """Parse comma-separated positive dimensions; empty or non-int is an error."""
     parts = [x.strip() for x in inner.split(",")]
-    if not parts:
-        raise LayoutError(
-            "shape must be a non-empty comma-separated list of positive ints"
-        )
     if any(not p for p in parts):
         raise LayoutError("shape must not contain empty dimensions")
     return tuple(_parse_one_dim(p) for p in parts)
@@ -154,6 +152,20 @@ def _optional_install_dirs() -> list[Path]:
     return found
 
 
+def _validate_explicit_dissect_path(path_str: str) -> Path:
+    """
+    Validate --xai-dissect path is a usable binary; raise LayoutError if not.
+
+    Returns the resolved parent directory of the validated binary.
+    """
+    p = Path(path_str).expanduser()
+    if not _is_safe_dissect_binary(p):
+        raise LayoutError(
+            f"--xai-dissect path is not a usable {DISSECT_BIN!r} binary: {p}"
+        )
+    return p
+
+
 def _dissect_search_dirs(explicit: str | None) -> list[Path]:
     """
     Directories to put on PATH so we can exec the fixed ``xai-dissect`` name.
@@ -162,11 +174,7 @@ def _dissect_search_dirs(explicit: str | None) -> list[Path]:
     LayoutError (never silently ignored).
     """
     if explicit:
-        p = Path(explicit).expanduser()
-        if not _is_safe_dissect_binary(p):
-            raise LayoutError(
-                f"--xai-dissect path is not a usable {DISSECT_BIN!r} binary: {p}"
-            )
+        p = _validate_explicit_dissect_path(explicit)
         return [p.parent.resolve()]
 
     out: list[Path] = []
@@ -407,11 +415,7 @@ def resolve_layout(
     embedding defaults only for shard basename tensor00000_000.
     """
     if args.xai_dissect:
-        p = Path(args.xai_dissect).expanduser()
-        if not _is_safe_dissect_binary(p):
-            raise LayoutError(
-                f"--xai-dissect path is not a usable {DISSECT_BIN!r} binary: {p}"
-            )
+        _validate_explicit_dissect_path(args.xai_dissect)
     offset, shape, dtype = _cli_layout(args)
     nbytes: int | None = None
     if not args.no_dissect and not _layout_complete(offset, shape, dtype):
