@@ -97,9 +97,12 @@ Official `xai-org/grok-1` `ckpt-0` shards are JAX **pickle** frames.
 [RM-189](https://linear.app/rpd-34/issue/RM-189)):
 
 ```bash
+# Customize CKPT / OUT for your machine (defaults also use ~/.models/xai-grok-1/...)
+CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
+OUT="${OUT:-$HOME/.models/xai-grok-1/export-npy}"
 python3 scripts/export_grok1_embedding_npy.py \
-  --shard /home/raulmc/.models/xai-grok-1/ckpt-0/tensor00000_000 \
-  --output-dir /home/raulmc/.models/xai-grok-1/export-npy
+  --shard "$CKPT/tensor00000_000" \
+  --output-dir "$OUT"
 ```
 
 This writes `embedding__slot_00__token_embedding.npy` (logical name
