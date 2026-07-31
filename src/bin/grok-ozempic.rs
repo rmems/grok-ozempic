@@ -444,9 +444,8 @@ fn reject_output_path_collisions(
             );
         }
     }
-    let rd = std::fs::read_dir(input_dir).map_err(|e| {
-        anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
-    })?;
+    let rd = std::fs::read_dir(input_dir)
+        .map_err(|e| anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display()))?;
     for entry in rd {
         let entry = entry.map_err(|e| {
             anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
