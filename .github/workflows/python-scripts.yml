@@ -1,0 +1,28 @@
+name: Python scripts
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "releases/*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  export-npy-tests:
+    name: export_grok1_embedding_npy unittest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Unit tests (stdlib only)
+        run: python3 -m unittest scripts.test_export_grok1_embedding_npy -v

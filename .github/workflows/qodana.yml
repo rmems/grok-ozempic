@@ -16,21 +16,25 @@ jobs:
   qodana:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      # Checkout only; PR/check annotations do not need repository contents: write.
+      contents: read
       pull-requests: write
       checks: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           # PR head commit (not the merge commit); fall back for push / dispatch
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0 # full history required for pull request analysis
+          persist-credentials: false
 
       - name: Qodana Scan
         # Pin third-party action to full commit SHA (Codacy / Opengrep GHA rule).
         uses: JetBrains/qodana-action@4861e015da555e86a72b862892aba6c2b93e6891 # v2026.1.3
         with:
           args: --linter qodana-rust
+          # Full-project baseline (not PR-diff-only): intentional for this repo until
+          # Qodana coverage is stable; re-enable pr-mode once that is useful.
           pr-mode: false
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}

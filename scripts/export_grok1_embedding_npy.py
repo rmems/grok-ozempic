@@ -248,6 +248,11 @@ def _npy_shape_str(shape: tuple[int, ...]) -> str:
 def _write_npy_body(f, dict_str: str, pad: int, payload: memoryview) -> None:
     magic = b"\x93NUMPY"
     header_len = len(dict_str) + 1 + pad
+    if header_len > 0xFFFF:
+        raise LayoutError(
+            f"npy v1.0 header length {header_len} exceeds 65535 bytes "
+            "(reduce rank/shape digits or use a v2 writer)"
+        )
     f.write(magic)
     f.write(bytes([1, 0]))
     f.write(struct.pack("<H", header_len))
@@ -287,6 +292,10 @@ def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> No
     try:
         with os.fdopen(fd, "wb") as f:
             _write_npy_body(f, dict_str, pad, payload)
+        # mkstemp uses 0o600; restore umask-based mode so readers match open("wb").
+        umask = os.umask(0o022)
+        os.umask(umask)
+        os.chmod(tmp_path, 0o666 & ~umask)
         os.replace(tmp_path, path)
     except BaseException:
         try:
@@ -464,8 +473,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--stem",
-        default=DEFAULT_STEM,
-        help=f"output filename stem without .npy (default: {DEFAULT_STEM})",
+        default=None,
+        help=(
+            "output filename stem without .npy "
+            f"(default: {DEFAULT_STEM} only for shard {DEFAULT_SHARD_NAME}; "
+            "required for any other shard)"
+        ),
     )
     p.add_argument(
         "--offset",
@@ -547,16 +560,30 @@ def _export_payload(
         try:
             write_npy_f32(out_path, shape, payload)
         finally:
-            del payload
+            # Explicit release: avoids BufferError on mmap close under non-CPython
+            # refcounting when the slice still holds an export of the mmap.
+            payload.release()
+
+
+def _resolve_stem(shard: Path, stem_arg: str | None) -> str:
+    """Default stem only for the embedding shard; require --stem otherwise."""
+    if stem_arg is not None:
+        return validate_stem(stem_arg)
+    if shard.name == DEFAULT_SHARD_NAME:
+        return DEFAULT_STEM
+    raise LayoutError(
+        f"--stem is required when --shard basename is not {DEFAULT_SHARD_NAME!r} "
+        f"(got {shard.name!r}); NPY filename becomes the logical tensor name"
+    )
 
 
 def export_embedding(args: argparse.Namespace) -> int:
     try:
-        stem = validate_stem(args.stem)
         shard: Path = args.shard.expanduser().resolve()
         if not shard.is_file():
             print(f"error: shard not found: {shard}", file=sys.stderr)
             return 1
+        stem = _resolve_stem(shard, args.stem)
 
         offset, shape, dtype, nbytes = resolve_layout(shard, args)
         exp = _validate_export(dtype, shape, nbytes, offset, shard.stat().st_size)

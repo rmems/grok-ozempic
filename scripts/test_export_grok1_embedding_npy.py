@@ -208,12 +208,47 @@ class EndToEndCliTests(unittest.TestCase):
                 offset=None,
                 shape="1,abc",
                 dtype=None,
-                stem=exp.DEFAULT_STEM,
+                stem=None,
                 no_dissect=True,
                 xai_dissect=None,
             )
             code = exp.export_embedding(ns)
             self.assertEqual(code, 1)
+
+    def test_non_default_shard_requires_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            shard = td_path / "other.bin"
+            _write_fake_shard(shard, b"\x00" * 8, [0.0, 1.0, -1.0, 0.5])
+            ns = argparse_ns(
+                shard=shard,
+                output_dir=td_path / "out",
+                offset=8,
+                shape="2,2",
+                dtype="f32",
+                stem=None,
+                no_dissect=True,
+                xai_dissect=None,
+            )
+            code = exp.export_embedding(ns)
+            self.assertEqual(code, 1)
+
+
+class WriteNpyGuardTests(unittest.TestCase):
+    def test_header_overflow_raises(self) -> None:
+        # Rank large enough that the v1 header exceeds u16.
+        shape = tuple([1] * 30_000)
+        with self.assertRaises(exp.LayoutError) as ctx:
+            exp.write_npy_f32(Path("/tmp/unused.npy"), shape, memoryview(b"\x00" * 4))
+        self.assertIn("65535", str(ctx.exception))
+
+    def test_published_mode_not_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "out.npy"
+            exp.write_npy_f32(path, (2, 2), memoryview(struct.pack("<4f", 0, 1, 2, 3)))
+            mode = path.stat().st_mode & 0o777
+            # Must not remain mkstemp's 0o600; group/other may still be 0 under umask.
+            self.assertNotEqual(mode, 0o600)
 
 
 if __name__ == "__main__":
