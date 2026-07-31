@@ -39,7 +39,7 @@ pub fn decide(
         TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnN,
         TensorClass::Default => resolve_default_precision(manifest)?,
     };
-    let threshold = resolve_threshold(class, manifest, config);
+    let threshold = resolve_threshold(class, manifest, config)?;
     Ok((precision, threshold))
 }
 
@@ -57,20 +57,24 @@ fn resolve_threshold(
     class: &TensorClass,
     manifest: Option<&DissectManifest>,
     config: &QuantizationConfig,
-) -> f32 {
-    if let TensorClass::TernaryCandidate {
+) -> Result<f32> {
+    let raw = if let TensorClass::TernaryCandidate {
         gif_threshold: Some(t),
         ..
     } = class
     {
-        return *t;
-    }
-    if let Some(m) = manifest
+        *t
+    } else if let Some(m) = manifest
         && let Some(t) = m.defaults.gif_threshold
     {
-        return t;
-    }
-    config.gif_threshold
+        t
+    } else {
+        config.gif_threshold
+    };
+    // Manifest JSON and CLI can both supply thresholds; reject non-finite / negative
+    // before quantize_f32 applies overlapping gates (Codex on #43).
+    crate::types::validate_gif_threshold(raw).map_err(GrokOzempicError::InvalidConfig)?;
+    Ok(raw)
 }
 
 /// Parse a manifest precision string into a concrete
@@ -225,6 +229,31 @@ mod tests {
         let err = decide(&TensorClass::Default, Some(&m), &config).unwrap_err();
         assert!(
             matches!(err, GrokOzempicError::ManifestInvalidPrecision { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn negative_manifest_gif_threshold_rejected() {
+        let config = config_with_threshold(0.05);
+        let m = manifest_with_defaults(None, Some(-0.5));
+        let err = decide(&TensorClass::Default, Some(&m), &config).unwrap_err();
+        assert!(
+            matches!(err, GrokOzempicError::InvalidConfig(_)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn negative_per_tensor_gif_threshold_rejected() {
+        let config = config_with_threshold(0.05);
+        let cls = TensorClass::TernaryCandidate {
+            rank: None,
+            gif_threshold: Some(-1.0),
+        };
+        let err = decide(&cls, None, &config).unwrap_err();
+        assert!(
+            matches!(err, GrokOzempicError::InvalidConfig(_)),
             "got {err:?}"
         );
     }

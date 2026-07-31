@@ -49,7 +49,8 @@ fn prepare_quantize_goz1(
         validate_gif_threshold(t).map_err(anyhow::Error::msg)?;
     }
     // Prevent File::create(output) from truncating an input shard or the
-    // classification manifest (Codex P1 on #43).
+    // classification manifest (Codex P1 on #43), including hard-link aliases
+    // and GROK_OZEMPIC_MANIFEST when --manifest is omitted.
     reject_output_path_collisions(input_dir, output, manifest.as_deref())?;
     note_manifest_policy(manifest.is_none() && !use_embedded_baseline);
     Ok(quantize_goz1_config(
@@ -126,6 +127,31 @@ fn path_key(path: &Path) -> PathBuf {
     }
 }
 
+/// True when `a` and `b` name the same file identity (hard links included).
+///
+/// Pathname equality alone misses hard-linked aliases on Unix: two distinct
+/// paths can share an inode, and `File::create` would truncate the shared data.
+fn same_file_identity(a: &Path, b: &Path) -> bool {
+    if path_key(a) == path_key(b) {
+        return true;
+    }
+    same_inode_if_both_exist(a, b)
+}
+
+#[cfg(unix)]
+fn same_inode_if_both_exist(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => ma.dev() == mb.dev() && ma.ino() == mb.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_inode_if_both_exist(_a: &Path, _b: &Path) -> bool {
+    false
+}
+
 fn is_quantize_weight_file(path: &Path) -> bool {
     let name = path
         .file_name()
@@ -135,17 +161,28 @@ fn is_quantize_weight_file(path: &Path) -> bool {
     name.ends_with(".npy") || name.ends_with(".safetensors")
 }
 
-fn reject_manifest_collision(output_key: &Path, manifest: &Path) -> anyhow::Result<()> {
-    if path_key(manifest) == output_key {
+/// Active classification manifest path (CLI first, else `GROK_OZEMPIC_MANIFEST`).
+fn classification_manifest_path(cli: Option<&Path>) -> Option<PathBuf> {
+    if let Some(m) = cli {
+        return Some(m.to_path_buf());
+    }
+    match std::env::var("GROK_OZEMPIC_MANIFEST") {
+        Ok(s) if !s.is_empty() => Some(PathBuf::from(s)),
+        _ => None,
+    }
+}
+
+fn reject_manifest_collision(output: &Path, manifest: &Path) -> anyhow::Result<()> {
+    if same_file_identity(manifest, output) {
         anyhow::bail!(
-            "--output collides with --manifest ({}); refuse to overwrite classification input",
+            "--output collides with classification manifest ({}); refuse to overwrite",
             manifest.display()
         );
     }
     Ok(())
 }
 
-fn reject_input_weight_collisions(input_dir: &Path, output_key: &Path) -> anyhow::Result<()> {
+fn reject_input_weight_collisions(input_dir: &Path, output: &Path) -> anyhow::Result<()> {
     let rd = std::fs::read_dir(input_dir)
         .map_err(|e| anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display()))?;
     for entry in rd {
@@ -153,7 +190,7 @@ fn reject_input_weight_collisions(input_dir: &Path, output_key: &Path) -> anyhow
             anyhow::anyhow!("failed to read --input-dir {}: {e}", input_dir.display())
         })?;
         let path = entry.path();
-        if path.is_file() && is_quantize_weight_file(&path) && path_key(&path) == output_key {
+        if path.is_file() && is_quantize_weight_file(&path) && same_file_identity(&path, output) {
             anyhow::bail!(
                 "--output collides with input weight file {}; refuse to truncate quantization input",
                 path.display()
@@ -169,9 +206,97 @@ fn reject_output_path_collisions(
     output: &Path,
     manifest: Option<&Path>,
 ) -> anyhow::Result<()> {
-    let out_key = path_key(output);
-    if let Some(m) = manifest {
-        reject_manifest_collision(&out_key, m)?;
+    if let Some(m) = classification_manifest_path(manifest) {
+        reject_manifest_collision(output, &m)?;
     }
-    reject_input_weight_collisions(input_dir, &out_key)
+    reject_input_weight_collisions(input_dir, output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn path_key_matches_on_canonical_paths() {
+        let dir = tempfile_dir();
+        let a = dir.join("w.npy");
+        fs::write(&a, b"x").unwrap();
+        assert!(same_file_identity(&a, &a));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hard_link_alias_detected() {
+        let dir = tempfile_dir();
+        let weight = dir.join("w.npy");
+        let alias = dir.join("alias_out.goz1");
+        fs::write(&weight, b"payload").unwrap();
+        std::fs::hard_link(&weight, &alias).unwrap();
+        assert!(same_file_identity(&weight, &alias));
+        let err = reject_input_weight_collisions(&dir, &alias).unwrap_err();
+        assert!(
+            err.to_string().contains("collides"),
+            "expected collision, got {err}"
+        );
+    }
+
+    #[test]
+    fn cli_manifest_collision_detected() {
+        let dir = tempfile_dir();
+        let manifest = dir.join("m.json");
+        fs::write(&manifest, b"{}").unwrap();
+        let abs = manifest.canonicalize().unwrap();
+        let err = reject_output_path_collisions(&dir, &abs, Some(&abs)).unwrap_err();
+        assert!(
+            err.to_string().contains("collides"),
+            "expected cli manifest collision, got {err}"
+        );
+    }
+
+    #[test]
+    fn classification_manifest_path_prefers_cli() {
+        let cli = PathBuf::from("/tmp/cli-manifest.json");
+        assert_eq!(classification_manifest_path(Some(&cli)), Some(cli));
+    }
+
+    #[test]
+    fn env_manifest_included_in_collision_check() {
+        // Serialize env mutation: cargo can run binary tests in parallel.
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let dir = tempfile_dir();
+        let manifest = dir.join("m.json");
+        fs::write(&manifest, b"{}").unwrap();
+        let abs = manifest.canonicalize().unwrap();
+        let prev = std::env::var_os("GROK_OZEMPIC_MANIFEST");
+        // SAFETY: guarded by ENV_LOCK; restored before unlock.
+        unsafe {
+            std::env::set_var("GROK_OZEMPIC_MANIFEST", &abs);
+        }
+        let err = reject_output_path_collisions(&dir, &abs, None).unwrap_err();
+        match prev {
+            Some(v) => unsafe { std::env::set_var("GROK_OZEMPIC_MANIFEST", v) },
+            None => unsafe { std::env::remove_var("GROK_OZEMPIC_MANIFEST") },
+        }
+        assert!(
+            err.to_string().contains("collides"),
+            "expected env manifest collision, got {err}"
+        );
+    }
+
+    fn tempfile_dir() -> PathBuf {
+        let mut d = std::env::temp_dir();
+        d.push(format!(
+            "goz1-collision-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
 }

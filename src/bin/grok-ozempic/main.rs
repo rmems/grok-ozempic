@@ -120,8 +120,8 @@ enum Commands {
     /// Pack safetensors or `.npy` weights into a GOZ1 checkpoint (real quantize path)
     ///
     /// Unlike `convert-grok1` / `smoke-grok1` (metadata-only), this streams tensor
-    /// payloads through `run_quantization`. Input must not be official pickle shards —
-    /// export to `.npy` first (see scripts/export_grok1_embedding_npy.py, #37 / RM-189).
+    /// payloads through `run_quantization`. Official Grok-1 pickle shards are not
+    /// accepted: export to `.npy` first (GitHub #37 / PR #42 / Linear RM-189).
     QuantizeGoz1 {
         /// Directory of `*.safetensors` shards or flat `*.npy` files
         #[arg(long)]
