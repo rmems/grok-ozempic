@@ -27,7 +27,7 @@ import os
 import re
 import shutil
 import struct
-import subprocess
+import subprocess  # nosec B404 — only invokes fixed basename xai-dissect via PATH
 import sys
 import tempfile
 from pathlib import Path
@@ -68,7 +68,8 @@ def _parse_pretty_dissect_row(text: str) -> Layout | None:
     """Parse first data row from ``xai-dissect dissect`` pretty table."""
     # │ 0   ┆ tensor ┆ f32   ┆ (131072, 6144) ┆ 0x97   ┆ 3221225472 │
     row = re.search(
-        r"│\s*\d+\s*┆[^│]*┆\s*(\w+)\s*┆\s*\(([^)]+)\)\s*┆\s*(0x[0-9a-fA-F]+|\d+)\s*┆\s*(\d+)\s*│",
+        r"│\s*\d+\s*┆[^│]*┆\s*(\w+)\s*┆\s*\(([^)]+)\)\s*┆"
+        r"\s*(0x[0-9a-fA-F]+|\d+)\s*┆\s*(\d+)\s*│",
         text,
     )
     if not row:
@@ -142,8 +143,8 @@ def _run_dissect_in_dir(bin_dir: Path, shard: Path) -> Layout | None:
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
     try:
-        # argv[0] is a static string; binary is resolved via PATH + basename check.
-        proc = subprocess.run(
+        # Fixed basename + static flags; PATH resolve + basename check above.
+        proc = subprocess.run(  # noqa: S603  # nosec B603
             [
                 DISSECT_BIN,
                 "dissect",
@@ -200,7 +201,11 @@ def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> No
     pad = (64 - (total_unpadded % 64)) % 64
     header_len = raw_header_len + pad
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=path.parent,
+    )
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as f:
@@ -257,7 +262,10 @@ def resolve_layout(
             offset, shape, dtype, nbytes = _apply_dissect_defaults(
                 offset, shape, dtype, parsed
             )
-            print(f"xai-dissect: offset={offset} nbytes={nbytes} dtype={dtype} shape={shape}")
+            print(
+                f"xai-dissect: offset={offset} nbytes={nbytes} "
+                f"dtype={dtype} shape={shape}"
+            )
 
     return (
         DEFAULT_OFFSET if offset is None else offset,
@@ -273,7 +281,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--shard",
         type=Path,
         default=DEFAULT_SHARD,
-        help="path to pickle shard (default: ~/.models/xai-grok-1/ckpt-0/tensor00000_000)",
+        help=(
+            "path to pickle shard "
+            "(default: ~/.models/xai-grok-1/ckpt-0/tensor00000_000)"
+        ),
     )
     p.add_argument(
         "--output-dir",
@@ -286,7 +297,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_STEM,
         help=f"output filename stem without .npy (default: {DEFAULT_STEM})",
     )
-    p.add_argument("--offset", type=lambda s: int(s, 0), default=None, help="payload byte offset")
+    p.add_argument(
+        "--offset",
+        type=lambda s: int(s, 0),
+        default=None,
+        help="payload byte offset",
+    )
     p.add_argument(
         "--shape",
         default=None,
@@ -351,7 +367,10 @@ def export_embedding(args: argparse.Namespace) -> int:
         return 1
 
     out_path = args.output_dir.expanduser().resolve() / f"{args.stem}.npy"
-    with shard.open("rb") as f, mmap_mod.mmap(f.fileno(), 0, access=mmap_mod.ACCESS_READ) as mm:
+    with (
+        shard.open("rb") as f,
+        mmap_mod.mmap(f.fileno(), 0, access=mmap_mod.ACCESS_READ) as mm,
+    ):
         payload = memoryview(mm)[offset : offset + exp]
         try:
             write_npy_f32(out_path, shape, payload)
