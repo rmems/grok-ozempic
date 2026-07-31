@@ -78,9 +78,10 @@ For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 | **GOZ1 real quant** | `quantize-goz1` | Yes — safetensors or `.npy` only |
 
 Official Grok-1 pickle shards are **not** accepted by `quantize-goz1`. Export first
-(see `scripts/export_grok1_embedding_npy.py` when present, GitHub
+(export tooling is tracked in GitHub
 [#37](https://github.com/rmems/grok-ozempic/issues/37) / Linear
-[RM-189](https://linear.app/rpd-34/issue/RM-189)).
+[RM-189](https://linear.app/rpd-34/issue/RM-189); PR
+[#42](https://github.com/rmems/grok-ozempic/pull/42)).
 
 ### Grok-1 SAAQ artifact sprint commands
 
