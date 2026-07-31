@@ -218,12 +218,16 @@ fn same_inode_if_both_exist(_a: &Path, _b: &Path) -> bool {
 }
 
 fn is_quantize_weight_file(path: &Path) -> bool {
-    let name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    name.ends_with(".npy") || name.ends_with(".safetensors")
+    // Use OsStr extension (not full file_name UTF-8) so non-UTF-8 basenames with
+    // ASCII ".npy"/".safetensors" still participate in collision checks — matching
+    // stream::collect_*_shards which filter via Path::extension.
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some(ext) => {
+            let ext = ext.to_ascii_lowercase();
+            ext == "npy" || ext == "safetensors"
+        }
+        None => false,
+    }
 }
 
 /// Active classification manifest path (CLI first, else `GROK_OZEMPIC_MANIFEST`).
@@ -307,6 +311,30 @@ mod tests {
         assert!(
             err.to_string().contains("collides"),
             "expected collision, got {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_weight_basename_still_checked() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let dir = tempfile_dir();
+        let mut name = b"\xff\xfe_shard".to_vec();
+        name.extend_from_slice(b".safetensors");
+        let weight = dir.join(OsString::from_vec(name));
+        fs::write(&weight, b"payload").unwrap();
+        assert!(
+            is_quantize_weight_file(&weight),
+            "ASCII extension must match even when basename is non-UTF-8"
+        );
+        let alias = dir.join("out.goz1");
+        std::fs::hard_link(&weight, &alias).unwrap();
+        let err = reject_input_weight_collisions(&dir, &alias).unwrap_err();
+        assert!(
+            err.to_string().contains("collides"),
+            "expected collision for non-UTF-8 weight hard-link, got {err}"
         );
     }
 
