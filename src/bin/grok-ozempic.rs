@@ -131,7 +131,7 @@ enum Commands {
         #[arg(long)]
         manifest: Option<PathBuf>,
 
-        /// Input layout: safetensors (default) or npy
+        /// Input layout: npy (default, JAX export) or safetensors
         #[arg(long, value_enum, default_value_t = CliInputFormat::Npy)]
         input_format: CliInputFormat,
 
