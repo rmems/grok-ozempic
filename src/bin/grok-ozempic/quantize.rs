@@ -94,7 +94,8 @@ fn prepare_quantize_goz1(
 ) -> anyhow::Result<QuantizationConfig> {
     let (input_dir_s, output_s) =
         validate_goz1_cli_paths(input_dir, output, manifest.as_deref(), gif_threshold)?;
-    note_manifest_policy(manifest.is_none() && !use_embedded_baseline);
+    // Match resolve_manifest precedence messaging (env wins over embedded).
+    note_manifest_policy(manifest.is_none(), use_embedded_baseline);
     Ok(goz1_config_from_cli(
         input_dir_s,
         output_s,
@@ -139,7 +140,9 @@ fn path_to_utf8_string(path: &Path, flag: &str) -> anyhow::Result<String> {
 }
 
 /// Match `resolve_manifest()`: only nonempty UTF-8 env paths count.
-fn note_manifest_policy(no_explicit_manifest: bool) {
+///
+/// Precedence when `--manifest` is omitted: env → embedded (if requested) → legacy heuristic.
+fn note_manifest_policy(no_explicit_manifest: bool, use_embedded_baseline: bool) {
     if !no_explicit_manifest {
         return;
     }
@@ -147,7 +150,15 @@ fn note_manifest_policy(no_explicit_manifest: bool) {
         .map(|s| !s.is_empty())
         .unwrap_or(false);
     if env_manifest_active {
-        eprintln!("note: using GROK_OZEMPIC_MANIFEST for classification (no --manifest flag)");
+        if use_embedded_baseline {
+            eprintln!(
+                "note: using GROK_OZEMPIC_MANIFEST for classification (takes precedence over --use-embedded-baseline)"
+            );
+        } else {
+            eprintln!("note: using GROK_OZEMPIC_MANIFEST for classification (no --manifest flag)");
+        }
+    } else if use_embedded_baseline {
+        eprintln!("note: using embedded Grok-1 baseline for classification");
     } else {
         eprintln!(
             "warning: no --manifest, no --use-embedded-baseline, and GROK_OZEMPIC_MANIFEST unset or empty; using legacy router_patterns heuristic only"
@@ -189,7 +200,19 @@ fn same_inode_if_both_exist(a: &Path, b: &Path) -> bool {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn same_inode_if_both_exist(a: &Path, b: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(ma), Ok(mb)) => {
+            ma.volume_serial_number() == mb.volume_serial_number()
+                && ma.file_index() == mb.file_index()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn same_inode_if_both_exist(_a: &Path, _b: &Path) -> bool {
     false
 }

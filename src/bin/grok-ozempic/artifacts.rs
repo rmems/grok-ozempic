@@ -132,8 +132,10 @@ fn resolve_checkpoint_and_shards(
         return Ok((checkpoint, None));
     };
     if !wd.is_dir() {
-        println!("Warning: weights_dir is not a valid directory.");
-        return Ok((checkpoint, None));
+        anyhow::bail!(
+            "--weights-dir is not a directory: {} (refusing silent Grok-1 default fallback)",
+            wd.display()
+        );
     }
     let checkpoint = checkpoint.or_else(|| derive_checkpoint_name_from_weights_dir(wd));
     let actual_shards = discover_xai_tensor_shards(wd, log_shard_discovery)?;
@@ -166,16 +168,20 @@ fn discover_xai_tensor_shards(
     wd: &Path,
     log_shard_discovery: bool,
 ) -> anyhow::Result<Option<usize>> {
-    let Some(count) = count_xai_tensor_shards(wd)? else {
-        return Ok(None);
-    };
+    let count = count_xai_tensor_shards(wd)?;
+    if count == 0 {
+        anyhow::bail!(
+            "--weights-dir {} contains no xai-dissect tensor*_* shards (refusing silent Grok-1 default fallback)",
+            wd.display()
+        );
+    }
     if log_shard_discovery {
         println!("Discovered {} xai-dissect tensor shards.", count);
     }
     Ok(Some(count))
 }
 
-fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<Option<usize>> {
+fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<usize> {
     let mut count = 0usize;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -190,7 +196,7 @@ fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<Option<usize>> {
             count += 1;
         }
     }
-    Ok((count > 0).then_some(count))
+    Ok(count)
 }
 
 fn is_xai_tensor_shard_name(name: &str) -> bool {
