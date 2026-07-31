@@ -125,52 +125,54 @@ fn load_manifest_ir(
 /// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_ir_from_manifest`].
 fn resolve_checkpoint_and_shards(
     weights_dir: Option<&Path>,
-    mut checkpoint: Option<String>,
+    checkpoint: Option<String>,
     log_shard_discovery: bool,
 ) -> anyhow::Result<(Option<String>, Option<usize>)> {
-    let mut actual_shards = None;
-
-    if let Some(wd) = weights_dir {
-        if wd.is_dir() {
-            if checkpoint.is_none() {
-                let mut tail: Vec<_> = wd
-                    .components()
-                    .rev()
-                    .filter_map(|c| match c {
-                        Component::Normal(name) => Some(name),
-                        _ => None,
-                    })
-                    .take(2)
-                    .collect();
-                tail.reverse();
-                match tail.as_slice() {
-                    [] => {}
-                    [only] => {
-                        checkpoint = Some(only.to_string_lossy().to_string());
-                    }
-                    [parent, leaf] => {
-                        checkpoint = Some(format!(
-                            "{}/{}",
-                            parent.to_string_lossy(),
-                            leaf.to_string_lossy()
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-
-            if let Some(count) = count_xai_tensor_shards(wd)? {
-                actual_shards = Some(count);
-                if log_shard_discovery {
-                    println!("Discovered {} xai-dissect tensor shards.", count);
-                }
-            }
-        } else {
-            println!("Warning: weights_dir is not a valid directory.");
-        }
+    let Some(wd) = weights_dir else {
+        return Ok((checkpoint, None));
+    };
+    if !wd.is_dir() {
+        println!("Warning: weights_dir is not a valid directory.");
+        return Ok((checkpoint, None));
     }
-
+    let checkpoint = checkpoint.or_else(|| derive_checkpoint_name_from_weights_dir(wd));
+    let actual_shards = discover_xai_tensor_shards(wd, log_shard_discovery)?;
     Ok((checkpoint, actual_shards))
+}
+
+fn derive_checkpoint_name_from_weights_dir(wd: &Path) -> Option<String> {
+    let mut tail: Vec<_> = wd
+        .components()
+        .rev()
+        .filter_map(|c| match c {
+            Component::Normal(name) => Some(name),
+            _ => None,
+        })
+        .take(2)
+        .collect();
+    tail.reverse();
+    match tail.as_slice() {
+        [only] => Some(only.to_string_lossy().to_string()),
+        [parent, leaf] => Some(format!(
+            "{}/{}",
+            parent.to_string_lossy(),
+            leaf.to_string_lossy()
+        )),
+        _ => None,
+    }
+}
+
+fn discover_xai_tensor_shards(
+    wd: &Path,
+    log_shard_discovery: bool,
+) -> anyhow::Result<Option<usize>> {
+    let Some(count) = count_xai_tensor_shards(wd)? else {
+        return Ok(None);
+    };
+    if log_shard_discovery {
+        println!("Discovered {} xai-dissect tensor shards.", count);
+    }
+    Ok(Some(count))
 }
 
 fn count_xai_tensor_shards(dir: &Path) -> anyhow::Result<Option<usize>> {
