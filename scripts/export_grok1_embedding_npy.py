@@ -141,11 +141,13 @@ def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> No
         shape_str = f"({shape[0]},)"
     else:
         shape_str = "(" + ", ".join(str(d) for d in shape) + ")"
-    # Trailing newline is required by the NPY v1.0 format.
-    dict_str = f"{{'descr': '<f4', 'fortran_order': False, 'shape': {shape_str}, }}\n"
+    # NPY v1.0: dict + spaces so (preamble+header) % 64 == 0, terminated by \n.
+    # Matches NumPy's writer: pad with spaces, then a final newline.
+    dict_str = f"{{'descr': '<f4', 'fortran_order': False, 'shape': {shape_str}, }}"
     magic = b"\x93NUMPY"
     preamble_len = 6 + 1 + 1 + 2
-    raw_header_len = len(dict_str)
+    # Reserve 1 byte for the terminating newline inside header_len.
+    raw_header_len = len(dict_str) + 1
     total_unpadded = preamble_len + raw_header_len
     pad = (64 - (total_unpadded % 64)) % 64
     header_len = raw_header_len + pad
@@ -159,6 +161,7 @@ def write_npy_f32(path: Path, shape: tuple[int, ...], payload: memoryview) -> No
             f.write(struct.pack("<H", header_len))
             f.write(dict_str.encode("ascii"))
             f.write(b" " * pad)
+            f.write(b"\n")
             chunk = 64 * 1024 * 1024
             for i in range(0, len(payload), chunk):
                 f.write(payload[i : i + chunk])
