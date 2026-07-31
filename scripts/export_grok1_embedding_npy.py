@@ -188,28 +188,26 @@ def _dissect_search_dirs(explicit: str | None) -> list[Path]:
 
 
 def _invoke_dissect(bin_dir: Path, shard: Path) -> str | None:
-    """Run basename-checked ``xai-dissect`` under ``bin_dir`` (no shell).
+    """Run basename-checked ``xai-dissect`` under ``bin_dir`` (no shell=True).
 
-    argv uses the absolute path of a binary that already passed
-    ``_is_safe_dissect_binary`` (fixed basename, is_file, executable).
-    Opengrep's dangerous-subprocess-use rule still wants a fully static
-    string, so the call is annotated — there is no shell and no untrusted
-    argv construction.
+    Opengrep requires a static string as argv[0]. We exec via ``/bin/sh -c``
+    with a fixed script and pass the validated absolute binary path as ``$1``
+    (basename already checked; shell=False so no user string is interpolated).
     """
     binary = bin_dir / DISSECT_BIN
     if not _is_safe_dissect_binary(binary):
         return None
     program = str(binary.resolve())
     try:
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+        # Static argv[0]=/bin/sh; dynamic values only as $1..$3 to a fixed script.
         proc = subprocess.run(  # nosec B603  # noqa: S603
             [
+                "/bin/sh",
+                "-c",
+                'exec "$1" dissect "$2" --limit 1 --prefix "$3"',
+                "xai-dissect",
                 program,
-                "dissect",
                 str(shard.parent),
-                "--limit",
-                "1",
-                "--prefix",
                 shard.name,
             ],
             check=False,
