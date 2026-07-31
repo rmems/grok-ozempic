@@ -109,6 +109,43 @@ impl Default for QuantizationConfig {
     }
 }
 
+/// Build a [`QuantizationConfig`] for the GOZ1 CLI (`quantize-goz1`) and tests.
+///
+/// Used by the `cli` binary and unit-tested so flag mapping stays stable for the
+/// first embedding experiment (GitHub #38 / Linear RM-193).
+pub fn quantize_goz1_config(
+    input_dir: impl Into<String>,
+    output_path: impl Into<String>,
+    input_format: QuantizationInputFormat,
+    manifest_path: Option<PathBuf>,
+    gif_threshold: Option<f32>,
+    use_embedded_baseline: bool,
+) -> QuantizationConfig {
+    let mut cfg = QuantizationConfig {
+        input_dir: input_dir.into(),
+        output_path: output_path.into(),
+        input_format,
+        manifest_path,
+        use_embedded_baseline,
+        ..QuantizationConfig::default()
+    };
+    if let Some(t) = gif_threshold {
+        cfg.gif_threshold = t;
+    }
+    cfg
+}
+
+/// Return an error message if `gif_threshold` is unusable for ternary GIF gating.
+pub fn validate_gif_threshold(t: f32) -> Result<(), String> {
+    if !t.is_finite() {
+        return Err(format!("gif_threshold must be finite (got {t})"));
+    }
+    if t < 0.0 {
+        return Err(format!("gif_threshold must be >= 0 (got {t})"));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
     pub gpu_temp_c: f32,
@@ -121,6 +158,56 @@ pub struct TelemetrySnapshot {
 impl TelemetrySnapshot {
     pub fn thermal_stress(&self) -> f32 {
         ((self.gpu_temp_c - 60.0) / 30.0).clamp(0.0, 1.0)
+    }
+}
+
+#[cfg(test)]
+mod quantize_goz1_config_tests {
+    use super::*;
+
+    #[test]
+    fn quantize_goz1_config_maps_cli_fields() {
+        let cfg = quantize_goz1_config(
+            "/tmp/in",
+            "/tmp/out.goz1",
+            QuantizationInputFormat::NpyDir,
+            Some(PathBuf::from("dissect/grok-1/baseline.json")),
+            Some(0.1),
+            true,
+        );
+        assert_eq!(cfg.input_dir, "/tmp/in");
+        assert_eq!(cfg.output_path, "/tmp/out.goz1");
+        assert_eq!(cfg.input_format, QuantizationInputFormat::NpyDir);
+        assert_eq!(
+            cfg.manifest_path,
+            Some(PathBuf::from("dissect/grok-1/baseline.json"))
+        );
+        assert!((cfg.gif_threshold - 0.1).abs() < f32::EPSILON);
+        assert!(cfg.use_embedded_baseline);
+    }
+
+    #[test]
+    fn quantize_goz1_config_omitted_gif_keeps_default() {
+        let cfg = quantize_goz1_config(
+            "/tmp/in",
+            "/tmp/out.goz1",
+            QuantizationInputFormat::NpyDir,
+            None,
+            None,
+            false,
+        );
+        assert!((cfg.gif_threshold - 0.05).abs() < f32::EPSILON);
+        assert!(!cfg.use_embedded_baseline);
+        assert!(cfg.manifest_path.is_none());
+    }
+
+    #[test]
+    fn validate_gif_threshold_rejects_nan_and_negative() {
+        assert!(validate_gif_threshold(0.0).is_ok());
+        assert!(validate_gif_threshold(0.05).is_ok());
+        assert!(validate_gif_threshold(f32::NAN).is_err());
+        assert!(validate_gif_threshold(f32::INFINITY).is_err());
+        assert!(validate_gif_threshold(-0.1).is_err());
     }
 }
 

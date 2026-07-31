@@ -70,6 +70,19 @@ For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 
 ---
 
+### Two CLI paths: SAAQ metadata vs GOZ1 weight packing
+
+| Path | Commands | Reads weights? |
+|------|----------|----------------|
+| **SAAQ metadata** | `validate-ingest`, `smoke-grok1`, `convert-grok1`, `validate-grok1-artifact` | Index/metadata only; may hash full shards if `checksums.json` is present under `--checkpoint` |
+| **GOZ1 real quant** | `quantize-goz1` | Yes — safetensors or `.npy` only |
+
+Official Grok-1 pickle shards are **not** accepted by `quantize-goz1`. Export first
+(export tooling is tracked in GitHub
+[#37](https://github.com/rmems/grok-ozempic/issues/37) / Linear
+[RM-189](https://linear.app/rpd-34/issue/RM-189); PR
+[#42](https://github.com/rmems/grok-ozempic/pull/42)).
+
 ### Grok-1 SAAQ artifact sprint commands
 
 The combined sprint path for ingest validation, one-block smoke validation,
@@ -106,10 +119,23 @@ python3 scripts/export_grok1_embedding_npy.py \
 ```
 
 This writes `embedding__slot_00__token_embedding.npy` (logical name
-`embedding.slot_00.token_embedding` after `__` → `.` stem mapping). Use that
-directory as `--input-dir` for GOZ1 packing once the `quantize-goz1` CLI is
-available ([#38](https://github.com/rmems/grok-ozempic/issues/38) /
-[RM-193](https://linear.app/rpd-34/issue/RM-193)).
+`embedding.slot_00.token_embedding` after `__` → `.` stem mapping). Pass that
+directory as `--input-dir` to `quantize-goz1` below.
+
+### GOZ1 packing (`quantize-goz1`)
+
+Streams tensors through `run_quantization` into a GOZ1 file
+([#38](https://github.com/rmems/grok-ozempic/issues/38) / Linear
+[RM-193](https://linear.app/rpd-34/issue/RM-193)):
+
+```bash
+cargo run --features cli -- quantize-goz1 \
+  --input-dir /path/to/npy-or-safetensors \
+  --output /tmp/model.goz1 \
+  --manifest dissect/grok-1/baseline.json \
+  --input-format npy \
+  --verify
+```
 
 ## CUDA kernel ownership
 

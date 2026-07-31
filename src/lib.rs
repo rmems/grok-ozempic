@@ -20,7 +20,7 @@ pub use core::dry_run::{
 pub use core::inventory::{InventoryTensor, ModelInventory};
 pub use types::{
     GROK1_HIDDEN_DIM, HybridConfig, HybridOutput, QuantizationConfig, QuantizationInputFormat,
-    TelemetrySnapshot, TensorPrecision,
+    TelemetrySnapshot, TensorPrecision, quantize_goz1_config, validate_gif_threshold,
 };
 
 // Re-export main types for convenience
