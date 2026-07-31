@@ -1,7 +1,9 @@
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use grok_ozempic::artifact::{self, ConvertOptions, GROK1_ARTIFACT_FORMAT, SmokeOptions};
 use grok_ozempic::reports;
 use grok_ozempic::reports::schema::ArtifactIR;
+use grok_ozempic::types::{QuantizationInputFormat, quantize_goz1_config};
+use grok_ozempic::{run_quantization, verify_pack_file};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Parser)]
@@ -111,6 +113,55 @@ enum Commands {
         #[arg(long, action = ArgAction::Set, default_value_t = true)]
         strict_router_protection: bool,
     },
+    /// Pack safetensors or `.npy` weights into a GOZ1 checkpoint (real quantize path)
+    ///
+    /// Unlike `convert-grok1` / `smoke-grok1` (metadata-only), this streams tensor
+    /// payloads through `run_quantization`. Input must not be official pickle shards —
+    /// export to `.npy` first (see scripts/export_grok1_embedding_npy.py, #37 / RM-189).
+    QuantizeGoz1 {
+        /// Directory of `*.safetensors` shards or flat `*.npy` files
+        #[arg(long)]
+        input_dir: PathBuf,
+
+        /// Output GOZ1 packed checkpoint path
+        #[arg(long)]
+        output: PathBuf,
+
+        /// Optional xai-dissect manifest JSON (V1 names for runtime quantize)
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+
+        /// Input layout: safetensors (default) or npy
+        #[arg(long, value_enum, default_value_t = CliInputFormat::Npy)]
+        input_format: CliInputFormat,
+
+        /// GIF saliency threshold (default 0.05; manifest defaults may override)
+        #[arg(long)]
+        gif_threshold: Option<f32>,
+
+        /// Use embedded Grok-1 baseline when `--manifest` is omitted
+        #[arg(long, default_value_t = false)]
+        use_embedded_baseline: bool,
+
+        /// Verify GOZ1 container after write
+        #[arg(long, default_value_t = false)]
+        verify: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliInputFormat {
+    Safetensors,
+    Npy,
+}
+
+impl From<CliInputFormat> for QuantizationInputFormat {
+    fn from(v: CliInputFormat) -> Self {
+        match v {
+            CliInputFormat::Safetensors => QuantizationInputFormat::Safetensors,
+            CliInputFormat::Npy => QuantizationInputFormat::NpyDir,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -238,6 +289,56 @@ fn main() -> anyhow::Result<()> {
                 "Grok-1 artifact validation {} ({} tensors, {} routers).",
                 report.status, report.artifact_tensor_count, report.router_count
             );
+        }
+        Commands::QuantizeGoz1 {
+            input_dir,
+            output,
+            manifest,
+            input_format,
+            gif_threshold,
+            use_embedded_baseline,
+            verify,
+        } => {
+            if !input_dir.is_dir() {
+                anyhow::bail!("--input-dir is not a directory: {}", input_dir.display());
+            }
+            if manifest.is_none() && !use_embedded_baseline {
+                eprintln!(
+                    "warning: no --manifest and --use-embedded-baseline not set; \
+                     using legacy router_patterns heuristic only"
+                );
+            }
+            let config = quantize_goz1_config(
+                input_dir.to_string_lossy(),
+                output.to_string_lossy(),
+                input_format.into(),
+                manifest,
+                gif_threshold,
+                use_embedded_baseline,
+            );
+            let stats = run_quantization(&config)
+                .map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
+            let ternary: usize = stats.iter().map(|s| s.tensors_ternary).sum();
+            let fp16: usize = stats.iter().map(|s| s.tensors_fp16).sum();
+            let skipped: usize = stats.iter().map(|s| s.tensors_skipped).sum();
+            let tensors = ternary + fp16;
+            println!(
+                "GOZ1 written to {} ({} source file(s), {} tensors: {} ternary, {} fp16/preserve, {} skipped).",
+                output.display(),
+                stats.len(),
+                tensors,
+                ternary,
+                fp16,
+                skipped
+            );
+            if verify {
+                let report = verify_pack_file(&output)
+                    .map_err(|e| anyhow::anyhow!("GOZ1 verify failed: {e}"))?;
+                println!(
+                    "GOZ1 verify ok: version={}, {} tensor header(s), file_size={}.",
+                    report.version, report.tensor_count, report.file_size
+                );
+            }
         }
         Commands::Artifacts { cmd } => match cmd {
             ArtifactsCommands::Generate {
