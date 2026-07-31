@@ -74,7 +74,7 @@ For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 
 | Path | Commands | Reads weights? |
 |------|----------|----------------|
-| **SAAQ metadata** | `validate-ingest`, `smoke-grok1`, `convert-grok1`, `validate-grok1-artifact` | No (indexes only) |
+| **SAAQ metadata** | `validate-ingest`, `smoke-grok1`, `convert-grok1`, `validate-grok1-artifact` | Index/metadata only; may hash full shards if `checksums.json` is present under `--checkpoint` |
 | **GOZ1 real quant** | `quantize-goz1` | Yes — safetensors or `.npy` only |
 
 Official Grok-1 pickle shards are **not** accepted by `quantize-goz1`. Export first

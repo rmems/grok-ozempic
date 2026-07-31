@@ -2,7 +2,7 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use grok_ozempic::artifact::{self, ConvertOptions, GROK1_ARTIFACT_FORMAT, SmokeOptions};
 use grok_ozempic::reports;
 use grok_ozempic::reports::schema::ArtifactIR;
-use grok_ozempic::types::{QuantizationInputFormat, quantize_goz1_config};
+use grok_ozempic::types::{QuantizationInputFormat, quantize_goz1_config, validate_gif_threshold};
 use grok_ozempic::{run_quantization, verify_pack_file};
 use std::path::{Component, Path, PathBuf};
 
@@ -302,15 +302,31 @@ fn main() -> anyhow::Result<()> {
             if !input_dir.is_dir() {
                 anyhow::bail!("--input-dir is not a directory: {}", input_dir.display());
             }
+            let input_dir_s = input_dir
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("--input-dir is not valid UTF-8"))?
+                .to_string();
+            let output_s = output
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("--output is not valid UTF-8"))?
+                .to_string();
+            if let Some(t) = gif_threshold {
+                validate_gif_threshold(t).map_err(anyhow::Error::msg)?;
+            }
             if manifest.is_none() && !use_embedded_baseline {
-                eprintln!(
-                    "warning: no --manifest and --use-embedded-baseline not set; \
-                     using legacy router_patterns heuristic only"
-                );
+                if std::env::var_os("GROK_OZEMPIC_MANIFEST").is_some() {
+                    eprintln!(
+                        "note: using GROK_OZEMPIC_MANIFEST for classification (no --manifest flag)"
+                    );
+                } else {
+                    eprintln!(
+                        "warning: no --manifest, no --use-embedded-baseline, and GROK_OZEMPIC_MANIFEST unset;                          using legacy router_patterns heuristic only"
+                    );
+                }
             }
             let config = quantize_goz1_config(
-                input_dir.to_string_lossy(),
-                output.to_string_lossy(),
+                input_dir_s,
+                output_s,
                 input_format.into(),
                 manifest,
                 gif_threshold,
@@ -320,16 +336,14 @@ fn main() -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
             let ternary: usize = stats.iter().map(|s| s.tensors_ternary).sum();
             let fp16: usize = stats.iter().map(|s| s.tensors_fp16).sum();
-            let skipped: usize = stats.iter().map(|s| s.tensors_skipped).sum();
             let tensors = ternary + fp16;
             println!(
-                "GOZ1 written to {} ({} source file(s), {} tensors: {} ternary, {} fp16/preserve, {} skipped).",
+                "GOZ1 written to {} ({} source file(s), {} tensors: {} ternary, {} fp16/preserve; unsupported dtypes omitted).",
                 output.display(),
                 stats.len(),
                 tensors,
                 ternary,
-                fp16,
-                skipped
+                fp16
             );
             if verify {
                 let report = verify_pack_file(&output)

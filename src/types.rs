@@ -135,6 +135,17 @@ pub fn quantize_goz1_config(
     cfg
 }
 
+/// Return an error message if `gif_threshold` is unusable for ternary GIF gating.
+pub fn validate_gif_threshold(t: f32) -> Result<(), String> {
+    if !t.is_finite() {
+        return Err(format!("gif_threshold must be finite (got {t})"));
+    }
+    if t < 0.0 {
+        return Err(format!("gif_threshold must be >= 0 (got {t})"));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
     pub gpu_temp_c: f32,
