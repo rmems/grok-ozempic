@@ -190,18 +190,21 @@ def _dissect_search_dirs(explicit: str | None) -> list[Path]:
 def _invoke_dissect(bin_dir: Path, shard: Path) -> str | None:
     """Run basename-checked ``xai-dissect`` under ``bin_dir`` (no shell).
 
-    Opengrep requires a static program name in argv; Ruff S607 wants a full
-    path. Satisfy both: static argv[0] ``\"xai-dissect\"`` and
-    ``executable=`` the absolute path of the validated binary.
+    argv uses the absolute path of a binary that already passed
+    ``_is_safe_dissect_binary`` (fixed basename, is_file, executable).
+    Opengrep's dangerous-subprocess-use rule still wants a fully static
+    string, so the call is annotated — there is no shell and no untrusted
+    argv construction.
     """
     binary = bin_dir / DISSECT_BIN
     if not _is_safe_dissect_binary(binary):
         return None
     program = str(binary.resolve())
     try:
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         proc = subprocess.run(  # nosec B603  # noqa: S603
             [
-                "xai-dissect",
+                program,
                 "dissect",
                 str(shard.parent),
                 "--limit",
@@ -209,7 +212,6 @@ def _invoke_dissect(bin_dir: Path, shard: Path) -> str | None:
                 "--prefix",
                 shard.name,
             ],
-            executable=program,
             check=False,
             capture_output=True,
             text=True,
