@@ -269,6 +269,10 @@ def main() -> int:
         )
         return 1
 
+    if offset < 0:
+        print(f"error: offset must be >= 0 (got {offset})", file=sys.stderr)
+        return 1
+
     file_size = shard.stat().st_size
     if offset + exp > file_size:
         print(
@@ -281,8 +285,10 @@ def main() -> int:
 
     with shard.open("rb") as f, mmap_mod.mmap(f.fileno(), 0, access=mmap_mod.ACCESS_READ) as mm:
         payload = memoryview(mm)[offset : offset + exp]
-        write_npy_f32(out_path, shape, payload)
-        del payload
+        try:
+            write_npy_f32(out_path, shape, payload)
+        finally:
+            del payload
 
     logical = args.stem.replace("__", ".")
     print(f"wrote {out_path}")
