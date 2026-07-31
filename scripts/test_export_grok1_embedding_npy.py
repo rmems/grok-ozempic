@@ -41,6 +41,14 @@ class ParseShapeTests(unittest.TestCase):
         with self.assertRaises(exp.LayoutError):
             exp._parse_shape_csv("-1,2")
 
+    def test_empty_dimension_rejected(self) -> None:
+        with self.assertRaises(exp.LayoutError) as ctx:
+            exp._parse_shape_csv("1,,3")
+        self.assertIn("empty", str(ctx.exception).lower())
+
+    def test_zero_padded_decimal(self) -> None:
+        self.assertEqual(exp._parse_shape_csv("0123,456"), (123, 456))
+
 
 class StemTests(unittest.TestCase):
     def test_ok(self) -> None:
@@ -118,6 +126,20 @@ class LayoutPolicyTests(unittest.TestCase):
             )
             off, shape, dtype, _ = exp.resolve_layout(shard, ns)
             self.assertEqual((off, shape, dtype), (8, (2, 2), "f32"))
+
+    def test_invalid_dissect_path_rejected_even_with_complete_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            shard = Path(td) / "other_tensor_001"
+            ns = self._ns(
+                no_dissect=False,
+                offset=8,
+                shape="2,2",
+                dtype="f32",
+                xai_dissect="/nonexistent/fake-dissect",
+            )
+            with self.assertRaises(exp.LayoutError) as ctx:
+                exp.resolve_layout(shard, ns)
+            self.assertIn("xai-dissect", str(ctx.exception).lower())
 
 
 class ExplicitDissectPathTests(unittest.TestCase):

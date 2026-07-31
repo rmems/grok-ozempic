@@ -70,7 +70,7 @@ def _parse_hex_or_int(s: str) -> int:
 
 def _parse_one_dim(p: str) -> int:
     try:
-        d = int(p, 0)
+        d = int(p, 10)
     except ValueError as e:
         raise LayoutError(f"invalid shape component {p!r}: not an integer") from e
     if d <= 0:
@@ -80,11 +80,13 @@ def _parse_one_dim(p: str) -> int:
 
 def _parse_shape_csv(inner: str) -> tuple[int, ...]:
     """Parse comma-separated positive dimensions; empty or non-int is an error."""
-    parts = [x.strip() for x in inner.split(",") if x.strip()]
+    parts = [x.strip() for x in inner.split(",")]
     if not parts:
         raise LayoutError(
             "shape must be a non-empty comma-separated list of positive ints"
         )
+    if any(not p for p in parts):
+        raise LayoutError("shape must not contain empty dimensions")
     return tuple(_parse_one_dim(p) for p in parts)
 
 
@@ -404,6 +406,12 @@ def resolve_layout(
     Prefer xai-dissect when layout is incomplete (unless --no-dissect). Hard-coded
     embedding defaults only for shard basename tensor00000_000.
     """
+    if args.xai_dissect:
+        p = Path(args.xai_dissect).expanduser()
+        if not _is_safe_dissect_binary(p):
+            raise LayoutError(
+                f"--xai-dissect path is not a usable {DISSECT_BIN!r} binary: {p}"
+            )
     offset, shape, dtype = _cli_layout(args)
     nbytes: int | None = None
     if not args.no_dissect and not _layout_complete(offset, shape, dtype):
