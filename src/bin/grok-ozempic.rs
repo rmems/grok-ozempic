@@ -2,8 +2,10 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use grok_ozempic::artifact::{self, ConvertOptions, GROK1_ARTIFACT_FORMAT, SmokeOptions};
 use grok_ozempic::reports;
 use grok_ozempic::reports::schema::ArtifactIR;
-use grok_ozempic::types::{QuantizationInputFormat, quantize_goz1_config, validate_gif_threshold};
-use grok_ozempic::{run_quantization, verify_pack_file};
+use grok_ozempic::types::{
+    QuantizationConfig, QuantizationInputFormat, quantize_goz1_config, validate_gif_threshold,
+};
+use grok_ozempic::{ShardStats, run_quantization, verify_pack_file};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Parser)]
@@ -335,28 +337,52 @@ fn cmd_quantize_goz1(
     use_embedded_baseline: bool,
     verify: bool,
 ) -> anyhow::Result<()> {
+    let config = prepare_quantize_goz1(
+        &input_dir,
+        &output,
+        manifest,
+        input_format,
+        gif_threshold,
+        use_embedded_baseline,
+    )?;
+    let stats =
+        run_quantization(&config).map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
+    print_quantize_goz1_summary(&output, &stats);
+    maybe_verify_goz1(&output, verify)
+}
+
+/// Validate CLI paths/flags and build a [`QuantizationConfig`] for quantize-goz1.
+fn prepare_quantize_goz1(
+    input_dir: &Path,
+    output: &Path,
+    manifest: Option<PathBuf>,
+    input_format: CliInputFormat,
+    gif_threshold: Option<f32>,
+    use_embedded_baseline: bool,
+) -> anyhow::Result<QuantizationConfig> {
     if !input_dir.is_dir() {
         anyhow::bail!("--input-dir is not a directory: {}", input_dir.display());
     }
-    let input_dir_s = path_to_utf8_string(&input_dir, "--input-dir")?;
-    let output_s = path_to_utf8_string(&output, "--output")?;
+    let input_dir_s = path_to_utf8_string(input_dir, "--input-dir")?;
+    let output_s = path_to_utf8_string(output, "--output")?;
     if let Some(t) = gif_threshold {
         validate_gif_threshold(t).map_err(anyhow::Error::msg)?;
     }
     // Prevent File::create(output) from truncating an input shard or the
     // classification manifest (Codex P1 on #43).
-    reject_output_path_collisions(&input_dir, &output, manifest.as_deref())?;
+    reject_output_path_collisions(input_dir, output, manifest.as_deref())?;
     note_manifest_policy(manifest.is_none() && !use_embedded_baseline);
-    let config = quantize_goz1_config(
+    Ok(quantize_goz1_config(
         input_dir_s,
         output_s,
         input_format.into(),
         manifest,
         gif_threshold,
         use_embedded_baseline,
-    );
-    let stats =
-        run_quantization(&config).map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
+    ))
+}
+
+fn print_quantize_goz1_summary(output: &Path, stats: &[ShardStats]) {
     let ternary: usize = stats.iter().map(|s| s.tensors_ternary).sum();
     let fp16: usize = stats.iter().map(|s| s.tensors_fp16).sum();
     let tensors = ternary + fp16;
@@ -368,14 +394,18 @@ fn cmd_quantize_goz1(
         ternary,
         fp16
     );
-    if verify {
-        let report =
-            verify_pack_file(&output).map_err(|e| anyhow::anyhow!("GOZ1 verify failed: {e}"))?;
-        println!(
-            "GOZ1 verify ok: version={}, {} tensor header(s), file_size={}.",
-            report.version, report.tensor_count, report.file_size
-        );
+}
+
+fn maybe_verify_goz1(output: &Path, verify: bool) -> anyhow::Result<()> {
+    if !verify {
+        return Ok(());
     }
+    let report =
+        verify_pack_file(output).map_err(|e| anyhow::anyhow!("GOZ1 verify failed: {e}"))?;
+    println!(
+        "GOZ1 verify ok: version={}, {} tensor header(s), file_size={}.",
+        report.version, report.tensor_count, report.file_size
+    );
     Ok(())
 }
 
@@ -409,40 +439,55 @@ fn cmd_artifacts(cmd: ArtifactsCommands) -> anyhow::Result<()> {
             output_dir,
             weights_dir,
             checkpoint,
-        } => {
-            println!(
-                "Generating artifacts to {} using manifest {}",
-                output_dir.display(),
-                manifest.display()
-            );
-            let (actual_checkpoint, actual_shards) =
-                resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, true)?;
-            let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
-            reports::validator::validate_ir(&ir)
-                .map_err(|e| anyhow::anyhow!("Artifact validation failed: {}", e))?;
-            reports::writer::write_reports(&ir, &output_dir)
-                .map_err(|e| anyhow::anyhow!("Failed to write reports: {}", e))?;
-            println!("Success!");
-        }
+        } => cmd_artifacts_generate(manifest, output_dir, weights_dir, checkpoint),
         ArtifactsCommands::Validate {
             report_dir,
             manifest,
             weights_dir,
             checkpoint,
-        } => {
-            println!(
-                "Validating reports in {} using manifest {}",
-                report_dir.display(),
-                manifest.display()
-            );
-            let (actual_checkpoint, actual_shards) =
-                resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, false)?;
-            let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
-            reports::writer::validate_report_dir_against_ir(&report_dir, &ir)
-                .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
-            println!("Report directory matches manifest and passes IR validation.");
-        }
+        } => cmd_artifacts_validate(report_dir, manifest, weights_dir, checkpoint),
     }
+}
+
+fn cmd_artifacts_generate(
+    manifest: PathBuf,
+    output_dir: PathBuf,
+    weights_dir: Option<PathBuf>,
+    checkpoint: Option<String>,
+) -> anyhow::Result<()> {
+    println!(
+        "Generating artifacts to {} using manifest {}",
+        output_dir.display(),
+        manifest.display()
+    );
+    let (actual_checkpoint, actual_shards) =
+        resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, true)?;
+    let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
+    reports::validator::validate_ir(&ir)
+        .map_err(|e| anyhow::anyhow!("Artifact validation failed: {}", e))?;
+    reports::writer::write_reports(&ir, &output_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to write reports: {}", e))?;
+    println!("Success!");
+    Ok(())
+}
+
+fn cmd_artifacts_validate(
+    report_dir: PathBuf,
+    manifest: PathBuf,
+    weights_dir: Option<PathBuf>,
+    checkpoint: Option<String>,
+) -> anyhow::Result<()> {
+    println!(
+        "Validating reports in {} using manifest {}",
+        report_dir.display(),
+        manifest.display()
+    );
+    let (actual_checkpoint, actual_shards) =
+        resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, false)?;
+    let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
+    reports::writer::validate_report_dir_against_ir(&report_dir, &ir)
+        .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
+    println!("Report directory matches manifest and passes IR validation.");
     Ok(())
 }
 
