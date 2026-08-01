@@ -1,0 +1,36 @@
+name: Grok PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: grok-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: 0xr3ngar/grok-build-review-action@v1
+        with:
+          grok_auth_json: ${{ secrets.GROK_AUTH_JSON }}
+          roast_level: professional
+          fail_on: bugs
+          effort: high
+          max_diff_kb: "300"
+          custom_instructions: |
+            This is a Rust (edition 2024) crate for Grok-1 GOZ1 quantization.
+            Flag: pickle accepted by quantize-goz1; preserve/fp16 misclassification
+            via name mismatch; V2 structural manifests used for runtime packs before
+            #40/RM-191; CUDA kernels living in this repo instead of myelin-accelerator;
+            inventing xai-dissect manifest fields. Prefer project AGENTS.md / CLAUDE.md.
