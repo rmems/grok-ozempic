@@ -32,6 +32,7 @@ maintenance: |
   set -euo pipefail
   export PATH="$HOME/.cargo/bin:$PATH"
   # Differential Devin builds may skip initialize — bootstrap rustup if missing.
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
   if ! command -v rustup >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
     export PATH="$HOME/.cargo/bin:$PATH"

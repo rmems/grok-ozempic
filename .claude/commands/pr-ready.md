@@ -27,6 +27,7 @@ python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 
 # root Dockerfile (or docker-compose that builds it) → docker.yml tester stage
 docker build --target tester -t grok-ozempic:test .
+docker build --target runtime -t grok-ozempic:latest .
 
 # .devcontainer/* or .cursor/Dockerfile: image build only if you changed those Dockerfiles
 # docker build -f .devcontainer/Dockerfile .

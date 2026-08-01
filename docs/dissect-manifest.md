@@ -22,7 +22,7 @@ for runtime GOZ1 packs until #40 / RM-191.
 Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):
 
 1. Explicit `QuantizationConfig.manifest_path` / CLI `--manifest` (caller-provided).
-2. Nonempty environment variable `GROK_OZEMPIC_MANIFEST`.
+2. Nonempty UTF-8 environment variable `GROK_OZEMPIC_MANIFEST`.
 3. Embedded Grok-1 baseline **only if** `use_embedded_baseline` /
    `--use-embedded-baseline` is set (**opt-in**; default off). The in-tree
    `dissect/grok-1/baseline.json` is a reference copy and is **not** loaded

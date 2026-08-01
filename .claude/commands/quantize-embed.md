@@ -27,7 +27,7 @@ fi
 ```bash
 CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
 # Always a new empty dir (~3 GiB); clean up on exit (success or fail)
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/goz1-embed-npy.XXXXXX")"
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/goz1-embed-npy.XXXXXX")" || exit 1
 cleanup_stage() { rm -rf "$STAGE"; }
 trap cleanup_stage EXIT
 

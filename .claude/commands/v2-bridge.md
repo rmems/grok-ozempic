@@ -39,10 +39,10 @@ Tracked work: GitHub **#40** / Linear **RM-191** as linked IDs only. **bd is the
 
 1. Quality gates (`/pr-ready` section 1 — full CI matrix including build + doc; path-scoped extras if needed)
 2. File follow-up **bd** issues for remaining work (before beads push)
-3. `bd close` / `bd update` for finished work, then **`bd dolt push`** (required when bd is available)
+3. `bd close` for finished work / `bd update` for in-progress notes, then **`bd dolt push`** (required when bd is available)
 4. **Exception — no bd/Dolt (e.g. Claude Code cloud):** GH/Linear status only for handoff links; do not invent MEMORY.md
 5. Commit: **imperative subject**, body explains **why**, include `(#40 / RM-191)` when applicable
 6. `git pull --rebase && git push` (resolve errors, then retry) until branch is up to date and working tree is clean
 7. PR title includes `(#40 / RM-191)`; use `gh pr create` / `gh pr edit` as needed
-8. Clean temp artifacts; if cleanup touches tracked files, commit + push again and re-check `git status`
+8. Clean temp artifacts, clear stashes, and prune remote branches; if cleanup touches tracked files, commit + push again and re-check `git status`
 9. Short handoff note (what shipped, what remains)
