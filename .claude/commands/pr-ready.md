@@ -19,14 +19,18 @@ cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
 ```
 
-Path-scoped extras (run when those paths change in the PR):
+Path-scoped extras (only when those paths change; command matches the path):
 
 ```bash
-# scripts/export_*.py or related tests → .github/workflows/python-scripts.yml
+# scripts/export_grok1_embedding_npy.py or scripts/test_export_grok1_embedding_npy.py
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 
-# Dockerfile / docker-compose / .devcontainer / .cursor Dockerfiles → docker.yml spirit
+# root Dockerfile (or docker-compose that builds it) → docker.yml tester stage
 docker build --target tester -t grok-ozempic:test .
+
+# .devcontainer/* or .cursor/Dockerfile: image build only if you changed those Dockerfiles
+# docker build -f .devcontainer/Dockerfile .
+# docker build -f .cursor/Dockerfile .
 ```
 
 ## 2. Diff hygiene

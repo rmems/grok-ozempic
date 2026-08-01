@@ -30,12 +30,12 @@ The loader validates:
 
 and will **hard-fail** on invalid manifest data.
 
-Manifest delivery precedence (`stream::resolve_manifest`) is:
+Manifest **resolution** precedence (`stream::resolve_manifest`) is:
 
 1. explicit config path / CLI `--manifest`
 2. nonempty `GROK_OZEMPIC_MANIFEST`
 3. embedded Grok-1 baseline **only if** `use_embedded_baseline` / `--use-embedded-baseline` (opt-in; default off)
-4. otherwise legacy substring heuristic (`router_patterns`)
+4. If no manifest resolves (`Ok(None)`), **selection** falls back to the legacy `router_patterns` heuristic (not part of `resolve_manifest` itself)
 
 ---
 

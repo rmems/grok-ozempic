@@ -33,8 +33,7 @@ maintenance: |
   export PATH="$HOME/.cargo/bin:$PATH"
   rustup default 1.97.1
   rustup component add --toolchain 1.97.1 rustfmt clippy
-  # Refresh lock-consistent deps on existing envs (initialize already fetched once).
-  cargo +1.97.1 fetch --locked
+  # Deps were fetched in initialize; re-fetch only when Cargo.lock changes (agent can run cargo +1.97.1 fetch --locked manually).
 
 knowledge:
   - name: lint
