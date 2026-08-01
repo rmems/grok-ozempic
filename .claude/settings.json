@@ -6,18 +6,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/claude-session-start.sh\""
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/claude-session-start.sh\" prime"
           }
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume",
+        "matcher": "startup|resume|clear",
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/claude-session-start.sh\""
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/claude-session-start.sh\" full"
           }
         ]
       }

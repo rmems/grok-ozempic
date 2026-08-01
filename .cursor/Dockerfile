@@ -1,6 +1,7 @@
 # Cursor cloud-agent / local image for grok-ozempic.
 # Do NOT COPY the project — Cursor checks out the correct commit itself.
-FROM rust:1.96-bookworm
+# Rust: latest stable (1.97.1) — matches host rustup + CI dtolnay/rust-toolchain@stable.
+FROM rust:1.97.1-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_TERM_COLOR=always
@@ -22,7 +23,8 @@ RUN apt-get update \
 
 RUN rustup component add clippy rustfmt
 
-# Passwordless sudo is required by some Cursor cloud-agent tooling.
+# Passwordless sudo is required by some Cursor cloud-agent tooling (agent install steps).
+# This is a developer sandbox image, not a production runtime — intentional tradeoff.
 RUN useradd -m -s /bin/bash ubuntu \
     && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/ubuntu \
     && chmod 0440 /etc/sudoers.d/ubuntu \

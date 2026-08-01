@@ -4,11 +4,11 @@
 
 initialize: |
   set -e
-  # Align with project Dockerfile rust pin when possible; host may already have rustup.
+  # Latest stable (matches host rustc 1.97.1 and CI dtolnay/rust-toolchain@stable).
   if command -v rustup >/dev/null 2>&1; then
-    rustup toolchain install 1.96.0 || rustup toolchain install stable
-    rustup default 1.96.0 2>/dev/null || rustup default stable
-    rustup component add rustfmt clippy || true
+    rustup toolchain install 1.97.1
+    rustup default 1.97.1
+    rustup component add --toolchain 1.97.1 rustfmt clippy || true
   fi
   echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -18,12 +18,16 @@ initialize: |
     python3 -m pip install --user -q numpy || true
   fi
 
-  cargo fetch
+  if command -v cargo >/dev/null 2>&1; then
+    cargo fetch
+  fi
 
 maintenance: |
   set -e
   export PATH="$HOME/.cargo/bin:$PATH"
-  cargo fetch
+  if command -v cargo >/dev/null 2>&1; then
+    cargo fetch
+  fi
   if command -v python3 >/dev/null 2>&1; then
     python3 -m pip install --user -q numpy || true
   fi
@@ -53,3 +57,4 @@ knowledge:
       Prefer dissect/grok-1/baseline.json for quantize-goz1 today.
       CUDA kernels belong in myelin-accelerator, not this crate.
       Claude Code cloud uses .claude/ + CLAUDE.md; this blueprint is for Devin.
+      Container/agent Rust pin: 1.97.1 (latest stable as of handoff).

@@ -1,6 +1,6 @@
 # Dev container for grok-ozempic (Codespaces / VS Code).
-# Rust matches repo production Dockerfile pin (rust:1.96-*); Python for npy export.
-FROM rust:1.96-bookworm
+# Rust: latest stable 1.97.1 (host + CI). Python for npy export scripts.
+FROM rust:1.97.1-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_TERM_COLOR=always
@@ -22,6 +22,7 @@ RUN apt-get update \
 
 RUN rustup component add clippy rustfmt llvm-tools-preview
 
+# Passwordless sudo for VS Code / Codespaces tooling (dev sandbox, not prod).
 RUN useradd -m -s /bin/bash -u 1000 vscode \
     && echo 'vscode ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/vscode \
     && chmod 0440 /etc/sudoers.d/vscode \

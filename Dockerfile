@@ -1,4 +1,4 @@
-FROM rust:1.96-slim AS builder
+FROM rust:1.97.1-slim AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --features cli --locked && \
     cp /app/target/release/grok-ozempic /usr/local/bin/
 
-FROM rust:1.96-slim AS tester
+FROM rust:1.97.1-slim AS tester
 WORKDIR /app
 RUN rustup component add clippy rustfmt
 COPY . .
