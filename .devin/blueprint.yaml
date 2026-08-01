@@ -5,13 +5,17 @@
 # often 1.97.1 today, not a fixed pin in workflow YAML).
 
 initialize: |
-  set -e
+  set -euo pipefail
   # Always require rustup so we can pin the toolchain (cargo-only images bypass pins).
   if ! command -v rustup >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
   fi
   echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
   export PATH="$HOME/.cargo/bin:$PATH"
+  if ! command -v rustup >/dev/null 2>&1; then
+    echo "rustup install failed or not on PATH" >&2
+    exit 1
+  fi
 
   rustup toolchain install 1.97.1
   rustup default 1.97.1
@@ -25,10 +29,11 @@ initialize: |
   cargo +1.97.1 fetch --locked
 
 maintenance: |
-  set -e
+  set -euo pipefail
   export PATH="$HOME/.cargo/bin:$PATH"
   rustup default 1.97.1
   rustup component add --toolchain 1.97.1 rustfmt clippy
+  # Refresh lock-consistent deps on existing envs (initialize already fetched once).
   cargo +1.97.1 fetch --locked
 
 knowledge:

@@ -4,8 +4,9 @@ Machine-readable JSON contract that lets `grok-ozempic` consume structural
 analysis produced by the upstream [`xai-dissect`](https://github.com/rmems/xai-dissect)
 repository, without depending on it as a runtime crate.
 
-This document freezes **schema v1**. Phase 1 implements the loader only;
-the batch pipeline in `src/core/stream.rs` is not rewired yet.
+This document freezes **schema v1**. The loader and runtime resolution path in
+`stream::resolve_manifest` are active; V2 structural naming is still rejected
+for runtime GOZ1 packs until #40 / RM-191.
 
 ## Authority and source of truth
 
@@ -34,10 +35,10 @@ GitHub #40 / RM-191 (checkpoint↔structural name bridge).
 
 ## Manifest precedence over legacy `router_patterns`
 
-When a manifest is provided, it **wins** over the legacy
-`QuantizationConfig.router_patterns` substring list. In phase 2 the
-wiring code will log a deprecation warning if both are present. The
-legacy field remains supported only for the manifest-less fallback path.
+When a manifest is resolved (path, env, or opt-in embedded baseline), it
+**wins** over the legacy `QuantizationConfig.router_patterns` substring list.
+If both are present, a deprecation warning may be logged. The legacy field
+remains supported only when no manifest is resolved.
 
 ## Schema v1
 

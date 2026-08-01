@@ -19,6 +19,16 @@ cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
 ```
 
+Path-scoped extras (run when those paths change in the PR):
+
+```bash
+# scripts/export_*.py or related tests → .github/workflows/python-scripts.yml
+python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+
+# Dockerfile / docker-compose / .devcontainer / .cursor Dockerfiles → docker.yml spirit
+docker build --target tester -t grok-ozempic:test .
+```
+
 ## 2. Diff hygiene
 
 - No secrets, tokens, or credentials
@@ -37,10 +47,11 @@ cargo test --features cli --locked
 ```bash
 git pull --rebase
 git push
-git status   # must show up to date with origin on this branch
+git status   # branch up to date with origin AND clean working tree
+# expect: nothing to commit, working tree clean; tracking branch up to date
 ```
 
-If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the same error. Do not hand off with only a local commit.
+If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the same error. Do not hand off with only a local commit or with dirty uncommitted work.
 
 ## 5. PR
 

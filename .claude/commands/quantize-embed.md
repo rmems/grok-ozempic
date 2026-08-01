@@ -26,8 +26,8 @@ fi
 
 ```bash
 CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
-STAGE="${STAGE:-$HOME/.models/xai-grok-1/export-npy-embed-only-$$}"
-mkdir -p "$STAGE"
+# Fresh empty directory every run (do not reuse $$ path — same shell keeps PID)
+STAGE="${STAGE:-$(mktemp -d "${TMPDIR:-/tmp}/goz1-embed-npy.XXXXXX")}"
 "${TIME_V[@]}" python3 scripts/export_grok1_embedding_npy.py \
   --shard "$CKPT/tensor00000_000" \
   --output-dir "$STAGE"
