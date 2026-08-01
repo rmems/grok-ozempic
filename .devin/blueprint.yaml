@@ -1,7 +1,8 @@
 # https://docs.devin.ai/onboard-devin/environment-yaml
 # Repo-level environment for rmems/grok-ozempic (Rust + light Python for npy export).
 # Commands run from the repo root.
-# Rust pin: 1.97.1 (host + CI dtolnay/rust-toolchain@stable).
+# Rust pin: 1.97.1 for Devin. CI uses dtolnay/rust-toolchain@stable (moving channel;
+# often 1.97.1 today, not a fixed pin in workflow YAML).
 
 initialize: |
   set -e
@@ -14,7 +15,8 @@ initialize: |
 
   rustup toolchain install 1.97.1
   rustup default 1.97.1
-  rustup component add --toolchain 1.97.1 rustfmt clippy || true
+  # Fail init if clippy/rustfmt missing — lint knowledge requires them.
+  rustup component add --toolchain 1.97.1 rustfmt clippy
 
   if ! command -v cargo >/dev/null 2>&1; then
     echo "cargo missing after rustup 1.97.1 setup" >&2
@@ -26,6 +28,7 @@ maintenance: |
   set -e
   export PATH="$HOME/.cargo/bin:$PATH"
   rustup default 1.97.1
+  rustup component add --toolchain 1.97.1 rustfmt clippy
   cargo +1.97.1 fetch --locked
 
 knowledge:

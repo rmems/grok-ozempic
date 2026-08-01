@@ -44,6 +44,11 @@ cargo run --release --features cli -- quantize-goz1 \
 
 ## Metrics to report
 
-Wall clock, max RSS, output bytes, exact command, host/backend (CPU `quantize_f32` path unless myelin is live).
+Wall clock, max RSS, output bytes, exact command.
 
-CLI summary emits two counters only: **`ternary`** and **`fp16/preserve`** (preserve is not a separate number — it is lumped with fp16 in the quantize-goz1 line).
+**Compute path today:** `run_quantization` → `quantizer::quantize_f32` / FP16 helpers on CPU. It does **not** go through `BackendKernel` / `LocalBackend` / `MyelinBackend`. Myelin is a future stub — do not report myelin as the backend for `quantize-goz1` runs.
+
+**CLI summary line** looks like:
+`GOZ1 written to … (N source file(s), T tensors: X ternary, Y fp16/preserve; …)`
+
+Four numbers: source files `N`, total tensors `T`, precision **`ternary`**, precision **`fp16/preserve`** (preserve is not separate from fp16). Size and wall time are **not** in the CLI summary.

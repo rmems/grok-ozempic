@@ -37,11 +37,11 @@ Tracked work: GitHub **#40** / Linear **RM-191** as linked IDs. **Use `bd` for t
 
 ## Done protocol
 
-1. Quality gates (`/pr-ready` section 1 — full CI matrix)
-2. `bd close` / `bd update` when bd is available, then `bd dolt push`; else GH/Linear status only (cloud exception)
+1. Quality gates (`/pr-ready` section 1 — full CI matrix including build + doc)
+2. `bd close` / `bd update` when bd is available, then **`bd dolt push`** (required with bd); else GH/Linear status only (cloud exception)
 3. Commit: **imperative subject**, body explains **why**, include `(#40 / RM-191)` when applicable
-4. `git pull --rebase && git push` until `git status` is up to date with origin
+4. `git pull --rebase && git push` (resolve errors, then retry) until `git status` is up to date with origin
 5. PR title includes `(#40 / RM-191)`
 6. File follow-up issues for remaining work
-7. Clean temp artifacts / worktree noise
+7. Clean temp artifacts / worktree noise; if cleanup changes tracked files, commit + push again and re-check `git status`
 8. Short handoff note (what shipped, what remains)

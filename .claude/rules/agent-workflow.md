@@ -3,17 +3,19 @@
 ## Tracking
 
 - **bd is required** for task tracking whenever `bd` is installed (`bd ready`, `bd show`, `bd update --claim`, `bd close`, `bd remember` for durable notes). Markdown under `.claude/` is acceptance/scope, not the tracker.
-- After closing/updating beads issues that should sync: `bd dolt push`.
+- Every local `bd close` / `bd update` that should be shared **must** be followed by `bd dolt push` (git push does not sync Dolt beads).
 - **Exception — Claude Code cloud / hosts without bd or Dolt:** GH issues + Linear (`RM-*`) for status and handoff only. SessionStart does not install bd. Do not invent MEMORY.md.
 
 ## Quality gates before done
 
-Match CI when shipping:
+Match CI when shipping (see `.github/workflows/rust.yml`; `--locked` is stricter than CI and preferred):
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
+cargo build --all-targets --all-features --locked
+cargo doc --no-deps --all-features --locked
 ```
 
 CLI-focused fast path while iterating:

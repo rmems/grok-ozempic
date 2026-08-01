@@ -36,10 +36,17 @@ mkdir -p "$STAGE"
 Expect sole file `embedding__slot_00__token_embedding.npy` (f32 `131072×6144` → **3.0 GiB** payload + small NPY header).
 
 ```bash
-# Guard: quantize-goz1 packs *every* .npy under --input-dir
-mapfile -t NPYS < <(find "$STAGE" -maxdepth 1 -name '*.npy' | sort)
-test "${#NPYS[@]}" -eq 1
-test "$(basename "${NPYS[0]}")" = "embedding__slot_00__token_embedding.npy"
+# Guard: quantize-goz1 packs *every* .npy under --input-dir (Bash 3.2-safe; fail closed)
+NPYS=()
+while IFS= read -r f; do
+  NPYS+=("$f")
+done <<EOF
+$(find "$STAGE" -maxdepth 1 -name '*.npy' | sort)
+EOF
+if [ "${#NPYS[@]}" -ne 1 ] || [ "$(basename "${NPYS[0]}")" != "embedding__slot_00__token_embedding.npy" ]; then
+  echo "expected sole embedding__slot_00__token_embedding.npy in $STAGE; found: ${NPYS[*]:-none}" >&2
+  exit 1
+fi
 ```
 
 ## 2. Pack GOZ1 (V1 baseline until #40)

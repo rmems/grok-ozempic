@@ -18,17 +18,19 @@ the batch pipeline in `src/core/stream.rs` is not rewired yet.
 
 ## Delivery
 
-The manifest reaches `grok-ozempic` through one of the following paths,
-resolved in order (first hit wins):
+Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):
 
-1. Explicit `QuantizationConfig.manifest_path` (caller-provided).
-2. Environment variable `GROK_OZEMPIC_MANIFEST`.
-3. In-tree baseline at `dissect/grok-1/baseline.json` (reference fallback).
-4. Legacy heuristic in `stream.rs` (`router_patterns` substring match) —
-   preserved only until phase 2 wiring lands.
+1. Explicit `QuantizationConfig.manifest_path` / CLI `--manifest` (caller-provided).
+2. Nonempty environment variable `GROK_OZEMPIC_MANIFEST`.
+3. Embedded Grok-1 baseline **only if** `use_embedded_baseline` /
+   `--use-embedded-baseline` is set (**opt-in**; default off). The in-tree
+   `dissect/grok-1/baseline.json` is a reference copy and is **not** loaded
+   automatically just because it exists on disk.
+4. Otherwise `None` → legacy `router_patterns` substring heuristic in selection.
 
-Phase 1 exposes the config field and loader; enforcement of the resolution
-order lives in the selection/precision seams introduced in phase 2.
+**V2 structural naming** (`block_{NNN}.slot_{SS}.{kind}`) parses for alignment /
+dry-run but is **rejected** by `resolve_manifest` for runtime GOZ1 packs until
+GitHub #40 / RM-191 (checkpoint↔structural name bridge).
 
 ## Manifest precedence over legacy `router_patterns`
 

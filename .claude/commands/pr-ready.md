@@ -2,12 +2,14 @@
 
 ## 1. Quality gates (match CI)
 
-Canonical matrix (same spirit as `.github/workflows/rust.yml`):
+Canonical matrix (same steps as `.github/workflows/rust.yml`, with `--locked`):
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
+cargo build --all-targets --all-features --locked
+cargo doc --no-deps --all-features --locked
 ```
 
 Fast smoke while iterating on CLI-only edits (not sufficient alone before merge):
@@ -38,7 +40,7 @@ git push
 git status   # must show up to date with origin on this branch
 ```
 
-Retry push until it succeeds. Do not hand off with only a local commit.
+If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the same error. Do not hand off with only a local commit.
 
 ## 5. PR
 

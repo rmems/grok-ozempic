@@ -21,7 +21,7 @@ Example of a **real** V1 vs V2 string mismatch (router preserve):
 |-------|----------------|
 | V2 structural preserve | `block_*.slot_11.router` |
 | V1 baseline preserve (different convention) | `blk.*.moe_gate.weight` / `blk.*.expert_router.weight` |
-| NPY logical (export stem) | e.g. embedding export → `embedding.slot_00.token_embedding` (this string **is** present as V2 ternary, not a preserve mismatch) |
+| NPY file → logical name | stem `embedding__slot_00__token_embedding` → logical `embedding.slot_00.token_embedding` (`__` → `.`); that logical name **is** a V2 ternary candidate, not a preserve mismatch |
 
 If the stream classifies checkpoint/logical names against the wrong convention’s rule list, preserve entries never match → default `ternary_snn` wins incorrectly. That is what #40’s name bridge must prevent.
 
