@@ -1,59 +1,55 @@
 # https://docs.devin.ai/onboard-devin/environment-yaml
 # Repo-level environment for rmems/grok-ozempic (Rust + light Python for npy export).
 # Commands run from the repo root.
+# Rust pin: 1.97.1 (host + CI dtolnay/rust-toolchain@stable).
 
 initialize: |
   set -e
-  # Install rustup if the image has neither rustup nor cargo.
-  if ! command -v rustup >/dev/null 2>&1 && ! command -v cargo >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.97.1
+  # Always require rustup so we can pin the toolchain (cargo-only images bypass pins).
+  if ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
   fi
   echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
   export PATH="$HOME/.cargo/bin:$PATH"
 
-  # Latest stable (matches host rustc 1.97.1 and CI dtolnay/rust-toolchain@stable).
-  if command -v rustup >/dev/null 2>&1; then
-    rustup toolchain install 1.97.1
-    rustup default 1.97.1
-    rustup component add --toolchain 1.97.1 rustfmt clippy || true
-  fi
+  rustup toolchain install 1.97.1
+  rustup default 1.97.1
+  rustup component add --toolchain 1.97.1 rustfmt clippy || true
 
   if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo missing after rust setup" >&2
+    echo "cargo missing after rustup 1.97.1 setup" >&2
     exit 1
   fi
-  cargo fetch --locked
+  cargo +1.97.1 fetch --locked
 
 maintenance: |
   set -e
   export PATH="$HOME/.cargo/bin:$PATH"
-  if command -v cargo >/dev/null 2>&1; then
-    cargo fetch --locked
-  fi
+  rustup default 1.97.1
+  cargo +1.97.1 fetch --locked
 
 knowledge:
   - name: lint
     contents: |
-      cargo fmt --all -- --check
-      cargo clippy --all-targets --features cli --locked -- -D warnings
+      cargo +1.97.1 fmt --all -- --check
+      cargo +1.97.1 clippy --all-targets --features cli --locked -- -D warnings
   - name: test
     contents: |
-      cargo test --features cli --locked
+      cargo +1.97.1 test --features cli --locked
   - name: build
     contents: |
-      cargo build --features cli --locked
+      cargo +1.97.1 build --features cli --locked
   - name: format
     contents: |
-      cargo fmt --all
+      cargo +1.97.1 fmt --all
   - name: smoke
     contents: |
-      cargo run --features cli --locked -- quantize-goz1 --help
-      cargo run --features cli --locked -- validate-ingest --help
+      cargo +1.97.1 run --features cli --locked -- quantize-goz1 --help
+      cargo +1.97.1 run --features cli --locked -- validate-ingest --help
   - name: notes
     contents: |
-      Official Grok-1 pickle is not accepted by quantize-goz1; export npy first.
+      Official Grok-1 pickle is not accepted by quantize-goz1; export npy first (stdlib-only script).
       Runtime V2 structural-manifest is rejected until GH #40 / RM-191.
       Prefer dissect/grok-1/baseline.json for quantize-goz1 today.
       CUDA kernels belong in myelin-accelerator, not this crate.
       Claude Code cloud uses .claude/ + CLAUDE.md; this blueprint is for Devin.
-      Container/agent Rust pin: 1.97.1 (latest stable as of handoff).

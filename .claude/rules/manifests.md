@@ -15,15 +15,15 @@ Inside a loaded manifest: **preserve > fp16 > ternary_candidates > defaults**.
 
 Routers, norms, and other preserve rules must not fall into default ternary because of a name mismatch. That is the core risk #40 closes.
 
-Example mismatch (not the same string):
+Example of a **real** V1 vs V2 string mismatch (router preserve):
 
 | Layer | Example name |
 |-------|----------------|
-| NPY stem → logical (export) | `embedding.slot_00.token_embedding` |
-| V2 structural manifest | often `block_*` / slot patterns; embedding may appear under structural rules, not V1 `blk.*` strings |
-| V1 baseline | `blk.{L}.{role}.weight`-style / empty `ternary_candidates` + default ternary |
+| V2 structural preserve | `block_*.slot_11.router` |
+| V1 baseline preserve (different convention) | `blk.*.moe_gate.weight` / `blk.*.expert_router.weight` |
+| NPY logical (export stem) | e.g. embedding export → `embedding.slot_00.token_embedding` (this string **is** present as V2 ternary, not a preserve mismatch) |
 
-If the stream classifies with V1 names against a V2 rule list (or the reverse), preserve entries never match → default `ternary_snn` wins incorrectly.
+If the stream classifies checkpoint/logical names against the wrong convention’s rule list, preserve entries never match → default `ternary_snn` wins incorrectly. That is what #40’s name bridge must prevent.
 
 ## Authority
 

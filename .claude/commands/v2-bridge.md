@@ -1,6 +1,6 @@
 # /v2-bridge — GH #40 / Linear RM-191
 
-Tracked work: GitHub **#40** / Linear **RM-191** (use `bd` / GH / Linear — not markdown checkboxes as the tracker).
+Tracked work: GitHub **#40** / Linear **RM-191** as linked IDs. **Use `bd` for task status** when installed (`bd update` / `bd close` + `bd dolt push`). Markdown below is acceptance/scope only.
 
 ## Problem
 
@@ -28,7 +28,7 @@ Tracked work: GitHub **#40** / Linear **RM-191** (use `bd` / GH / Linear — not
 - GOZ1 path can classify using structural-manifest rules
 - Routers/norms cannot fall into default ternary by name mismatch
 - V1 baseline path still works
-- `cargo test --features cli --locked` green
+- `cargo test --all-targets --all-features --locked` green
 
 ## Non-goals
 
@@ -37,8 +37,11 @@ Tracked work: GitHub **#40** / Linear **RM-191** (use `bd` / GH / Linear — not
 
 ## Done protocol
 
-1. Quality gates (`/smoke` or `/pr-ready` section 1)
-2. Update tracker (bd/GH/Linear) for finished work
+1. Quality gates (`/pr-ready` section 1 — full CI matrix)
+2. `bd close` / `bd update` when bd is available, then `bd dolt push`; else GH/Linear status only (cloud exception)
 3. Commit: **imperative subject**, body explains **why**, include `(#40 / RM-191)` when applicable
 4. `git pull --rebase && git push` until `git status` is up to date with origin
 5. PR title includes `(#40 / RM-191)`
+6. File follow-up issues for remaining work
+7. Clean temp artifacts / worktree noise
+8. Short handoff note (what shipped, what remains)

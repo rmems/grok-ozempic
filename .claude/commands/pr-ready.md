@@ -1,20 +1,20 @@
 # /pr-ready — ship checklist
 
-## 1. Quality gates
+## 1. Quality gates (match CI)
 
-Default (matches most PRs / `cli` surface):
+Canonical matrix (same spirit as `.github/workflows/rust.yml`):
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --features cli --locked -- -D warnings
-cargo test --features cli --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
 ```
 
-If the change touches optional features outside `cli` (e.g. `async`), also run:
+Fast smoke while iterating on CLI-only edits (not sufficient alone before merge):
 
 ```bash
-cargo test --all-targets --all-features --locked
-cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --features cli --locked -- -D warnings
+cargo test --features cli --locked
 ```
 
 ## 2. Diff hygiene
@@ -28,7 +28,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 
 - Imperative subject + body that explains **why**
 - GH + Linear IDs when applicable
-- Claude Code cloud sessions already add a `Claude-Session:` trailer — leave that alone; no extra product brand lines needed
+- Claude Code cloud sessions already add a `Claude-Session:` trailer — leave that alone
 
 ## 4. Push until the remote is current
 
@@ -44,9 +44,20 @@ Retry push until it succeeds. Do not hand off with only a local commit.
 
 - Title: `type: summary (#N / RM-xxx)`
 - Body: problem, approach, test plan, link issues
-- Open/update PR when authenticated (`gh pr create` / `gh pr view`)
+- Create: `gh pr create` when needed
+- Update existing PR metadata: `gh pr edit` (not `gh pr view` — view is read-only)
+- Verify: `gh pr view`
 
-## 6. Handoff
+## 6. Tracker + handoff
 
-- Update issue status when applicable (`bd close` / GH close / Linear) after the work is actually done
-- Comment on the GitHub issue (two-way Linear sync for rmems/grok-ozempic when configured) with PR URL and residual risks
+**bd is the project task tracker when installed** (see `AGENTS.md` / `CLAUDE.md` beads block):
+
+```bash
+# when bd is available
+bd close <id>   # or bd update … for in-progress notes
+bd dolt push    # share beads state; local close alone is not enough
+```
+
+**Exception — Claude Code cloud (and any host without bd/Dolt):** update the GitHub issue / Linear twin for handoff links only; do not invent MEMORY.md. Prefer installing/using bd on long-lived local agents.
+
+Then comment on the GitHub issue (two-way Linear sync when configured) with PR URL and residual risks. File follow-ups for unfinished work, clean temp artifacts, and leave a short handoff note.

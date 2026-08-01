@@ -2,14 +2,23 @@
 
 ## Tracking
 
-- **Local agents:** use **bd** when installed (`bd ready`, `bd show`, `bd update --claim`, `bd close`) — same duty as `AGENTS.md` / `CLAUDE.md` beads block.
-- **Claude Code cloud:** `bd`/Dolt are often missing — use GitHub issues + Linear (rmems team, `RM-*`). Hooks fail soft; do not invent MEMORY.md.
-- Markdown under `.claude/commands` is **acceptance/scope**, not a second tracker. Real work is GH/Linear/bd.
+- **bd is required** for task tracking whenever `bd` is installed (`bd ready`, `bd show`, `bd update --claim`, `bd close`, `bd remember` for durable notes). Markdown under `.claude/` is acceptance/scope, not the tracker.
+- After closing/updating beads issues that should sync: `bd dolt push`.
+- **Exception — Claude Code cloud / hosts without bd or Dolt:** GH issues + Linear (`RM-*`) for status and handoff only. SessionStart does not install bd. Do not invent MEMORY.md.
 
 ## Quality gates before done
 
+Match CI when shipping:
+
 ```bash
 cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+```
+
+CLI-focused fast path while iterating:
+
+```bash
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
 ```

@@ -45,7 +45,9 @@ cargo run --release --features cli --locked -- quantize-goz1 \
   --verify
 ```
 
-Until #40 / RM-191 lands, **runtime** packs use V1 `baseline.json` (default ternary). Prefer `--verify`. Claim ternary only with CLI summary metrics (ternary count, size, wall time).
+Until #40 / RM-191 lands, **runtime** packs use V1 `baseline.json` (default ternary). Prefer `--verify`.
+
+**Evidence sources:** CLI summary reports **ternary** and **fp16/preserve** counts only (not bytes or wall time). Measure size with `stat`/`ls` and wall/RSS with `/usr/bin/time` (or `gtime` / BSD `time -l`). Claim ternary only when the CLI ternary counter matches expectation.
 
 ## Ownership
 
