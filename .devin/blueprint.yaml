@@ -31,9 +31,18 @@ initialize: |
 maintenance: |
   set -euo pipefail
   export PATH="$HOME/.cargo/bin:$PATH"
+  # Differential Devin builds may skip initialize — bootstrap rustup if missing.
+  if ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  if ! command -v rustup >/dev/null 2>&1; then
+    echo "rustup required for maintenance" >&2
+    exit 1
+  fi
   rustup default 1.97.1
   rustup component add --toolchain 1.97.1 rustfmt clippy
-  # Deps were fetched in initialize; re-fetch only when Cargo.lock changes (agent can run cargo +1.97.1 fetch --locked manually).
+  # Deps fetched in initialize; agent can `cargo +1.97.1 fetch --locked` if Cargo.lock changed.
 
 knowledge:
   - name: lint

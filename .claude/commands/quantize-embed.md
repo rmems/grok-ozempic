@@ -26,8 +26,11 @@ fi
 
 ```bash
 CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
-# Always a new empty dir (do not honor a reused STAGE path — stale npy risk)
+# Always a new empty dir (~3 GiB); clean up on exit (success or fail)
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/goz1-embed-npy.XXXXXX")"
+cleanup_stage() { rm -rf "$STAGE"; }
+trap cleanup_stage EXIT
+
 "${TIME_V[@]}" python3 scripts/export_grok1_embedding_npy.py \
   --shard "$CKPT/tensor00000_000" \
   --output-dir "$STAGE"
@@ -61,13 +64,15 @@ cargo build --release --features cli --locked
   --manifest dissect/grok-1/baseline.json \
   --input-format npy \
   --verify
+# trap removes STAGE (3 GiB) after pack; keep $ART GOZ1 output
 ```
 
 ## 3. Accept only if
 
-- Output exists and is non-trivial (~**192 MiB** ternary for single embedding historically) — measure size with `stat`/`ls`, not from CLI summary
+- Output exists and is non-trivial (~**192 MiB** ternary for single embedding historically)
 - CLI summary shows **1 ternary** (and `fp16/preserve` as the combined non-ternary counter)
+- `--verify` reports `file_size=…` (total GOZ1 bytes)
 - Stage dir had only the embedding `.npy`
-- Wall / max RSS from `TIME_V` (not from CLI summary)
+- Wall / max RSS from `TIME_V`
 
 Do **not** use `structural-manifest.json` for runtime pack until #40 is done.

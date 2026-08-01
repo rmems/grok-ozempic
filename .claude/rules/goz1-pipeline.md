@@ -9,9 +9,9 @@
 
 Official Grok-1 `ckpt-0` shards are JAX **pickle**. `quantize-goz1` / `run_quantization` **reject pickle**.
 
-### Export is embedding-scoped today
+### Export script scope
 
-`scripts/export_grok1_embedding_npy.py` exports **only** the token embedding from one pickle shard — not a full 770-tensor pack. Full-model npy export is out of scope for that script.
+`scripts/export_grok1_embedding_npy.py` is **stdlib-only**. Defaults target the token embedding on one pickle shard (not a full 770-tensor pack). With `--stem` and layout flags it can export **another single f32 tensor** from a shard — still one file per invocation, not bulk export.
 
 ```bash
 python3 scripts/export_grok1_embedding_npy.py \
@@ -19,7 +19,7 @@ python3 scripts/export_grok1_embedding_npy.py \
   --output-dir "$OUT"
 ```
 
-Stem mapping: `embedding__slot_00__token_embedding.npy` → logical name `embedding.slot_00.token_embedding` (`__` → `.`).
+Default stem mapping: `embedding__slot_00__token_embedding.npy` → logical `embedding.slot_00.token_embedding` (`__` → `.`).
 
 ## Real pack recipes
 
@@ -47,7 +47,15 @@ cargo run --release --features cli --locked -- quantize-goz1 \
 
 Until #40 / RM-191 lands, **runtime** packs use V1 `baseline.json` (default ternary). Prefer `--verify`.
 
-**Evidence sources:** CLI summary reports **ternary** and **fp16/preserve** counts only (not bytes or wall time). Measure size with `stat`/`ls` and wall/RSS with `/usr/bin/time` (or `gtime` / BSD `time -l`). Claim ternary only when the CLI ternary counter matches expectation.
+**Evidence sources:**
+
+| Metric | Where |
+|--------|--------|
+| Ternary / fp16-preserve counts | Pack CLI summary line (`… X ternary, Y fp16/preserve`) |
+| Total GOZ1 **file_size** (bytes) | `--verify` line: `GOZ1 verify ok: … file_size=…` |
+| Wall / max RSS | External: `/usr/bin/time -v`, `gtime -v`, or BSD `time -l` |
+
+Claim ternary only when the CLI ternary counter matches expectation.
 
 ## Ownership
 

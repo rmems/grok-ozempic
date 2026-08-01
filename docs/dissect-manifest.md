@@ -110,17 +110,23 @@ remains supported only when no manifest is resolved.
 
 ## Hard-fail validation
 
-The loader **must** reject the following with typed errors rather than
-best-effort parse:
+### Loader (`load_manifest` / parse)
+
+Reject with typed errors rather than best-effort parse:
 
 - `schema_version` other than `1`.
-- `model.tensor_name_convention` other than `"blk.{L}.{role}.weight"`
-  (v1 only supports the canonical Grok-1 naming used by
-  `src/core/npy.rs::npy_stem_to_tensor_name`).
+- `model.tensor_name_convention` other than V1 `"blk.{L}.{role}.weight"` **or**
+  V2 `"block_{NNN}.slot_{SS}.{kind}"` (both parse; unknown conventions fail).
 - Non-existent / unreadable manifest file.
-- Malformed JSON.
+- Malformed JSON / invalid precision strings.
 
 Unknown top-level fields are **tolerated** for forward compatibility.
+
+### Runtime GOZ1 stream (`resolve_manifest`)
+
+Even when a V2 manifest **parses**, `stream::resolve_manifest` **rejects** V2
+for live `quantize-goz1` / `run_quantization` until #40. Alignment and dry-run
+may still load embedded V2 fixtures via other entry points (`alignment.rs`).
 
 ## Versioning
 
