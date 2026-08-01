@@ -95,7 +95,7 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 1. Official Grok-1 pickle shards are **not** accepted by `quantize-goz1` — export npy first.
 2. Runtime V2 structural manifests are **rejected** in `resolve_manifest` until **#40 / RM-191**.
 3. Use `dissect/grok-1/baseline.json` for real packs today; structural-manifest is alignment/dry-run.
-4. Preserve > fp16 > ternary_candidates > defaults — never silent-ternary routers/norms.
+4. Preserve > fp16 > ternary_candidates > defaults — a name mismatch that ternary-quantizes routers/norms is a classification bug (fix the matcher; do not paper over with defaults).
 
 ### Open critical path
 
@@ -132,7 +132,7 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 
 | Path | Purpose |
 |------|---------|
-| `.claude/rules/` | Always-on invariants (GOZ1, manifests, kernels, workflow) |
+| `.claude/rules/` | Standing project constraints (GOZ1, manifests, kernels, workflow) |
 | `.claude/commands/` | `/smoke`, `/quantize-embed`, `/v2-bridge`, `/pr-ready` |
 | `.claude/skills/` | Deep playbooks for quantize + structural V2 |
 | `.claude/agents/goz1-reviewer.md` | Review specialist |
