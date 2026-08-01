@@ -1,0 +1,30 @@
+{
+  "name": "grok-ozempic",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "postCreateCommand": "rustc --version && cargo fetch && python3 -c 'import numpy; print(numpy.__version__)'",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "ms-python.python"
+      ],
+      "settings": {
+        "rust-analyzer.cargo.features": ["cli"],
+        "editor.formatOnSave": true,
+        "[rust]": {
+          "editor.defaultFormatter": "rust-lang.rust-analyzer"
+        }
+      }
+    }
+  },
+  "forwardPorts": [],
+  "features": {}
+}

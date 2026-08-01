@@ -1,0 +1,55 @@
+# https://docs.devin.ai/onboard-devin/environment-yaml
+# Repo-level environment for rmems/grok-ozempic (Rust + light Python for npy export).
+# Commands run from the repo root.
+
+initialize: |
+  set -e
+  # Align with project Dockerfile rust pin when possible; host may already have rustup.
+  if command -v rustup >/dev/null 2>&1; then
+    rustup toolchain install 1.96.0 || rustup toolchain install stable
+    rustup default 1.96.0 2>/dev/null || rustup default stable
+    rustup component add rustfmt clippy || true
+  fi
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
+  export PATH="$HOME/.cargo/bin:$PATH"
+
+  # numpy for scripts/export_grok1_embedding_npy.py
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m pip install --user -q numpy || true
+  fi
+
+  cargo fetch
+
+maintenance: |
+  set -e
+  export PATH="$HOME/.cargo/bin:$PATH"
+  cargo fetch
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m pip install --user -q numpy || true
+  fi
+
+knowledge:
+  - name: lint
+    contents: |
+      cargo fmt --all -- --check
+      cargo clippy --all-targets --features cli --locked -- -D warnings
+  - name: test
+    contents: |
+      cargo test --features cli --locked
+  - name: build
+    contents: |
+      cargo build --features cli --locked
+  - name: format
+    contents: |
+      cargo fmt --all -- --check
+  - name: smoke
+    contents: |
+      cargo run --features cli -- quantize-goz1 --help
+      cargo run --features cli -- validate-ingest --help
+  - name: notes
+    contents: |
+      Official Grok-1 pickle is not accepted by quantize-goz1; export npy first.
+      Runtime V2 structural-manifest is rejected until GH #40 / RM-191.
+      Prefer dissect/grok-1/baseline.json for quantize-goz1 today.
+      CUDA kernels belong in myelin-accelerator, not this crate.
+      Claude Code cloud uses .claude/ + CLAUDE.md; this blueprint is for Devin.
