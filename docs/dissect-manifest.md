@@ -4,8 +4,9 @@ Machine-readable JSON contract that lets `grok-ozempic` consume structural
 analysis produced by the upstream [`xai-dissect`](https://github.com/rmems/xai-dissect)
 repository, without depending on it as a runtime crate.
 
-This document freezes **schema v1**. Phase 1 implements the loader only;
-the batch pipeline in `src/core/stream.rs` is not rewired yet.
+This document freezes **schema v1**. The loader and runtime resolution path in
+`stream::resolve_manifest` are active; V2 structural naming is still rejected
+for runtime GOZ1 packs until #40 / RM-191.
 
 ## Authority and source of truth
 
@@ -18,24 +19,26 @@ the batch pipeline in `src/core/stream.rs` is not rewired yet.
 
 ## Delivery
 
-The manifest reaches `grok-ozempic` through one of the following paths,
-resolved in order (first hit wins):
+Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):
 
-1. Explicit `QuantizationConfig.manifest_path` (caller-provided).
-2. Environment variable `GROK_OZEMPIC_MANIFEST`.
-3. In-tree baseline at `dissect/grok-1/baseline.json` (reference fallback).
-4. Legacy heuristic in `stream.rs` (`router_patterns` substring match) —
-   preserved only until phase 2 wiring lands.
+1. Explicit `QuantizationConfig.manifest_path` / CLI `--manifest` (caller-provided).
+2. Nonempty UTF-8 environment variable `GROK_OZEMPIC_MANIFEST`.
+3. Embedded Grok-1 baseline **only if** `use_embedded_baseline` /
+   `--use-embedded-baseline` is set (**opt-in**; default off). The in-tree
+   `dissect/grok-1/baseline.json` is a reference copy and is **not** loaded
+   automatically just because it exists on disk.
+4. Otherwise `None` → legacy `router_patterns` substring heuristic in selection.
 
-Phase 1 exposes the config field and loader; enforcement of the resolution
-order lives in the selection/precision seams introduced in phase 2.
+**V2 structural naming** (`block_{NNN}.slot_{SS}.{kind}`) parses for alignment /
+dry-run but is **rejected** by `resolve_manifest` for runtime GOZ1 packs until
+GitHub #40 / RM-191 (checkpoint↔structural name bridge).
 
 ## Manifest precedence over legacy `router_patterns`
 
-When a manifest is provided, it **wins** over the legacy
-`QuantizationConfig.router_patterns` substring list. In phase 2 the
-wiring code will log a deprecation warning if both are present. The
-legacy field remains supported only for the manifest-less fallback path.
+When a manifest is resolved (path, env, or opt-in embedded baseline), it
+**wins** over the legacy `QuantizationConfig.router_patterns` substring list.
+If both are present, a deprecation warning may be logged. The legacy field
+remains supported only when no manifest is resolved.
 
 ## Schema v1
 
@@ -107,17 +110,23 @@ legacy field remains supported only for the manifest-less fallback path.
 
 ## Hard-fail validation
 
-The loader **must** reject the following with typed errors rather than
-best-effort parse:
+### Loader (`load_manifest` / parse)
+
+Reject with typed errors rather than best-effort parse:
 
 - `schema_version` other than `1`.
-- `model.tensor_name_convention` other than `"blk.{L}.{role}.weight"`
-  (v1 only supports the canonical Grok-1 naming used by
-  `src/core/npy.rs::npy_stem_to_tensor_name`).
+- `model.tensor_name_convention` other than V1 `"blk.{L}.{role}.weight"` **or**
+  V2 `"block_{NNN}.slot_{SS}.{kind}"` (both parse; unknown conventions fail).
 - Non-existent / unreadable manifest file.
-- Malformed JSON.
+- Malformed JSON / invalid precision strings.
 
 Unknown top-level fields are **tolerated** for forward compatibility.
+
+### Runtime GOZ1 stream (`resolve_manifest`)
+
+Even when a V2 manifest **parses**, `stream::resolve_manifest` **rejects** V2
+for live `quantize-goz1` / `run_quantization` until #40. Alignment and dry-run
+may still load embedded V2 fixtures via other entry points (`alignment.rs`).
 
 ## Versioning
 

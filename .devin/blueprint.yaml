@@ -1,0 +1,73 @@
+# https://docs.devin.ai/onboard-devin/environment-yaml
+# Repo-level environment for rmems/grok-ozempic (Rust + light Python for npy export).
+# Commands run from the repo root.
+# Rust pin: 1.97.1 for Devin. CI uses dtolnay/rust-toolchain@stable (moving channel;
+# often 1.97.1 today, not a fixed pin in workflow YAML).
+
+initialize: |
+  set -euo pipefail
+  # Always require rustup so we can pin the toolchain (cargo-only images bypass pins).
+  if ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+  fi
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
+  export PATH="$HOME/.cargo/bin:$PATH"
+  if ! command -v rustup >/dev/null 2>&1; then
+    echo "rustup install failed or not on PATH" >&2
+    exit 1
+  fi
+
+  rustup toolchain install 1.97.1
+  rustup default 1.97.1
+  # Fail init if clippy/rustfmt missing — lint knowledge requires them.
+  rustup component add --toolchain 1.97.1 rustfmt clippy
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "cargo missing after rustup 1.97.1 setup" >&2
+    exit 1
+  fi
+  cargo +1.97.1 fetch --locked
+
+maintenance: |
+  set -euo pipefail
+  export PATH="$HOME/.cargo/bin:$PATH"
+  # Differential Devin builds may skip initialize — bootstrap rustup if missing.
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
+  if ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  if ! command -v rustup >/dev/null 2>&1; then
+    echo "rustup required for maintenance" >&2
+    exit 1
+  fi
+  rustup default 1.97.1
+  rustup component add --toolchain 1.97.1 rustfmt clippy
+  # Deps fetched in initialize; agent can `cargo +1.97.1 fetch --locked` if Cargo.lock changed.
+
+knowledge:
+  - name: lint
+    contents: |
+      cargo +1.97.1 fmt --all -- --check
+      cargo +1.97.1 clippy --all-targets --all-features --locked -- -D warnings
+  - name: test
+    contents: |
+      cargo +1.97.1 test --all-targets --all-features --locked
+  - name: build
+    contents: |
+      cargo +1.97.1 build --all-targets --all-features --locked
+      cargo +1.97.1 doc --no-deps --all-features --locked
+  - name: format
+    contents: |
+      cargo +1.97.1 fmt --all
+  - name: smoke
+    contents: |
+      cargo +1.97.1 run --features cli --locked -- quantize-goz1 --help
+      cargo +1.97.1 run --features cli --locked -- validate-ingest --help
+  - name: notes
+    contents: |
+      Official Grok-1 pickle is not accepted by quantize-goz1; export npy first (stdlib-only script).
+      Runtime V2 structural-manifest is rejected until GH #40 / RM-191.
+      Prefer dissect/grok-1/baseline.json for quantize-goz1 today.
+      CUDA kernels belong in myelin-accelerator, not this crate.
+      Claude Code cloud uses .claude/ + CLAUDE.md; this blueprint is for Devin.
