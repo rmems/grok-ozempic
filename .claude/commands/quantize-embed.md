@@ -57,14 +57,16 @@ fi
 ```bash
 ART="${ART:-$HOME/.models/xai-grok-1/artifacts}"
 mkdir -p "$ART"
-cargo build --release --features cli --locked
+cargo build --release --features cli --locked &&
 "${TIME_V[@]}" ./target/release/grok-ozempic quantize-goz1 \
   --input-dir "$STAGE" \
   --output "$ART/grok1-first-embed.goz1" \
   --manifest dissect/grok-1/baseline.json \
   --input-format npy \
   --verify
-# trap removes STAGE (3 GiB) after pack; keep $ART GOZ1 output
+# Clean the 3 GiB stage now for persistent shells; the trap remains fail-safe.
+cleanup_stage
+trap - EXIT
 ```
 
 ## 3. Accept only if

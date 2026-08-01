@@ -49,13 +49,14 @@ knowledge:
   - name: lint
     contents: |
       cargo +1.97.1 fmt --all -- --check
-      cargo +1.97.1 clippy --all-targets --features cli --locked -- -D warnings
+      cargo +1.97.1 clippy --all-targets --all-features --locked -- -D warnings
   - name: test
     contents: |
-      cargo +1.97.1 test --features cli --locked
+      cargo +1.97.1 test --all-targets --all-features --locked
   - name: build
     contents: |
-      cargo +1.97.1 build --features cli --locked
+      cargo +1.97.1 build --all-targets --all-features --locked
+      cargo +1.97.1 doc --no-deps --all-features --locked
   - name: format
     contents: |
       cargo +1.97.1 fmt --all

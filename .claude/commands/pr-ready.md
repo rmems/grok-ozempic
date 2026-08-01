@@ -23,9 +23,14 @@ Path-scoped extras (only when those paths change; command matches the path):
 
 ```bash
 # scripts/export_grok1_embedding_npy.py or scripts/test_export_grok1_embedding_npy.py
+python3 -c 'import numpy; print(numpy.__version__)'
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 
-# root Dockerfile (or docker-compose that builds it) → docker.yml tester stage
+# Cargo.toml or Cargo.lock → cargo-audit.yml
+cargo audit
+
+# Root Docker build inputs (Dockerfile, Cargo.toml, Cargo.lock, src/**, dissect/**,
+# or docker-compose that builds it) → both docker.yml targets
 docker build --target tester -t grok-ozempic:test .
 docker build --target runtime -t grok-ozempic:latest .
 
@@ -47,7 +52,13 @@ docker build --target runtime -t grok-ozempic:latest .
 - GH + Linear IDs when applicable
 - Claude Code cloud sessions already add a `Claude-Session:` trailer — leave that alone
 
-## 4. Push until the remote is current
+## 4. Tracker update
+
+Before the final code push, file follow-up issues and close finished work in `bd`.
+Run `bd dolt push` after every status update that must be shared. On the explicit
+cloud/no-Dolt exception, update only the linked GitHub/Linear handoff state.
+
+## 5. Push until the remote is current
 
 ```bash
 git pull --rebase
@@ -58,7 +69,7 @@ git status   # branch up to date with origin AND clean working tree
 
 If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the same error. Do not hand off with only a local commit or with dirty uncommitted work.
 
-## 5. PR
+## 6. PR
 
 - Title: `type: summary (#N / RM-xxx)`
 - Body: problem, approach, test plan, link issues
@@ -66,16 +77,7 @@ If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hook
 - Update existing PR metadata: `gh pr edit` (not `gh pr view` — view is read-only)
 - Verify: `gh pr view`
 
-## 6. Tracker + handoff
+## 7. Handoff
 
-**bd is the project task tracker when installed** (see `AGENTS.md` / `CLAUDE.md` beads block):
-
-```bash
-# when bd is available
-bd close <id>   # or bd update … for in-progress notes
-bd dolt push    # share beads state; local close alone is not enough
-```
-
-**Exception — Claude Code cloud (and any host without bd/Dolt):** update the GitHub issue / Linear twin for handoff links only; do not invent MEMORY.md. Prefer installing/using bd on long-lived local agents.
-
-Then comment on the GitHub issue (two-way Linear sync when configured) with PR URL and residual risks. File follow-ups for unfinished work, clean temp artifacts, and leave a short handoff note.
+Comment on the GitHub issue (two-way Linear sync when configured) with the PR URL
+and residual risks. Clean temp artifacts and leave a short handoff note.
