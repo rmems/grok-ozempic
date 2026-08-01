@@ -14,13 +14,16 @@
 | Physical pickle | `/home/raulmc/.models/xai-grok-1/ckpt-0/tensor00000_000` |
 | Export npy | `/home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy` |
 | Shape / dtype | `(131072, 6144)` f32 |
+| Payload size (exact) | `131072 × 6144 × 4 = 3_221_225_472` bytes = **3.0 GiB** f32 (+ small NPY header on disk) |
 | Manifest | `dissect/grok-1/baseline.json` (V1; default `ternary_snn`) |
-| Backend | LocalBackend CPU (no myelin / CUDA) |
+| Compute path | CPU `quantizer::quantize_f32` inside `run_quantization` / `quantize-goz1` (no myelin / CUDA). Same math as `LocalBackend`; stream does **not** dispatch through the `BackendKernel` trait. |
 
 ## Commands
 
+Wall / max RSS below come from `/usr/bin/time -v` on both steps:
+
 ```bash
-python3 scripts/export_grok1_embedding_npy.py \
+/usr/bin/time -v python3 scripts/export_grok1_embedding_npy.py \
   --shard /home/raulmc/.models/xai-grok-1/ckpt-0/tensor00000_000 \
   --output-dir /home/raulmc/.models/xai-grok-1/export-npy
 
@@ -39,7 +42,7 @@ cargo build --release --features cli --locked
 |--------|--------|----------|
 | Wall clock | 2.07 s | 4.64 s |
 | Max RSS | ~3.02 GiB (3161876 KiB) | ~5.29 GiB (5541932 KiB) |
-| Output size | 3.1 GiB npy | **193 MiB** GOZ1 (`201327136` bytes) |
+| Output size | ~3.0 GiB npy (f32 payload 3.0 GiB + header) | **~192 MiB** GOZ1 (`201327136` bytes ≈ 192.001 MiB) |
 | CLI summary | — | 1 source file, **1 ternary**, 0 fp16/preserve |
 | Verify | — | GOZ1 version=1, 1 tensor header |
 
@@ -53,5 +56,5 @@ cargo build --release --features cli --locked
 
 ## Notes
 
-- Compression ≈ 3.1 GiB f32 npy → 193 MiB ternary GOZ1 (~16× size reduction for this tensor).
+- Compression ≈ 3.0 GiB f32 payload → ~192 MiB ternary GOZ1 (**~16×** size reduction for this tensor). Earlier “3.1 GiB / 193 MiB” labels were `ls -lh`-style rounding, not exact binary sizes.
 - V2 `structural-manifest.json` not used (stream rejects V2 until #40 / RM-191).
