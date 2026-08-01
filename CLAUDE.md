@@ -72,7 +72,7 @@ cargo run --features cli -- quantize-goz1 --help
 cargo test --all-targets --all-features --locked
 ```
 
-Python 3 is only required for Grok-1 pickle → `.npy` export (`scripts/export_grok1_embedding_npy.py`; needs `numpy`).
+Python 3 is only required for Grok-1 pickle → `.npy` export (`scripts/export_grok1_embedding_npy.py`; **stdlib only**, no NumPy).
 
 Slash shortcuts (Claude Code): `/smoke`, `/quantize-embed`, `/v2-bridge`, `/pr-ready`.
 

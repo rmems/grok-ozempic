@@ -7,7 +7,7 @@
   "remoteUser": "vscode",
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
-  "postCreateCommand": "rustc --version && cargo fetch && python3 -c 'import numpy; print(numpy.__version__)'",
+  "postCreateCommand": "rustc --version && cargo fetch --locked && python3 --version",
   "customizations": {
     "vscode": {
       "extensions": [

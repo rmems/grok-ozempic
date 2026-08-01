@@ -22,7 +22,7 @@ Use `/smoke` or `/pr-ready` slash commands.
 - Claude Code on the web already attaches a `Claude-Session:` trailer / session URL — do not invent a third-party tool citation.
 - PR titles include GH issue + Linear when known, e.g. `(#40 / RM-191)`.
 - Do not commit secrets, multi-GiB weights, or accidental `.beads` noise unless intentional.
-- Session is not complete until **`git push`** succeeds when the project protocol requires it (see CLAUDE.md beads block for local agent duty).
+- Session is not complete until **`git push`** succeeds (mandatory session-completion protocol in `CLAUDE.md` / `AGENTS.md`). Do not leave finished work only on the local machine.
 
 ## Claude Code on the web
 

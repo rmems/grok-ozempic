@@ -18,11 +18,6 @@ initialize: |
     rustup component add --toolchain 1.97.1 rustfmt clippy || true
   fi
 
-  # numpy for scripts/export_grok1_embedding_npy.py
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -m pip install --user -q numpy || true
-  fi
-
   if ! command -v cargo >/dev/null 2>&1; then
     echo "cargo missing after rust setup" >&2
     exit 1
@@ -34,9 +29,6 @@ maintenance: |
   export PATH="$HOME/.cargo/bin:$PATH"
   if command -v cargo >/dev/null 2>&1; then
     cargo fetch --locked
-  fi
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -m pip install --user -q numpy || true
   fi
 
 knowledge:
@@ -52,7 +44,7 @@ knowledge:
       cargo build --features cli --locked
   - name: format
     contents: |
-      cargo fmt --all -- --check
+      cargo fmt --all
   - name: smoke
     contents: |
       cargo run --features cli --locked -- quantize-goz1 --help

@@ -27,7 +27,7 @@ description: Pack Grok weights into GOZ1 via quantize-goz1 / run_quantization. U
 | Stream / resolve_manifest | `src/core/stream.rs` |
 | Ternary quant | `src/core/quantizer.rs` |
 | NPY load | `src/core/npy.rs` |
-| GOZ1 format | `src/core/weight_pack.rs`, `weight_pack_read.rs` |
+| GOZ1 format | `src/core/weight_pack.rs`, `src/core/weight_pack_read.rs` |
 | Docs | `README.md`, `docs/grok1-saaq-artifact-flow.md` |
 
 ## Commands
@@ -44,4 +44,6 @@ cargo run --release --features cli -- quantize-goz1 \
 
 ## Metrics to report
 
-Wall clock, max RSS, output bytes, CLI ternary/preserve/fp16 counts, exact command, host/backend (CPU LocalBackend unless myelin is live).
+Wall clock, max RSS, output bytes, exact command, host/backend (CPU `quantize_f32` path unless myelin is live).
+
+CLI summary emits two counters only: **`ternary`** and **`fp16/preserve`** (preserve is not a separate number — it is lumped with fp16 in the quantize-goz1 line).

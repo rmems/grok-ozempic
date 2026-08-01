@@ -2,8 +2,9 @@
 # Rust: latest stable 1.97.1 (host + CI). Python for npy export scripts.
 FROM rust:1.97.1-bookworm
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    CARGO_TERM_COLOR=always
+# Build-only noninteractive apt; do not bake DEBIAN_FRONTEND into runtime shell.
+ARG DEBIAN_FRONTEND=noninteractive
+ENV CARGO_TERM_COLOR=always
 
 # hadolint ignore=DL3008
 RUN apt-get update \

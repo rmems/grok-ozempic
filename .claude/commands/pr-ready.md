@@ -2,10 +2,19 @@
 
 ## 1. Quality gates
 
+Default (matches most PRs / `cli` surface):
+
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
+```
+
+If the change touches optional features outside `cli` (e.g. `async`), also run:
+
+```bash
+cargo test --all-targets --all-features --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
 ```
 
 ## 2. Diff hygiene

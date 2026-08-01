@@ -29,6 +29,12 @@ If the stream classifies with V1 names against a V2 rule list (or the reverse), 
 
 - **`xai-dissect` is authoritative** for manifests. In-tree copies are reference fallbacks.
 - This crate **never writes** manifests and must not invent schema fields.
-- Delivery precedence: explicit path → `GROK_OZEMPIC_MANIFEST` → embedded baseline → legacy router substring heuristic.
+- Delivery precedence in `stream::resolve_manifest`:
+  1. Explicit `manifest_path` / CLI `--manifest`
+  2. Nonempty `GROK_OZEMPIC_MANIFEST` env
+  3. Embedded Grok-1 baseline **only if** `use_embedded_baseline` / `--use-embedded-baseline` is set (opt-in; default off)
+  4. Else `None` → legacy `router_patterns` substring heuristic in selection
 
-See `docs/dissect-manifest.md` and `src/core/manifest.rs`.
+Do not assume the in-tree `baseline.json` is active unless a path/env was supplied or the opt-in flag is on. The `quantize-goz1` recipes pass `--manifest` explicitly.
+
+See `docs/dissect-manifest.md` and `src/core/stream.rs` / `manifest.rs`.
