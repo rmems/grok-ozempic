@@ -1,12 +1,14 @@
 # /v2-bridge — GH #40 / Linear RM-191
 
+Tracked work: GitHub **#40** / Linear **RM-191** (use `bd` / GH / Linear — not markdown checkboxes as the tracker).
+
 ## Problem
 
 - `dissect/grok-1/structural-manifest.json` has correct preserve/ternary rules (V2 names).
 - `stream::resolve_manifest` **rejects** `MANIFEST_NAME_CONVENTION_V2`.
 - V1 `baseline.json` has empty `ternary_candidates` and relies on default ternary — wrong for structural-named preserve tensors if names do not match.
 
-## Tasks
+## Scope (acceptance)
 
 1. Design checkpoint name ↔ structural name map **or** accept V2 when inputs already use structural names.
 2. Wire into `resolve_manifest` / classification **without breaking V1**.
@@ -26,7 +28,7 @@
 - GOZ1 path can classify using structural-manifest rules
 - Routers/norms cannot fall into default ternary by name mismatch
 - V1 baseline path still works
-- `cargo test --features cli` green
+- `cargo test --features cli --locked` green
 
 ## Non-goals
 
@@ -35,4 +37,8 @@
 
 ## Done protocol
 
-Quality gates → commit with clear message + issue IDs → PR title includes `(#40 / RM-191)` → push.
+1. Quality gates (`/smoke` or `/pr-ready` section 1)
+2. Update tracker (bd/GH/Linear) for finished work
+3. Commit: **imperative subject**, body explains **why**, include `(#40 / RM-191)` when applicable
+4. `git pull --rebase && git push` until `git status` is up to date with origin
+5. PR title includes `(#40 / RM-191)`

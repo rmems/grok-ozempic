@@ -2,15 +2,16 @@
 
 ## Tracking
 
-- Prefer **bd** (`bd ready`, `bd show`, `bd update --claim`, `bd close`) when `bd` is installed.
-- On **Claude Code cloud**, `bd`/Dolt often are **not** available — use GitHub issues + Linear (rmems team, `RM-*`) instead. Hooks fail soft; do not invent MEMORY.md.
+- **Local agents:** use **bd** when installed (`bd ready`, `bd show`, `bd update --claim`, `bd close`) — same duty as `AGENTS.md` / `CLAUDE.md` beads block.
+- **Claude Code cloud:** `bd`/Dolt are often missing — use GitHub issues + Linear (rmems team, `RM-*`). Hooks fail soft; do not invent MEMORY.md.
+- Markdown under `.claude/commands` is **acceptance/scope**, not a second tracker. Real work is GH/Linear/bd.
 
 ## Quality gates before done
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --features cli -- -D warnings
-cargo test --features cli
+cargo clippy --all-targets --features cli --locked -- -D warnings
+cargo test --features cli --locked
 ```
 
 Use `/smoke` or `/pr-ready` slash commands.

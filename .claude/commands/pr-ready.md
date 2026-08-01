@@ -17,16 +17,27 @@ cargo test --features cli --locked
 
 ## 3. Commit message
 
-- Imperative subject + why in body
+- Imperative subject + body that explains **why**
 - GH + Linear IDs when applicable
 - Claude Code cloud sessions already add a `Claude-Session:` trailer — leave that alone; no extra product brand lines needed
 
-## 4. PR
+## 4. Push until the remote is current
+
+```bash
+git pull --rebase
+git push
+git status   # must show up to date with origin on this branch
+```
+
+Retry push until it succeeds. Do not hand off with only a local commit.
+
+## 5. PR
 
 - Title: `type: summary (#N / RM-xxx)`
 - Body: problem, approach, test plan, link issues
-- Push branch; open PR with `gh pr create` when authenticated
+- Open/update PR when authenticated (`gh pr create` / `gh pr view`)
 
-## 5. Handoff
+## 6. Handoff
 
-Comment on the GitHub issue (two-way Linear sync for rmems/grok-ozempic when configured) with PR URL and residual risks.
+- Update issue status when applicable (`bd close` / GH close / Linear) after the work is actually done
+- Comment on the GitHub issue (two-way Linear sync for rmems/grok-ozempic when configured) with PR URL and residual risks

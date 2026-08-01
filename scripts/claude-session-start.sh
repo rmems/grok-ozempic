@@ -21,12 +21,12 @@ if command -v bd >/dev/null 2>&1; then
 fi
 
 # Network fetch only on full SessionStart — not PreCompact (avoids stall on offline/retry).
+# --locked: do not rewrite Cargo.lock during bootstrap (read-only session warm).
 if [ "$MODE" = "full" ] && command -v cargo >/dev/null 2>&1; then
-  # Bound wait: do not hang compaction/start forever on bad network.
   if command -v timeout >/dev/null 2>&1; then
-    timeout 60s cargo fetch --quiet 2>/dev/null || true
+    timeout 60s cargo fetch --quiet --locked 2>/dev/null || true
   else
-    cargo fetch --quiet 2>/dev/null || true
+    cargo fetch --quiet --locked 2>/dev/null || true
   fi
 fi
 

@@ -4,29 +4,36 @@
 
 initialize: |
   set -e
+  # Install rustup if the image has neither rustup nor cargo.
+  if ! command -v rustup >/dev/null 2>&1 && ! command -v cargo >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.97.1
+  fi
+  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
+  export PATH="$HOME/.cargo/bin:$PATH"
+
   # Latest stable (matches host rustc 1.97.1 and CI dtolnay/rust-toolchain@stable).
   if command -v rustup >/dev/null 2>&1; then
     rustup toolchain install 1.97.1
     rustup default 1.97.1
     rustup component add --toolchain 1.97.1 rustfmt clippy || true
   fi
-  echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$ENVRC"
-  export PATH="$HOME/.cargo/bin:$PATH"
 
   # numpy for scripts/export_grok1_embedding_npy.py
   if command -v python3 >/dev/null 2>&1; then
     python3 -m pip install --user -q numpy || true
   fi
 
-  if command -v cargo >/dev/null 2>&1; then
-    cargo fetch
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "cargo missing after rust setup" >&2
+    exit 1
   fi
+  cargo fetch --locked
 
 maintenance: |
   set -e
   export PATH="$HOME/.cargo/bin:$PATH"
   if command -v cargo >/dev/null 2>&1; then
-    cargo fetch
+    cargo fetch --locked
   fi
   if command -v python3 >/dev/null 2>&1; then
     python3 -m pip install --user -q numpy || true
@@ -48,8 +55,8 @@ knowledge:
       cargo fmt --all -- --check
   - name: smoke
     contents: |
-      cargo run --features cli -- quantize-goz1 --help
-      cargo run --features cli -- validate-ingest --help
+      cargo run --features cli --locked -- quantize-goz1 --help
+      cargo run --features cli --locked -- validate-ingest --help
   - name: notes
     contents: |
       Official Grok-1 pickle is not accepted by quantize-goz1; export npy first.

@@ -13,7 +13,17 @@ V2 is valid for **alignment / dry-run** (`src/core/alignment.rs`, embedded struc
 
 Inside a loaded manifest: **preserve > fp16 > ternary_candidates > defaults**.
 
-Routers, norms, and other preserve rules must **never** fall into default ternary because of a name mismatch. That is the core risk #40 closes for structural names like `embedding.slot_00.token_embedding` vs V2 `embedding.slot_00.token_embedding` / block patterns.
+Routers, norms, and other preserve rules must not fall into default ternary because of a name mismatch. That is the core risk #40 closes.
+
+Example mismatch (not the same string):
+
+| Layer | Example name |
+|-------|----------------|
+| NPY stem → logical (export) | `embedding.slot_00.token_embedding` |
+| V2 structural manifest | often `block_*` / slot patterns; embedding may appear under structural rules, not V1 `blk.*` strings |
+| V1 baseline | `blk.{L}.{role}.weight`-style / empty `ternary_candidates` + default ternary |
+
+If the stream classifies with V1 names against a V2 rule list (or the reverse), preserve entries never match → default `ternary_snn` wins incorrectly.
 
 ## Authority
 
