@@ -19,13 +19,7 @@ cargo test --features cli --locked
 
 - Imperative subject + why in body
 - GH + Linear IDs when applicable
-- **Grok Build sessions must include:**
-
-  ```text
-  Grok Build: Grok 4.5 (high)
-  ```
-
-  Other agents use their own attribution convention if documented.
+- Claude Code cloud sessions already add a `Claude-Session:` trailer — leave that alone; no extra product brand lines needed
 
 ## 4. PR
 

@@ -35,4 +35,4 @@
 
 ## Done protocol
 
-Quality gates → commit with agent citation → PR title includes `(#40 / RM-191)` → push.
+Quality gates → commit with clear message + issue IDs → PR title includes `(#40 / RM-191)` → push.

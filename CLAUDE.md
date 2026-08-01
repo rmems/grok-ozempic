@@ -106,7 +106,7 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 
 ## Conventions & Patterns
 
-- **Commits (Grok Build):** body ends with `Grok Build: Grok 4.5 (high)`.
+- **Commits:** imperative subject, why in the body, GH + Linear IDs when known. Claude Code cloud adds `Claude-Session:` trailers automatically.
 - **PR titles:** include GH + Linear IDs, e.g. `(#40 / RM-191)`.
 - **Tracking:** bd when available; GH/Linear on Claude cloud if bd missing.
 - **No secrets** in repo or cloud environment variables that are world-readable.

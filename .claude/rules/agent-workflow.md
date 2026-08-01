@@ -17,12 +17,8 @@ Use `/smoke` or `/pr-ready` slash commands.
 
 ## Commits and PRs
 
-- Every agent commit message body **must** end with attribution appropriate to the agent. For Grok Build sessions:
-
-  ```text
-  Grok Build: Grok 4.5 (high)
-  ```
-
+- Clear imperative subjects; body explains **why**. Link GH + Linear IDs when known.
+- Claude Code on the web already attaches a `Claude-Session:` trailer / session URL — do not invent a third-party tool citation.
 - PR titles include GH issue + Linear when known, e.g. `(#40 / RM-191)`.
 - Do not commit secrets, multi-GiB weights, or accidental `.beads` noise unless intentional.
 - Session is not complete until **`git push`** succeeds when the project protocol requires it (see CLAUDE.md beads block for local agent duty).
