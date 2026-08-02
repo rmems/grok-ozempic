@@ -92,6 +92,21 @@ pub fn append_grok1_arch_metadata(meta: &mut BTreeMap<String, PackMetaValue>) {
 /// is `None`.
 pub const MANIFEST_ENV_VAR: &str = "GROK_OZEMPIC_MANIFEST";
 
+/// Path from `GROK_OZEMPIC_MANIFEST`, or a test-only override.
+///
+/// Under `cfg(test)`, unit tests inject a path (or force unset) via
+/// `test_manifest_env` so they never call process-wide `set_var` /
+/// `remove_var` (unsafe on Unix when other threads may read the env).
+fn manifest_env_path() -> Option<String> {
+    #[cfg(test)]
+    if let Some(forced) = test_manifest_env::current() {
+        return forced;
+    }
+    std::env::var(MANIFEST_ENV_VAR)
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Resolve the xai-dissect manifest that governs this `run_quantization`
 /// call.
 ///
@@ -109,9 +124,7 @@ fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifes
     if let Some(path) = &config.manifest_path {
         return Ok(Some(load_manifest(path)?));
     }
-    if let Ok(env_path) = std::env::var(MANIFEST_ENV_VAR)
-        && !env_path.is_empty()
-    {
+    if let Some(env_path) = manifest_env_path() {
         let p = std::path::PathBuf::from(env_path);
         return Ok(Some(load_manifest(&p)?));
     }
@@ -121,6 +134,53 @@ fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifes
         return Ok(Some(embedded_grok1_baseline()?.clone()));
     }
     Ok(None)
+}
+
+/// Test-only injection for [`manifest_env_path`] — thread-local so parallel
+/// tests do not race and so no process `set_var` is required.
+#[cfg(test)]
+mod test_manifest_env {
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// `None` = use real process env.
+        /// `Some(None)` = force unset.
+        /// `Some(Some(path))` = force this path.
+        static OVERRIDE: RefCell<Option<Option<String>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<Option<String>> {
+        OVERRIDE.with(|c| c.borrow().clone())
+    }
+
+    /// Restores the previous override on drop (including panic unwind).
+    pub(super) struct Guard {
+        prev: Option<Option<String>>,
+    }
+
+    impl Guard {
+        pub(super) fn set(path: impl Into<String>) -> Self {
+            let path = path.into();
+            let prev = OVERRIDE.with(|c| c.borrow().clone());
+            OVERRIDE.with(|c| *c.borrow_mut() = Some(Some(path)));
+            Self { prev }
+        }
+
+        pub(super) fn unset() -> Self {
+            let prev = OVERRIDE.with(|c| c.borrow().clone());
+            OVERRIDE.with(|c| *c.borrow_mut() = Some(None));
+            Self { prev }
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let prev = self.prev.take();
+            // `prev` was `Option<Option<String>>` stored as the cell value;
+            // restore it even when it was `None` (no override).
+            OVERRIDE.with(|c| *c.borrow_mut() = prev);
+        }
+    }
 }
 
 /// Return `true` if a deprecation warning about `router_patterns`
@@ -596,25 +656,6 @@ fn bytemuck_cast_f16(raw: &[u8]) -> &[f16] {
     unsafe { std::slice::from_raw_parts(raw.as_ptr().cast::<f16>(), raw.len() / 2) }
 }
 
-/// Serialises env-var mutations across tests that touch
-/// `GROK_OZEMPIC_MANIFEST`. Declared at the module level so the
-/// `#[cfg(test)]` test module can refer to it via `super::`.
-#[cfg(test)]
-static ENV_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Clears `MANIFEST_ENV_VAR` on drop so a panicking test cannot leak the
-/// env into sibling tests (guard is only meaningful under `ENV_TEST_MUTEX`).
-#[cfg(test)]
-struct ManifestEnvGuard;
-
-#[cfg(test)]
-impl Drop for ManifestEnvGuard {
-    fn drop(&mut self) {
-        // SAFETY: callers hold `ENV_TEST_MUTEX` for the lifetime of this guard.
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-    }
-}
-
 fn bf16_bytes_to_f32(raw: &[u8]) -> Vec<f32> {
     assert_eq!(raw.len() % 2, 0, "bf16 data length must be a multiple of 2");
     raw.chunks_exact(2)
@@ -864,10 +905,8 @@ mod tests {
     /// byte-identical GOZ1 output.
     #[test]
     fn parity_legacy_vs_baseline_is_byte_identical() {
-        // Hold ENV_TEST_MUTEX so a parallel env-var test cannot leak
-        // GROK_OZEMPIC_MANIFEST into the legacy run below.
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        // Force-unset so a real process env cannot leak into the legacy path.
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("parity-input");
         write_parity_fixture(&dir);
@@ -908,8 +947,7 @@ mod tests {
     /// value of the manifest wiring.
     #[test]
     fn divergence_on_ffn_gate_false_positive() {
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("diverge-input");
         write_parity_fixture(&dir);
@@ -985,22 +1023,22 @@ mod tests {
         let out_a = scratch_dir("prec-out-a").join("a.goz1");
         let out_b = scratch_dir("prec-out-b").join("b.goz1");
 
-        // Serialize env-var mutations for test-safety.
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // SAFETY: mutation guarded by the single-threaded test mutex.
-        unsafe { std::env::set_var(MANIFEST_ENV_VAR, &env_path) };
-
         // A: explicit + env — explicit must win.
-        let mut config = base_config(&dir, &out_a);
-        config.manifest_path = Some(explicit_path.clone());
-        run_quantization(&config).expect("explicit+env run");
+        {
+            let _env = super::test_manifest_env::Guard::set(env_path.to_string_lossy());
+            let mut config = base_config(&dir, &out_a);
+            config.manifest_path = Some(explicit_path.clone());
+            run_quantization(&config).expect("explicit+env run");
+        }
 
         // B: explicit only — same explicit manifest, no env. Should
         // produce identical bytes to A if explicit truly won.
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-        let mut config = base_config(&dir, &out_b);
-        config.manifest_path = Some(explicit_path.clone());
-        run_quantization(&config).expect("explicit only run");
+        {
+            let _env = super::test_manifest_env::Guard::unset();
+            let mut config = base_config(&dir, &out_b);
+            config.manifest_path = Some(explicit_path.clone());
+            run_quantization(&config).expect("explicit only run");
+        }
 
         let a = goz1_bytes(&out_a);
         let b = goz1_bytes(&out_b);
@@ -1038,17 +1076,19 @@ mod tests {
         let out_legacy = scratch_dir("env-out-legacy").join("a.goz1");
         let out_env = scratch_dir("env-out-env").join("b.goz1");
 
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // Legacy run (env var unset).
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-        let config = base_config(&dir, &out_legacy);
-        run_quantization(&config).expect("legacy run");
+        // Legacy run (env path forced unset).
+        {
+            let _env = super::test_manifest_env::Guard::unset();
+            let config = base_config(&dir, &out_legacy);
+            run_quantization(&config).expect("legacy run");
+        }
 
         // Env-var run.
-        unsafe { std::env::set_var(MANIFEST_ENV_VAR, &env_path) };
-        let config = base_config(&dir, &out_env);
-        run_quantization(&config).expect("env var run");
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        {
+            let _env = super::test_manifest_env::Guard::set(env_path.to_string_lossy());
+            let config = base_config(&dir, &out_env);
+            run_quantization(&config).expect("env var run");
+        }
 
         assert_ne!(
             goz1_bytes(&out_legacy),
@@ -1070,8 +1110,7 @@ mod tests {
     /// silent drift.
     #[test]
     fn preserve_and_fp16_tiers_emit_identical_goz1_bytes() {
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("preserve-fp16-input");
         let ffn_up = [0.3f32, -0.3, 0.01, -0.01];
@@ -1278,11 +1317,9 @@ mod tests {
         write_structural_fixture(&dir);
         let out = scratch_dir("v2-env-out").join("v2env.goz1");
 
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // SAFETY: mutation guarded by the env test mutex; ManifestEnvGuard
-        // clears the var even if run_quantization panics.
-        let _env_guard = super::ManifestEnvGuard;
-        unsafe { std::env::set_var(MANIFEST_ENV_VAR, in_tree_structural_manifest()) };
+        // Thread-local env override — no process set_var (Codacy/CodeRabbit).
+        let _env =
+            super::test_manifest_env::Guard::set(in_tree_structural_manifest().to_string_lossy());
         let config = base_config(&dir, &out);
         let stats = run_quantization(&config).expect("V2 manifest via env var must be accepted");
         assert_structural_fixture_stats(&stats);
