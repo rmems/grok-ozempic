@@ -349,10 +349,12 @@ def main(argv: list[str]) -> int:
                 "refusing to overwrite the GOZ1 artifact"
             )
         result = analyze(pack_path)
+        # Write failures (missing parent dir, permissions, full disk) stay in
+        # the same controlled error path as analyze().
+        _emit_result(result, as_json=args.json, json_out=args.json_out)
     except (OSError, Goz1Error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    _emit_result(result, as_json=args.json, json_out=args.json_out)
     return 0
 
 
