@@ -1,0 +1,23 @@
+reports/grok-1-tau-sweep/results.md
+  s_8998c6d89f00df::t_f4682d3a199b29 1-186
+scripts/tau_sweep_embedding.sh
+  s_8998c6d89f00df::t_d47a4c6da92865 1-96
+scripts/goz1_trit_histogram.py
+  s_8998c6d89f00df::t_a35dfae9cd2ce6 1-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4ccf4f7e4dbae5b07157e1d38302f0b5483f44eb",
+  "prompts": {},
+  "sessions": {
+    "s_8998c6d89f00df": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4802b499-eb23-472b-b5e6-c935c567b795",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
