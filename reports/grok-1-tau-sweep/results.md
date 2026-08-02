@@ -23,7 +23,7 @@ multi-tensor run can *choose* its sparsity regime.
 | Logical tensor | `embedding.slot_00.token_embedding` |
 | Shape / dtype | `(131072, 6144)` f32 — 805,306,368 elements |
 | Source | `~/.models/xai-grok-1/ckpt-0/tensor00000_000` (official pickle → `.npy` via `scripts/export_grok1_embedding_npy.py`) |
-| Quantizer | `τ = gif_threshold × rms`; `|w| < τ → 0`, `w ≥ τ → +1`, `w ≤ −τ → −1` (`src/core/quantizer.rs`) |
+| Quantizer | weight-space `τ = gif_threshold × rms`; `abs(w) < τ → 0`, `w ≥ τ → +1`, `w ≤ −τ → −1` (`src/core/quantizer.rs`) |
 | Compute path | CPU `quantizer::quantize_f32` via `run_quantization` / `quantize-goz1` — no myelin / CUDA |
 | Measurement | `scripts/goz1_trit_histogram.py` (new; stdlib-only GOZ1 readback, exact trit counts) |
 | Weight rms | 0.012758015 (f64 accumulation over all elements) |
@@ -31,11 +31,17 @@ multi-tensor run can *choose* its sparsity regime.
 
 ## Sweep results (measured from packs)
 
+**Notation:** columns labeled `gif_threshold` are the dimensionless CLI /
+manifest multiplier (`--gif-threshold`). The actual weight-space firing
+threshold is `τ = gif_threshold × rms` (for this embedding,
+`rms ≈ 0.012758`, so `gif_threshold = 0.65` ⇒ `τ ≈ 0.00829`). Tables below
+report the CLI multiplier unless stated otherwise.
+
 Each row is one `quantize-goz1` run against a manifest **without**
 `defaults.gif_threshold` (see trap below), `--input-format npy --verify`,
 followed by exact trit counts from GOZ1 readback. GNU time 1.9 (`/usr/bin/time -v`).
 
-| τ | zeros | zeros % | +1 % | −1 % | Gaussian pred. % | pack bytes | wall | max RSS |
+| gif_threshold | zeros | zeros % | +1 % | −1 % | Gaussian pred. % | pack bytes | wall | max RSS |
 |-----|------------|---------|---------|---------|---------|-------------|---------|---------|
 | 0.0 | 0 | 0.0000 | 49.7377 | 50.2623 | 0.0000 | 201,327,136 | 5.73 s | 6.17 GiB |
 | 0.05 | 33,567,192 | 4.1683 | 47.6529 | 48.1788 | 3.9878 | 201,327,136 | 5.96 s | 6.19 GiB |
@@ -48,20 +54,24 @@ followed by exact trit counts from GOZ1 readback. GNU time 1.9 (`/usr/bin/time -
 
 Validation:
 
-- **τ = 0.0 control**: exactly 0 zeros — pure sign pack (`w ≥ 0 → +1`), as the
-  gate predicts. The +1/−1 split (49.74/50.26) shows a slight negative skew.
-- **τ = 0.05 control**: 4.1683% zeros and `file_size=201327136` — reproduces
-  GH #39 exactly, validating the new histogram script against known ground truth.
+- **gif_threshold = 0.0 control**: exactly 0 zeros — pure sign pack
+  (`w ≥ 0 → +1`), as the gate predicts. The +1/−1 split (49.74/50.26) shows a
+  slight negative skew.
+- **gif_threshold = 0.05 control**: 4.1683% zeros and `file_size=201327136` —
+  reproduces GH #39 exactly, validating the new histogram script against known
+  ground truth.
 - Trit totals equal 805,306,368 and invalid `0b11` codes are 0 in every pack.
-- An independent npy-side prediction (numpy, chunked `P(|w| < τ·rms)`) matches
-  the pack-side measurement to 4 decimal places at **all eight** τ values.
-- Pack size is τ-independent by design (2 bits/trit regardless of value);
-  sparsity is a *kernel-side* win (event-driven skip), not a *storage* win in GOZ1 v1.
-- `oz.gif_threshold` pack metadata matched the CLI τ in every sweep run.
+- An independent npy-side prediction (numpy, chunked
+  `P(abs(w) < gif_threshold·rms)`) matches the pack-side measurement to 4
+  decimal places at **all eight** gif_threshold values.
+- Pack size is gif_threshold-independent by design (2 bits/trit regardless of
+  value); sparsity is a *kernel-side* win (event-driven skip), not a *storage*
+  win in GOZ1 v1.
+- `oz.gif_threshold` pack metadata matched the CLI multiplier in every sweep run.
 
-### τ → sparsity map (from |w|/rms quantiles, 1e-4 bin resolution)
+### gif_threshold → sparsity map (from abs(w)/rms quantiles, 1e-4 bin resolution)
 
-| target zeros | required τ |
+| target zeros | required gif_threshold |
 |--------------|------------|
 | 25% | ≈ 0.31 |
 | 50% | ≈ 0.65 |
@@ -69,8 +79,9 @@ Validation:
 | 90% | ≈ 1.63 |
 | 95% | ≈ 1.97 |
 
-The embedding is near-Gaussian, so `zeros(τ) ≈ erf(τ/√2)` is a good first-order
-model (measured runs ~0.2–1.5 pp above Gaussian; heavier-than-Gaussian center).
+The embedding is near-Gaussian, so
+`zeros(gif_threshold) ≈ erf(gif_threshold/√2)` is a good first-order model
+(measured runs ~0.2–1.5 pp above Gaussian; heavier-than-Gaussian center).
 
 ## ⚠ The manifest τ trap (documented + demonstrated)
 
@@ -85,16 +96,17 @@ ignored**. Demonstrated live:
 
 ```text
 quantize-goz1 --manifest dissect/grok-1/baseline.json --gif-threshold 0.5 ...
-→ zeros = 33,567,192 (4.1683%)   # identical, trit-for-trit, to τ=0.05
+→ zeros = 33,567,192 (4.1683%)   # identical, trit-for-trit, to gif_threshold=0.05
 → oz.gif_threshold = 0.05        # pack metadata records what actually applied
 ```
 
 **Rule for sweeps:** use a manifest without `defaults.gif_threshold` (then the
-CLI flag controls τ), or bake the per-run τ into `defaults`. The driver script
-(`scripts/tau_sweep_embedding.sh`) derives such a manifest from `baseline.json`
-at runtime; nothing under `dissect/` is modified (xai-dissect stays authoritative).
+CLI flag controls the multiplier), or bake the per-run value into `defaults`.
+The driver script (`scripts/tau_sweep_embedding.sh`) derives such a manifest
+from `baseline.json` at runtime; nothing under `dissect/` is modified
+(xai-dissect stays authoritative).
 **Always check `oz.gif_threshold` in the pack metadata** — it records the
-effective baseline τ, which is how you catch this trap after the fact.
+effective baseline multiplier, which is how you catch this trap after the fact.
 
 ## Second tensor family: blocked-by-export (evidence)
 
@@ -129,24 +141,25 @@ explicit non-goal (#51) — routing readout must stay preserve.
 
 | Tier | Recommendation | Rationale |
 |------|----------------|-----------|
-| Embedding | Dense sign-like is *acceptable* (τ ∈ [0, 0.05]) **unless** event-driven embedding lookup is the goal; then τ ≈ 0.65 for ~50% zeros. | Embedding rows are read once per token (lookup, not GEMV); sparsity buys little compute unless the runtime skips zero trits inside fused kernels. Sign information is the dominant signal. |
-| MoE experts | Target **event-driven**: τ for 50–75% zeros (≈ 0.65–1.12 *if* expert weights are near-Gaussian — must be re-measured after dequant export; official weights are int8). | Experts dominate FLOPs and memory traffic; zero-skipping GEMV is where spiking-sparse pays. Per-expert rms (slice of the (8, …) tensor) rather than whole-tensor rms should be evaluated. |
-| Attention proj | Intermediate: start τ ≈ 0.3–0.5 (25–40% zeros) and validate quality before pushing higher. | Attention is more sensitive to weight perturbation than MoE experts in most PTQ literature; be conservative until measured. |
-| Router / gates | **Preserve (fp16). Never ternary. No τ.** | Routing decisions collapse under sign-only weights; explicit non-goal. |
+| Embedding | Dense sign-like is *acceptable* (gif_threshold ∈ [0, 0.05]) **unless** event-driven embedding lookup is the goal; then gif_threshold ≈ 0.65 for ~50% zeros. | Embedding rows are read once per token (lookup, not GEMV); sparsity buys little compute unless the runtime skips zero trits inside fused kernels. Sign information is the dominant signal. |
+| MoE experts | Target **event-driven**: gif_threshold for 50–75% zeros (≈ 0.65–1.12 *if* expert weights are near-Gaussian — must be re-measured after dequant export; official weights are int8). | Experts dominate FLOPs and memory traffic; zero-skipping GEMV is where spiking-sparse pays. Per-expert rms (slice of the (8, …) tensor) rather than whole-tensor rms should be evaluated. |
+| Attention proj | Intermediate: start gif_threshold ≈ 0.3–0.5 (25–40% zeros) and validate quality before pushing higher. | Attention is more sensitive to weight perturbation than MoE experts in most PTQ literature; be conservative until measured. |
+| Router / gates | **Preserve (fp16). Never ternary. No gif_threshold.** | Routing decisions collapse under sign-only weights; explicit non-goal. |
 | Norm/scale vectors | Preserve. | Tiny (6144 floats), quality-critical. |
 
 **When is dense sign-like OK?** When the consumer is a dense ternary kernel
 (sign-GEMV) or a lookup — compression is already 16× and zeros add nothing.
 **When is sparsity required?** When the runtime is event-driven (skip zero
-trits): then zeros% is the compute-reduction knob, and τ should be *chosen per
-tier from a target sparsity*, not left at the 0.05 legacy default. The
-`defaults.gif_threshold: 0.05` in `baseline.json` should be treated as a
+trits): then zeros% is the compute-reduction knob, and gif_threshold should be
+*chosen per tier from a target sparsity*, not left at the 0.05 legacy default.
+The `defaults.gif_threshold: 0.05` in `baseline.json` should be treated as a
 sign-pack default, not an SNN default.
 
-Caveats: these τ values are calibrated on the **embedding** distribution
-(near-Gaussian, kurtosis 3.6). Expert/attention distributions may differ —
-re-run this sweep per tier once a dequant export exists. No quality (perplexity
-/ downstream) claims are made here; this is distribution + packing science only.
+Caveats: these gif_threshold values are calibrated on the **embedding**
+distribution (near-Gaussian, kurtosis 3.6). Expert/attention distributions may
+differ — re-run this sweep per tier once a dequant export exists. No quality
+(perplexity / downstream) claims are made here; this is distribution + packing
+science only.
 
 ## Reproduce
 
@@ -160,8 +173,10 @@ scripts/tau_sweep_embedding.sh
 
 # Exact trit histogram of any GOZ1 pack
 python3 scripts/goz1_trit_histogram.py PACK.goz1 [--json]
+# human + JSON artifact from one analysis:
+# python3 scripts/goz1_trit_histogram.py PACK.goz1 --json-out hist.json
 
-# Trap demo (CLI τ ignored under stock baseline manifest)
+# Trap demo (CLI gif_threshold ignored under stock baseline manifest)
 target/release/grok-ozempic quantize-goz1 \
   --input-dir ~/.models/xai-grok-1/export-npy \
   --output /tmp/trap-demo.goz1 \
@@ -170,17 +185,20 @@ target/release/grok-ozempic quantize-goz1 \
 python3 scripts/goz1_trit_histogram.py /tmp/trap-demo.goz1   # → 4.1683%, oz.gif_threshold=0.05
 ```
 
-The rms/kurtosis/τ-quantile numbers came from a one-off chunked numpy pass over
-the exported npy (`np.load(..., mmap_mode="r")`; f64 accumulation for `Σw²`,
-`Σw⁴`; 160,000-bin histogram of `|w|/rms` on `[0, 16)` for quantiles) — numpy
-is a host-side analysis convenience only, not a pipeline dependency.
+The rms/kurtosis/gif_threshold-quantile numbers came from a one-off chunked
+numpy pass over the exported npy (`np.load(..., mmap_mode="r")`; f64
+accumulation for `Σw²`, `Σw⁴`; 160,000-bin histogram of `abs(w)/rms` on
+`[0, 16)` for quantiles) — numpy is a host-side analysis convenience only, not
+a pipeline dependency.
 
 ## Relation to open work
 
-- **#48 / RM-196 (multi-tensor epic):** per-tier τ table above is the policy
-  input; expert/attention sweeps are blocked on an int8-dequant export step.
+- **#48 / RM-196 (multi-tensor epic):** per-tier gif_threshold table above is
+  the policy input; expert/attention sweeps are blocked on an int8-dequant
+  export step.
 - **#40 / RM-191 (V2 name bridge):** untouched here. Note the trap compounds
   with #40's risk: a preserve-name mismatch would send routers into default
-  ternary *at whatever τ defaults carry* — both bugs hide in `defaults`.
+  ternary *at whatever gif_threshold defaults carry* — both bugs hide in
+  `defaults`.
 - Packs (8 × 192 MiB) and logs remain under
   `~/.models/xai-grok-1/artifacts/tau-sweep/` — host-only, never committed.

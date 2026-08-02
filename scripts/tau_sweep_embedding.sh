@@ -40,9 +40,11 @@ fi
 }
 
 # Fresh disk-backed stage; never wipe caller-owned dirs.
+# Parent must exist before mktemp -d with a template path; ART/logs before tee.
+mkdir -p "$HOME/.models/xai-grok-1" "$ART/logs"
 WORK="$(mktemp -d "$HOME/.models/xai-grok-1/tau-sweep-stage.XXXXXX")"
 STAGE="$WORK/npy"
-mkdir -p "$STAGE" "$ART/logs"
+mkdir -p "$STAGE"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
@@ -88,9 +90,9 @@ for TAU in $TAUS; do
     --input-format npy \
     --gif-threshold "$TAU" \
     --verify 2>&1 | tee "$LOG"
-  python3 "$REPO/scripts/goz1_trit_histogram.py" "$OUT" --json \
-    >"$ART/logs/tau-${TAU}.hist.json"
-  python3 "$REPO/scripts/goz1_trit_histogram.py" "$OUT" | tee -a "$LOG"
+  # One pack analysis: JSON artifact + human summary (no double full-file scan).
+  python3 "$REPO/scripts/goz1_trit_histogram.py" "$OUT" \
+    --json-out "$ART/logs/tau-${TAU}.hist.json" | tee -a "$LOG"
 done
 
 echo "== done; packs + logs under $ART"

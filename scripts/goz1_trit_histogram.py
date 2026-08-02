@@ -28,6 +28,7 @@ import argparse
 import json
 import struct
 import sys
+from collections import Counter
 from pathlib import Path
 
 DATA_ALIGNMENT = 32
@@ -143,7 +144,8 @@ def histogram_ternary(f, abs_offset: int, n_elements: int) -> dict[str, int]:
         if remaining == 0 and n_elements % 4 != 0:
             last_byte = chunk[-1]
             chunk = chunk[:-1]
-        for value, count in ((v, chunk.count(v)) for v in set(chunk)):
+        # Single-pass byte frequencies (avoids re-scanning the chunk per unique value).
+        for value, count in Counter(chunk).items():
             z, p, m, bad = _LUT[value]
             zeros += z * count
             pos += p * count
@@ -169,13 +171,23 @@ def analyze(path: Path) -> dict:
         out_tensors = []
         for t in tensors:
             n = _num_elements(t["shape"])
+            tt = t["tensor_type"]
+            if tt == TENSOR_TERNARY:
+                type_name = "ternary"
+            elif tt == TENSOR_F16:
+                type_name = "f16"
+            else:
+                raise Goz1Error(
+                    f"unsupported tensor_type {tt} for {t['name']} "
+                    f"(expected {TENSOR_F16}=f16 or {TENSOR_TERNARY}=ternary)"
+                )
             entry: dict[str, object] = {
                 "name": t["name"],
                 "shape": t["shape"],
                 "num_elements": n,
-                "type": "ternary" if t["tensor_type"] == TENSOR_TERNARY else "f16",
+                "type": type_name,
             }
-            if t["tensor_type"] == TENSOR_TERNARY:
+            if tt == TENSOR_TERNARY:
                 hist = histogram_ternary(f, data_start + t["data_offset"], n)
                 total = hist["zeros"] + hist["pos"] + hist["neg"] + hist["invalid"]
                 if total != n:
@@ -207,6 +219,12 @@ def _print_human(result: dict) -> None:
         h = t["histogram"]
         n = t["num_elements"]
         print(f"  {t['name']}  [{shape}]  n={n}")
+        if n == 0:
+            print(
+                "    empty tensor (zeros=0, +1=0, -1=0); sparsity=1.0 by convention"
+                + (f"  INVALID={h['invalid']}" if h["invalid"] else "")
+            )
+            continue
         print(
             f"    zeros={h['zeros']} ({100.0 * h['zeros'] / n:.4f}%)  "
             f"+1={h['pos']} ({100.0 * h['pos'] / n:.4f}%)  "
@@ -218,13 +236,20 @@ def _print_human(result: dict) -> None:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("pack", type=Path, help="path to .goz1 file")
-    ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    ap.add_argument("--json", action="store_true", help="emit JSON on stdout instead of text")
+    ap.add_argument(
+        "--json-out",
+        type=Path,
+        help="write JSON to this path (still prints human text unless --json)",
+    )
     args = ap.parse_args(argv)
     try:
         result = analyze(args.pack)
     except (OSError, Goz1Error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if args.json_out is not None:
+        args.json_out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     if args.json:
         json.dump(result, sys.stdout, indent=2)
         print()
