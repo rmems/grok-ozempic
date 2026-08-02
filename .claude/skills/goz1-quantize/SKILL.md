@@ -32,8 +32,24 @@ description: Pack Grok weights into GOZ1 via quantize-goz1 / run_quantization. U
 
 ## Commands
 
+Pick the manifest that matches the **tensor-name convention** of the inputs.
+V2 is fail-closed (unmatched names hard-error); V1 allows defaults fallthrough.
+
+**Structural-named npy** (export-script stems, `block_*.slot_*.{kind}`):
+
 ```bash
 cargo run --features cli -- quantize-goz1 --help
+cargo run --release --features cli -- quantize-goz1 \
+  --input-dir "$OUT" \
+  --output "$ART/model.goz1" \
+  --manifest dissect/grok-1/structural-manifest.json \
+  --input-format npy \
+  --verify
+```
+
+**Legacy `blk.*` names** (V1 baseline):
+
+```bash
 cargo run --release --features cli -- quantize-goz1 \
   --input-dir "$OUT" \
   --output "$ART/model.goz1" \

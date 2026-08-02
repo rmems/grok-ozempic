@@ -34,13 +34,24 @@ cargo run --release --features cli --locked -- quantize-goz1 \
   --verify
 ```
 
-**Safetensors directory** (do not use `--input-format npy`; use the manifest whose convention matches the tensor names):
+**Safetensors — structural names** (V2):
 
 ```bash
 cargo run --release --features cli --locked -- quantize-goz1 \
   --input-dir /path/to/safetensors-dir \
   --output /path/to/out.goz1 \
   --manifest dissect/grok-1/structural-manifest.json \
+  --input-format safetensors \
+  --verify
+```
+
+**Safetensors — legacy `blk.*` names** (V1; do not pair with V2):
+
+```bash
+cargo run --release --features cli --locked -- quantize-goz1 \
+  --input-dir /path/to/safetensors-dir \
+  --output /path/to/out.goz1 \
+  --manifest dissect/grok-1/baseline.json \
   --input-format safetensors \
   --verify
 ```

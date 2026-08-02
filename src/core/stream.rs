@@ -505,6 +505,11 @@ fn build_manifest_safetensors(
             if dtype == SourceDtype::Other {
                 // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
                 // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
+                // Under V2 still classify the name so fail-closed applies to *all* present tensors
+                // (including unsupported dtypes) before the intentional skip — GH #40 / RM-191.
+                if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+                    let _ = classify_and_decide(&name, dissect_manifest, config)?;
+                }
                 continue;
             }
             let (_class, precision, gif_threshold) =
@@ -531,16 +536,20 @@ fn build_manifest_npy(
     for path in paths {
         let npy = MmapNpy::map_path(path)?;
         let dtype = npy_dtype_to_source(npy.dtype());
-        if dtype == SourceDtype::Other {
-            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
-            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
-            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
-            continue;
-        }
         let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
             GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
         })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
+        if dtype == SourceDtype::Other {
+            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
+            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
+            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
+            // Under V2 still classify the name so fail-closed applies before the skip (GH #40 / RM-191).
+            if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+                let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
+            }
+            continue;
+        }
         let (_class, precision, gif_threshold) =
             classify_and_decide(&tensor_name, dissect_manifest, config)?;
         let shape: Vec<u64> = npy.shape().iter().map(|&d| d as u64).collect();
@@ -592,6 +601,19 @@ fn bytemuck_cast_f16(raw: &[u8]) -> &[f16] {
 /// `#[cfg(test)]` test module can refer to it via `super::`.
 #[cfg(test)]
 static ENV_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Clears `MANIFEST_ENV_VAR` on drop so a panicking test cannot leak the
+/// env into sibling tests (guard is only meaningful under `ENV_TEST_MUTEX`).
+#[cfg(test)]
+struct ManifestEnvGuard;
+
+#[cfg(test)]
+impl Drop for ManifestEnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: callers hold `ENV_TEST_MUTEX` for the lifetime of this guard.
+        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+    }
+}
 
 fn bf16_bytes_to_f32(raw: &[u8]) -> Vec<f32> {
     assert_eq!(raw.len() % 2, 0, "bf16 data length must be a multiple of 2");
@@ -653,6 +675,43 @@ mod tests {
         for v in data {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(&bytes).unwrap();
+    }
+
+    /// Minimal i8 `.npy` (descr `<i1`) so `SourceDtype::Other` is exercised
+    /// without needing safetensors fixtures.
+    fn write_npy_i8(path: &std::path::Path, shape: &[usize], data: &[i8]) {
+        use std::io::Write as _;
+        let expected: usize = shape.iter().product();
+        assert_eq!(expected, data.len(), "data length must match shape");
+        let shape_str = if shape.is_empty() {
+            "()".to_string()
+        } else if shape.len() == 1 {
+            format!("({},)", shape[0])
+        } else {
+            let inner = shape
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({inner})")
+        };
+        let dict = format!("{{'descr': '<i1', 'fortran_order': False, 'shape': {shape_str}, }}");
+        let magic = b"\x93NUMPY";
+        let preamble_len = magic.len() + 1 + 1 + 2;
+        let raw_header_len = dict.len();
+        let total_unpadded = preamble_len + raw_header_len;
+        let pad = (64 - (total_unpadded % 64)) % 64;
+        let header_len = raw_header_len + pad;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(magic);
+        bytes.push(1);
+        bytes.push(0);
+        bytes.extend_from_slice(&(header_len as u16).to_le_bytes());
+        bytes.extend_from_slice(dict.as_bytes());
+        bytes.extend(std::iter::repeat_n(b' ', pad));
+        bytes.extend(data.iter().map(|&v| v as u8));
         let mut f = std::fs::File::create(path).unwrap();
         f.write_all(&bytes).unwrap();
     }
@@ -1186,6 +1245,31 @@ mod tests {
         }
     }
 
+    /// Unsupported dtypes are skipped by the float stream, but under V2 their
+    /// names must still be classified so a legacy/misspelled stem cannot
+    /// silently disappear past fail-closed (Codex/CodeAnt on PR #55).
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_other_dtype() {
+        let dir = scratch_dir("v2-fail-closed-other-input");
+        write_npy_i8(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[4],
+            &[1i8, -1, 0, 2],
+        );
+        let out = scratch_dir("v2-fail-closed-other-out").join("bad.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("unmatched Other-dtype name under V2 must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
     /// The `GROK_OZEMPIC_MANIFEST` env path accepts V2 structural
     /// manifests too (same policy as the explicit `manifest_path`).
     #[test]
@@ -1195,13 +1279,12 @@ mod tests {
         let out = scratch_dir("v2-env-out").join("v2env.goz1");
 
         let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // SAFETY: mutation guarded by the env test mutex.
+        // SAFETY: mutation guarded by the env test mutex; ManifestEnvGuard
+        // clears the var even if run_quantization panics.
+        let _env_guard = super::ManifestEnvGuard;
         unsafe { std::env::set_var(MANIFEST_ENV_VAR, in_tree_structural_manifest()) };
         let config = base_config(&dir, &out);
-        let result = run_quantization(&config);
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-
-        let stats = result.expect("V2 manifest via env var must be accepted");
+        let stats = run_quantization(&config).expect("V2 manifest via env var must be accepted");
         assert_structural_fixture_stats(&stats);
     }
 

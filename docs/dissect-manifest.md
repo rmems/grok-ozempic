@@ -7,7 +7,7 @@ repository, without depending on it as a runtime crate.
 This document freezes **schema v1**. The loader and runtime resolution path in
 `stream::resolve_manifest` are active; V2 structural naming
 (`block_{NNN}.slot_{SS}.{kind}`) is accepted for runtime GOZ1 packs as of
-#40 / RM-191, with a fail-closed rule for unmatched tensors (see below).
+GitHub #40 / RM-191, with a fail-closed rule for unmatched tensors (see below).
 
 ## Authority and source of truth
 
