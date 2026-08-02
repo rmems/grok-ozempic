@@ -1,0 +1,15 @@
+src/core/manifest.rs
+  ai_agent 92-103,191-192
+src/error.rs
+  ai_agent 49-56
+src/core/stream.rs
+  ai_agent 27,110,116,475-484,1084-1261
+src/bin/grok-ozempic/main.rs
+  ai_agent 134-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "204106579e2023d84d694fb34d85bdaf53196033",
+  "prompts": {}
+}
