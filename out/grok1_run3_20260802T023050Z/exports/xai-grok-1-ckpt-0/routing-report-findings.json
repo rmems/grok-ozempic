@@ -1,0 +1,30 @@
+{
+  "analysis": "routing-report",
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "checkpoint_slug": "xai-grok-1-ckpt-0",
+  "headline": "64 routing candidates discovered",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "routing_candidates",
+      "detail": "64 routing candidates across 64 relevant blocks"
+    },
+    {
+      "severity": "info",
+      "category": "expert_linkage",
+      "detail": "expected experts per router 8"
+    },
+    {
+      "severity": "info",
+      "category": "orientations",
+      "detail": "d_model_to_experts x64"
+    },
+    {
+      "severity": "info",
+      "category": "routing_critical_blocks",
+      "detail": "64 blocks marked routing-critical"
+    }
+  ],
+  "schema_version": 1
+}

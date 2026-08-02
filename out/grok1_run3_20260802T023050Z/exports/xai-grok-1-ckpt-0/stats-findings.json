@@ -1,0 +1,30 @@
+{
+  "analysis": "stats",
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "checkpoint_slug": "xai-grok-1-ckpt-0",
+  "headline": "770 tensors profiled",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "sampling",
+      "detail": "770 tensors profiled with up to 65536 sampled values each"
+    },
+    {
+      "severity": "info",
+      "category": "highest_rms",
+      "detail": "highest RMS: block_063.slot_04.attn_proj_i8.model_width (37.729480)"
+    },
+    {
+      "severity": "info",
+      "category": "highest_variance",
+      "detail": "highest variance: block_063.slot_04.attn_proj_i8.model_width (1423.501918)"
+    },
+    {
+      "severity": "info",
+      "category": "outlier_heavy",
+      "detail": "most outlier-heavy tensor: block_053.slot_10.block_norm (0.009440)"
+    }
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,39 @@
+{
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "baseline": "grok1-map-v1-clean",
+  "required_validation": {
+    "blocks": 64,
+    "tensors": 770,
+    "routers": 64,
+    "expert_families": 192,
+    "unknown_tensors": 0
+  },
+  "discovered_validation": {
+    "blocks": 64,
+    "tensors": 770,
+    "routers": 64,
+    "expert_families": 192,
+    "unknown_tensors": 0
+  },
+  "keep_fp32": [
+    "router",
+    "block_norm",
+    "final_norm"
+  ],
+  "pilot_quantize": [
+    "attn_proj_i8.model_width",
+    "attn_proj_i8.narrow",
+    "moe_expert.gate",
+    "moe_expert.up",
+    "moe_expert.down"
+  ],
+  "defer": [
+    "token_embedding"
+  ],
+  "notes": [
+    "770 tensors partition into 448 quantization candidates, 64 routing-critical, 257 precision-sensitive, and 1 deferred entries.",
+    "Top quantization candidate is `block_030.slot_01.moe_expert.down` with readiness 0.188."
+  ],
+  "schema_version": 1
+}

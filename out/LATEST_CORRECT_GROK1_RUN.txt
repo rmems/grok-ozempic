@@ -1,0 +1,34 @@
+LATEST CORRECT GROK-1 RUN
+
+Path: out/grok1_run3_20260802T023050Z
+Generated UTC: 2026-08-02T02:30:50Z → 2026-08-02T02:51:47Z (~21 min wall)
+Status: successful full structural campaign after planning surfaces (#32/#34/#36) and CI/Sentry (#48)
+Checkpoint: /home/raulmc/.models/xai-grok-1/ckpt-0 (770 shards, ~297 GiB)
+Slug: xai-grok-1-ckpt-0
+Binary: target/release/xai-dissect 0.1.0 (rebuilt 2026-08-01)
+
+Coverage gate (grok1-coverage.json):
+  baseline_profile = grok1-map-v1-clean
+  validation = pass
+  coverage_schema_version = 2
+  discovered = expected: blocks=64 tensors=770 routers=64 expert_families=192 unknown_tensors=0
+  checksum = fnv1a64:de5a1c978121c62c (matches May 2025/2026 structural checksum)
+
+Commands (all OK):
+  inventory, experts, routing-report, pilot-plan, route-preservation,
+  stats --sample-values 65536, saaq-readiness --sample-values 65536,
+  quant-plan --sample-values 65536
+
+New vs May run (out/grok1_run2_after_fixes_20260525T002904Z):
+  + pilot-selection-plan.json/.md
+  + route-preservation-report.json/.md
+  + conversion-manifest.json
+  + quant-plan.json/.md
+  + baseline_profile field on coverage (schema v2)
+
+Primary reports:
+  out/grok1_run3_20260802T023050Z/reports/xai-grok-1-ckpt-0/inventory.md
+  out/grok1_run3_20260802T023050Z/reports/xai-grok-1-ckpt-0/quant-plan.md
+  out/grok1_run3_20260802T023050Z/manifests/xai-grok-1-ckpt-0/conversion-manifest.json
+
+Use this folder, not the older May run, for grok-ozempic / SAAQ handoff.

@@ -190,11 +190,15 @@ To stay decoupled from the core quantization loop, we expose this via a new subc
 ```bash
 grok-ozempic artifacts generate \
     --manifest path/to/dissect.json \
-    --output-dir ./reports/grok-1-official__ckpt-0
+    --output-dir ./out/LATEST_CORRECT_GROK1_RUN/reports/xai-grok-1-ckpt-0
 
 grok-ozempic artifacts validate \
-    --report-dir ./reports/grok-1-official__ckpt-0
+    --report-dir ./out/LATEST_CORRECT_GROK1_RUN/reports/xai-grok-1-ckpt-0
 ```
+
+Authoritative cartography handoff from xai-dissect lives under
+[`out/LATEST_CORRECT_GROK1_RUN`](../out/LATEST_CORRECT_GROK1_RUN)
+(see [`docs/runs/grok1_run3_vs_run2_comparison.md`](./runs/grok1_run3_vs_run2_comparison.md)).
 
 ## 9. Exact Cursor Patch Checklist
 

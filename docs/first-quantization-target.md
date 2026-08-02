@@ -16,7 +16,7 @@ The first quantization target is:
 
 - `embedding.slot_00.token_embedding`
 
-This target already appears as the clearest candidate in [`reports/grok-1-official__ckpt-0/saaq-readiness.md`](../reports/grok-1-official__ckpt-0/saaq-readiness.md).
+This target already appears as the clearest candidate in the run3 SAAQ readiness report ([`out/LATEST_CORRECT_GROK1_RUN/reports/xai-grok-1-ckpt-0/saaq-readiness.md`](../out/LATEST_CORRECT_GROK1_RUN/reports/xai-grok-1-ckpt-0/saaq-readiness.md)). Note run3 `quant-plan` **defers** `token_embedding` for multi-tensor pilots; the first-embed experiment under [`reports/grok-1-first-embed-goz1/`](../reports/grok-1-first-embed-goz1/) remains the historical #39 result.
 
 ## Why this target
 

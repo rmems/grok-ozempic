@@ -17,6 +17,20 @@ for runtime GOZ1 packs until #40 / RM-191.
 - `grok-ozempic` **never writes manifests** and never depends on
   `xai-dissect` as a Cargo crate.
 
+### Cartography handoff vs quantize manifests
+
+These are **different artifact families**:
+
+| Kind | Location | Schema / use |
+|------|----------|----------------|
+| Quantize classification (V1/V2) | `dissect/grok-1/*.json` | `xai-dissect.manifest` → `stream::resolve_manifest` / `quantize-goz1` |
+| Full cartography campaign (run3) | `out/LATEST_CORRECT_GROK1_RUN/` | inventory, conversion-manifest, quant-plan, pilot-selection, route-preservation, SAAQ readiness — **planning / validation**, not drop-in for `resolve_manifest` |
+
+Prefer run3 over the retired May run2 markdown under the old
+`reports/grok-1-official__ckpt-0/` path. Comparison:
+[`docs/runs/grok1_run3_vs_run2_comparison.md`](./runs/grok1_run3_vs_run2_comparison.md).
+Pointer summary: [`out/LATEST_CORRECT_GROK1_RUN.txt`](../out/LATEST_CORRECT_GROK1_RUN.txt).
+
 ## Delivery
 
 Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):

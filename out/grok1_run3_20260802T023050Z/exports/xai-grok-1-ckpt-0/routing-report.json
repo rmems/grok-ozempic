@@ -1,0 +1,5032 @@
+{
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "shard_count": 770,
+  "inferred": {
+    "vocab_size": 131072,
+    "d_model": 6144,
+    "n_experts": 8,
+    "d_ff": 32768,
+    "n_blocks": 64
+  },
+  "relevant_block_count": 64,
+  "expected_experts_per_router": 8,
+  "candidate_tensors": [
+    {
+      "shard_ordinal": 13,
+      "in_shard_index": 0,
+      "block_index": 0,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_000.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 25,
+      "in_shard_index": 0,
+      "block_index": 1,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_001.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 37,
+      "in_shard_index": 0,
+      "block_index": 2,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_002.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 49,
+      "in_shard_index": 0,
+      "block_index": 3,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_003.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 61,
+      "in_shard_index": 0,
+      "block_index": 4,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_004.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 73,
+      "in_shard_index": 0,
+      "block_index": 5,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_005.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 85,
+      "in_shard_index": 0,
+      "block_index": 6,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_006.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 97,
+      "in_shard_index": 0,
+      "block_index": 7,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_007.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 109,
+      "in_shard_index": 0,
+      "block_index": 8,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_008.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 121,
+      "in_shard_index": 0,
+      "block_index": 9,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_009.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 133,
+      "in_shard_index": 0,
+      "block_index": 10,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_010.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 145,
+      "in_shard_index": 0,
+      "block_index": 11,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_011.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 157,
+      "in_shard_index": 0,
+      "block_index": 12,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_012.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 169,
+      "in_shard_index": 0,
+      "block_index": 13,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_013.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 181,
+      "in_shard_index": 0,
+      "block_index": 14,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_014.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 193,
+      "in_shard_index": 0,
+      "block_index": 15,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_015.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 205,
+      "in_shard_index": 0,
+      "block_index": 16,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_016.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 217,
+      "in_shard_index": 0,
+      "block_index": 17,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_017.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 229,
+      "in_shard_index": 0,
+      "block_index": 18,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_018.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 241,
+      "in_shard_index": 0,
+      "block_index": 19,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_019.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 253,
+      "in_shard_index": 0,
+      "block_index": 20,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_020.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 265,
+      "in_shard_index": 0,
+      "block_index": 21,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_021.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 277,
+      "in_shard_index": 0,
+      "block_index": 22,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_022.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 289,
+      "in_shard_index": 0,
+      "block_index": 23,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_023.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 301,
+      "in_shard_index": 0,
+      "block_index": 24,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_024.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 313,
+      "in_shard_index": 0,
+      "block_index": 25,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_025.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 325,
+      "in_shard_index": 0,
+      "block_index": 26,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_026.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 337,
+      "in_shard_index": 0,
+      "block_index": 27,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_027.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 349,
+      "in_shard_index": 0,
+      "block_index": 28,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_028.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 361,
+      "in_shard_index": 0,
+      "block_index": 29,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_029.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 373,
+      "in_shard_index": 0,
+      "block_index": 30,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_030.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 385,
+      "in_shard_index": 0,
+      "block_index": 31,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_031.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 397,
+      "in_shard_index": 0,
+      "block_index": 32,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_032.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 409,
+      "in_shard_index": 0,
+      "block_index": 33,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_033.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 421,
+      "in_shard_index": 0,
+      "block_index": 34,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_034.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 433,
+      "in_shard_index": 0,
+      "block_index": 35,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_035.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 445,
+      "in_shard_index": 0,
+      "block_index": 36,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_036.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 457,
+      "in_shard_index": 0,
+      "block_index": 37,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_037.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 469,
+      "in_shard_index": 0,
+      "block_index": 38,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_038.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 481,
+      "in_shard_index": 0,
+      "block_index": 39,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_039.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 493,
+      "in_shard_index": 0,
+      "block_index": 40,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_040.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 505,
+      "in_shard_index": 0,
+      "block_index": 41,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_041.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 517,
+      "in_shard_index": 0,
+      "block_index": 42,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_042.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 529,
+      "in_shard_index": 0,
+      "block_index": 43,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_043.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 541,
+      "in_shard_index": 0,
+      "block_index": 44,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_044.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 553,
+      "in_shard_index": 0,
+      "block_index": 45,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_045.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 565,
+      "in_shard_index": 0,
+      "block_index": 46,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_046.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 577,
+      "in_shard_index": 0,
+      "block_index": 47,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_047.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 589,
+      "in_shard_index": 0,
+      "block_index": 48,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_048.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 601,
+      "in_shard_index": 0,
+      "block_index": 49,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_049.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 613,
+      "in_shard_index": 0,
+      "block_index": 50,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_050.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 625,
+      "in_shard_index": 0,
+      "block_index": 51,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_051.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 637,
+      "in_shard_index": 0,
+      "block_index": 52,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_052.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 649,
+      "in_shard_index": 0,
+      "block_index": 53,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_053.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 661,
+      "in_shard_index": 0,
+      "block_index": 54,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_054.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 673,
+      "in_shard_index": 0,
+      "block_index": 55,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_055.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 685,
+      "in_shard_index": 0,
+      "block_index": 56,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_056.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 697,
+      "in_shard_index": 0,
+      "block_index": 57,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_057.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 709,
+      "in_shard_index": 0,
+      "block_index": 58,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_058.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 721,
+      "in_shard_index": 0,
+      "block_index": 59,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_059.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 733,
+      "in_shard_index": 0,
+      "block_index": 60,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_060.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 745,
+      "in_shard_index": 0,
+      "block_index": 61,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_061.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 757,
+      "in_shard_index": 0,
+      "block_index": 62,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_062.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    },
+    {
+      "shard_ordinal": 769,
+      "in_shard_index": 0,
+      "block_index": 63,
+      "block_slot": 11,
+      "role": "tensor",
+      "dtype": "f32",
+      "shape": [
+        6144,
+        8
+      ],
+      "kind_label": "router",
+      "orientation": "d_model_to_experts",
+      "expert_axis": 1,
+      "linked_expert_count": 8,
+      "matches_inferred_expert_count": true,
+      "structural_name": "block_063.routing_slot_11",
+      "gate_metrics": {
+        "total_elements": 49152,
+        "total_nbytes": 196608,
+        "input_width": 6144,
+        "output_width": 8,
+        "expert_count": 8,
+        "logits_per_input": 8
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "block_index": 0,
+      "label": "block_000",
+      "shard_range": {
+        "start": 2,
+        "end_inclusive": 13
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 13,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 13,
+          "in_shard_index": 0,
+          "block_index": 0,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_000.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 1,
+      "label": "block_001",
+      "shard_range": {
+        "start": 14,
+        "end_inclusive": 25
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 25,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 25,
+          "in_shard_index": 0,
+          "block_index": 1,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_001.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 2,
+      "label": "block_002",
+      "shard_range": {
+        "start": 26,
+        "end_inclusive": 37
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 37,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 37,
+          "in_shard_index": 0,
+          "block_index": 2,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_002.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 3,
+      "label": "block_003",
+      "shard_range": {
+        "start": 38,
+        "end_inclusive": 49
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 49,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 49,
+          "in_shard_index": 0,
+          "block_index": 3,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_003.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 4,
+      "label": "block_004",
+      "shard_range": {
+        "start": 50,
+        "end_inclusive": 61
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 61,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 61,
+          "in_shard_index": 0,
+          "block_index": 4,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_004.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 5,
+      "label": "block_005",
+      "shard_range": {
+        "start": 62,
+        "end_inclusive": 73
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 73,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 73,
+          "in_shard_index": 0,
+          "block_index": 5,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_005.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 6,
+      "label": "block_006",
+      "shard_range": {
+        "start": 74,
+        "end_inclusive": 85
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 85,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 85,
+          "in_shard_index": 0,
+          "block_index": 6,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_006.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 7,
+      "label": "block_007",
+      "shard_range": {
+        "start": 86,
+        "end_inclusive": 97
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 97,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 97,
+          "in_shard_index": 0,
+          "block_index": 7,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_007.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 8,
+      "label": "block_008",
+      "shard_range": {
+        "start": 98,
+        "end_inclusive": 109
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 109,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 109,
+          "in_shard_index": 0,
+          "block_index": 8,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_008.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 9,
+      "label": "block_009",
+      "shard_range": {
+        "start": 110,
+        "end_inclusive": 121
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 121,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 121,
+          "in_shard_index": 0,
+          "block_index": 9,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_009.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 10,
+      "label": "block_010",
+      "shard_range": {
+        "start": 122,
+        "end_inclusive": 133
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 133,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 133,
+          "in_shard_index": 0,
+          "block_index": 10,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_010.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 11,
+      "label": "block_011",
+      "shard_range": {
+        "start": 134,
+        "end_inclusive": 145
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 145,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 145,
+          "in_shard_index": 0,
+          "block_index": 11,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_011.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 12,
+      "label": "block_012",
+      "shard_range": {
+        "start": 146,
+        "end_inclusive": 157
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 157,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 157,
+          "in_shard_index": 0,
+          "block_index": 12,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_012.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 13,
+      "label": "block_013",
+      "shard_range": {
+        "start": 158,
+        "end_inclusive": 169
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 169,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 169,
+          "in_shard_index": 0,
+          "block_index": 13,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_013.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 14,
+      "label": "block_014",
+      "shard_range": {
+        "start": 170,
+        "end_inclusive": 181
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 181,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 181,
+          "in_shard_index": 0,
+          "block_index": 14,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_014.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 15,
+      "label": "block_015",
+      "shard_range": {
+        "start": 182,
+        "end_inclusive": 193
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 193,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 193,
+          "in_shard_index": 0,
+          "block_index": 15,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_015.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 16,
+      "label": "block_016",
+      "shard_range": {
+        "start": 194,
+        "end_inclusive": 205
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 205,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 205,
+          "in_shard_index": 0,
+          "block_index": 16,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_016.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 17,
+      "label": "block_017",
+      "shard_range": {
+        "start": 206,
+        "end_inclusive": 217
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 217,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 217,
+          "in_shard_index": 0,
+          "block_index": 17,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_017.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 18,
+      "label": "block_018",
+      "shard_range": {
+        "start": 218,
+        "end_inclusive": 229
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 229,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 229,
+          "in_shard_index": 0,
+          "block_index": 18,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_018.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 19,
+      "label": "block_019",
+      "shard_range": {
+        "start": 230,
+        "end_inclusive": 241
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 241,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 241,
+          "in_shard_index": 0,
+          "block_index": 19,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_019.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 20,
+      "label": "block_020",
+      "shard_range": {
+        "start": 242,
+        "end_inclusive": 253
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 253,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 253,
+          "in_shard_index": 0,
+          "block_index": 20,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_020.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 21,
+      "label": "block_021",
+      "shard_range": {
+        "start": 254,
+        "end_inclusive": 265
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 265,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 265,
+          "in_shard_index": 0,
+          "block_index": 21,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_021.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 22,
+      "label": "block_022",
+      "shard_range": {
+        "start": 266,
+        "end_inclusive": 277
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 277,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 277,
+          "in_shard_index": 0,
+          "block_index": 22,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_022.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 23,
+      "label": "block_023",
+      "shard_range": {
+        "start": 278,
+        "end_inclusive": 289
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 289,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 289,
+          "in_shard_index": 0,
+          "block_index": 23,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_023.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 24,
+      "label": "block_024",
+      "shard_range": {
+        "start": 290,
+        "end_inclusive": 301
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 301,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 301,
+          "in_shard_index": 0,
+          "block_index": 24,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_024.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 25,
+      "label": "block_025",
+      "shard_range": {
+        "start": 302,
+        "end_inclusive": 313
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 313,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 313,
+          "in_shard_index": 0,
+          "block_index": 25,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_025.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 26,
+      "label": "block_026",
+      "shard_range": {
+        "start": 314,
+        "end_inclusive": 325
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 325,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 325,
+          "in_shard_index": 0,
+          "block_index": 26,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_026.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 27,
+      "label": "block_027",
+      "shard_range": {
+        "start": 326,
+        "end_inclusive": 337
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 337,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 337,
+          "in_shard_index": 0,
+          "block_index": 27,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_027.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 28,
+      "label": "block_028",
+      "shard_range": {
+        "start": 338,
+        "end_inclusive": 349
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 349,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 349,
+          "in_shard_index": 0,
+          "block_index": 28,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_028.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 29,
+      "label": "block_029",
+      "shard_range": {
+        "start": 350,
+        "end_inclusive": 361
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 361,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 361,
+          "in_shard_index": 0,
+          "block_index": 29,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_029.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 30,
+      "label": "block_030",
+      "shard_range": {
+        "start": 362,
+        "end_inclusive": 373
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 373,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 373,
+          "in_shard_index": 0,
+          "block_index": 30,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_030.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 31,
+      "label": "block_031",
+      "shard_range": {
+        "start": 374,
+        "end_inclusive": 385
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 385,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 385,
+          "in_shard_index": 0,
+          "block_index": 31,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_031.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 32,
+      "label": "block_032",
+      "shard_range": {
+        "start": 386,
+        "end_inclusive": 397
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 397,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 397,
+          "in_shard_index": 0,
+          "block_index": 32,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_032.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 33,
+      "label": "block_033",
+      "shard_range": {
+        "start": 398,
+        "end_inclusive": 409
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 409,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 409,
+          "in_shard_index": 0,
+          "block_index": 33,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_033.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 34,
+      "label": "block_034",
+      "shard_range": {
+        "start": 410,
+        "end_inclusive": 421
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 421,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 421,
+          "in_shard_index": 0,
+          "block_index": 34,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_034.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 35,
+      "label": "block_035",
+      "shard_range": {
+        "start": 422,
+        "end_inclusive": 433
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 433,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 433,
+          "in_shard_index": 0,
+          "block_index": 35,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_035.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 36,
+      "label": "block_036",
+      "shard_range": {
+        "start": 434,
+        "end_inclusive": 445
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 445,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 445,
+          "in_shard_index": 0,
+          "block_index": 36,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_036.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 37,
+      "label": "block_037",
+      "shard_range": {
+        "start": 446,
+        "end_inclusive": 457
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 457,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 457,
+          "in_shard_index": 0,
+          "block_index": 37,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_037.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 38,
+      "label": "block_038",
+      "shard_range": {
+        "start": 458,
+        "end_inclusive": 469
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 469,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 469,
+          "in_shard_index": 0,
+          "block_index": 38,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_038.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 39,
+      "label": "block_039",
+      "shard_range": {
+        "start": 470,
+        "end_inclusive": 481
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 481,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 481,
+          "in_shard_index": 0,
+          "block_index": 39,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_039.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 40,
+      "label": "block_040",
+      "shard_range": {
+        "start": 482,
+        "end_inclusive": 493
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 493,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 493,
+          "in_shard_index": 0,
+          "block_index": 40,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_040.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 41,
+      "label": "block_041",
+      "shard_range": {
+        "start": 494,
+        "end_inclusive": 505
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 505,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 505,
+          "in_shard_index": 0,
+          "block_index": 41,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_041.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 42,
+      "label": "block_042",
+      "shard_range": {
+        "start": 506,
+        "end_inclusive": 517
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 517,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 517,
+          "in_shard_index": 0,
+          "block_index": 42,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_042.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 43,
+      "label": "block_043",
+      "shard_range": {
+        "start": 518,
+        "end_inclusive": 529
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 529,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 529,
+          "in_shard_index": 0,
+          "block_index": 43,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_043.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 44,
+      "label": "block_044",
+      "shard_range": {
+        "start": 530,
+        "end_inclusive": 541
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 541,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 541,
+          "in_shard_index": 0,
+          "block_index": 44,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_044.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 45,
+      "label": "block_045",
+      "shard_range": {
+        "start": 542,
+        "end_inclusive": 553
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 553,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 553,
+          "in_shard_index": 0,
+          "block_index": 45,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_045.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 46,
+      "label": "block_046",
+      "shard_range": {
+        "start": 554,
+        "end_inclusive": 565
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 565,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 565,
+          "in_shard_index": 0,
+          "block_index": 46,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_046.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 47,
+      "label": "block_047",
+      "shard_range": {
+        "start": 566,
+        "end_inclusive": 577
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 577,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 577,
+          "in_shard_index": 0,
+          "block_index": 47,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_047.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 48,
+      "label": "block_048",
+      "shard_range": {
+        "start": 578,
+        "end_inclusive": 589
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 589,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 589,
+          "in_shard_index": 0,
+          "block_index": 48,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_048.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 49,
+      "label": "block_049",
+      "shard_range": {
+        "start": 590,
+        "end_inclusive": 601
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 601,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 601,
+          "in_shard_index": 0,
+          "block_index": 49,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_049.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 50,
+      "label": "block_050",
+      "shard_range": {
+        "start": 602,
+        "end_inclusive": 613
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 613,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 613,
+          "in_shard_index": 0,
+          "block_index": 50,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_050.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 51,
+      "label": "block_051",
+      "shard_range": {
+        "start": 614,
+        "end_inclusive": 625
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 625,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 625,
+          "in_shard_index": 0,
+          "block_index": 51,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_051.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 52,
+      "label": "block_052",
+      "shard_range": {
+        "start": 626,
+        "end_inclusive": 637
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 637,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 637,
+          "in_shard_index": 0,
+          "block_index": 52,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_052.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 53,
+      "label": "block_053",
+      "shard_range": {
+        "start": 638,
+        "end_inclusive": 649
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 649,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 649,
+          "in_shard_index": 0,
+          "block_index": 53,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_053.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 54,
+      "label": "block_054",
+      "shard_range": {
+        "start": 650,
+        "end_inclusive": 661
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 661,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 661,
+          "in_shard_index": 0,
+          "block_index": 54,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_054.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 55,
+      "label": "block_055",
+      "shard_range": {
+        "start": 662,
+        "end_inclusive": 673
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 673,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 673,
+          "in_shard_index": 0,
+          "block_index": 55,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_055.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 56,
+      "label": "block_056",
+      "shard_range": {
+        "start": 674,
+        "end_inclusive": 685
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 685,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 685,
+          "in_shard_index": 0,
+          "block_index": 56,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_056.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 57,
+      "label": "block_057",
+      "shard_range": {
+        "start": 686,
+        "end_inclusive": 697
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 697,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 697,
+          "in_shard_index": 0,
+          "block_index": 57,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_057.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 58,
+      "label": "block_058",
+      "shard_range": {
+        "start": 698,
+        "end_inclusive": 709
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 709,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 709,
+          "in_shard_index": 0,
+          "block_index": 58,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_058.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 59,
+      "label": "block_059",
+      "shard_range": {
+        "start": 710,
+        "end_inclusive": 721
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 721,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 721,
+          "in_shard_index": 0,
+          "block_index": 59,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_059.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 60,
+      "label": "block_060",
+      "shard_range": {
+        "start": 722,
+        "end_inclusive": 733
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 733,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 733,
+          "in_shard_index": 0,
+          "block_index": 60,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_060.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 61,
+      "label": "block_061",
+      "shard_range": {
+        "start": 734,
+        "end_inclusive": 745
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 745,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 745,
+          "in_shard_index": 0,
+          "block_index": 61,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_061.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 62,
+      "label": "block_062",
+      "shard_range": {
+        "start": 746,
+        "end_inclusive": 757
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 757,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 757,
+          "in_shard_index": 0,
+          "block_index": 62,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_062.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    },
+    {
+      "block_index": 63,
+      "label": "block_063",
+      "shard_range": {
+        "start": 758,
+        "end_inclusive": 769
+      },
+      "local_expert_count": 8,
+      "primary_candidate": {
+        "shard_ordinal": 769,
+        "in_shard_index": 0,
+        "block_slot": 11
+      },
+      "candidates": [
+        {
+          "shard_ordinal": 769,
+          "in_shard_index": 0,
+          "block_index": 63,
+          "block_slot": 11,
+          "role": "tensor",
+          "dtype": "f32",
+          "shape": [
+            6144,
+            8
+          ],
+          "kind_label": "router",
+          "orientation": "d_model_to_experts",
+          "expert_axis": 1,
+          "linked_expert_count": 8,
+          "matches_inferred_expert_count": true,
+          "structural_name": "block_063.routing_slot_11",
+          "gate_metrics": {
+            "total_elements": 49152,
+            "total_nbytes": 196608,
+            "input_width": 6144,
+            "output_width": 8,
+            "expert_count": 8,
+            "logits_per_input": 8
+          }
+        }
+      ]
+    }
+  ],
+  "orientation_summaries": [
+    {
+      "orientation": "d_model_to_experts",
+      "count": 64,
+      "observed_shapes": [
+        [
+          6144,
+          8
+        ]
+      ],
+      "observed_blocks": 64
+    }
+  ],
+  "likely_routing_critical_blocks": [
+    {
+      "block_index": 0,
+      "label": "block_000",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 13,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 1,
+      "label": "block_001",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 25,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 2,
+      "label": "block_002",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 37,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 3,
+      "label": "block_003",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 49,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 4,
+      "label": "block_004",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 61,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 5,
+      "label": "block_005",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 73,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 6,
+      "label": "block_006",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 85,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 7,
+      "label": "block_007",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 97,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 8,
+      "label": "block_008",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 109,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 9,
+      "label": "block_009",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 121,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 10,
+      "label": "block_010",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 133,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 11,
+      "label": "block_011",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 145,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 12,
+      "label": "block_012",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 157,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 13,
+      "label": "block_013",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 169,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 14,
+      "label": "block_014",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 181,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 15,
+      "label": "block_015",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 193,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 16,
+      "label": "block_016",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 205,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 17,
+      "label": "block_017",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 217,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 18,
+      "label": "block_018",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 229,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 19,
+      "label": "block_019",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 241,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 20,
+      "label": "block_020",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 253,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 21,
+      "label": "block_021",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 265,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 22,
+      "label": "block_022",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 277,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 23,
+      "label": "block_023",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 289,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 24,
+      "label": "block_024",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 301,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 25,
+      "label": "block_025",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 313,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 26,
+      "label": "block_026",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 325,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 27,
+      "label": "block_027",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 337,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 28,
+      "label": "block_028",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 349,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 29,
+      "label": "block_029",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 361,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 30,
+      "label": "block_030",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 373,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 31,
+      "label": "block_031",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 385,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 32,
+      "label": "block_032",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 397,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 33,
+      "label": "block_033",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 409,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 34,
+      "label": "block_034",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 421,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 35,
+      "label": "block_035",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 433,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 36,
+      "label": "block_036",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 445,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 37,
+      "label": "block_037",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 457,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 38,
+      "label": "block_038",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 469,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 39,
+      "label": "block_039",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 481,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 40,
+      "label": "block_040",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 493,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 41,
+      "label": "block_041",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 505,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 42,
+      "label": "block_042",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 517,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 43,
+      "label": "block_043",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 529,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 44,
+      "label": "block_044",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 541,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 45,
+      "label": "block_045",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 553,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 46,
+      "label": "block_046",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 565,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 47,
+      "label": "block_047",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 577,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 48,
+      "label": "block_048",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 589,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 49,
+      "label": "block_049",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 601,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 50,
+      "label": "block_050",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 613,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 51,
+      "label": "block_051",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 625,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 52,
+      "label": "block_052",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 637,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 53,
+      "label": "block_053",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 649,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 54,
+      "label": "block_054",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 661,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 55,
+      "label": "block_055",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 673,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 56,
+      "label": "block_056",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 685,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 57,
+      "label": "block_057",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 697,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 58,
+      "label": "block_058",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 709,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 59,
+      "label": "block_059",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 721,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 60,
+      "label": "block_060",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 733,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 61,
+      "label": "block_061",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 745,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 62,
+      "label": "block_062",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 757,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    },
+    {
+      "block_index": 63,
+      "label": "block_063",
+      "reason": "contains a primary routing candidate linked to a 8-expert MoE block",
+      "primary_candidate": {
+        "shard_ordinal": 769,
+        "in_shard_index": 0,
+        "block_slot": 11
+      }
+    }
+  ],
+  "grok_layout_notes": [
+    "Primary routing candidates are plain f32 tensors oriented from d_model to expert logits.",
+    "Primary routing candidates occupy a stable block slot (11) across observed blocks.",
+    "Observed primary routing tensors match the Grok-style router shape `(6144, 8)`."
+  ],
+  "anomalies": [],
+  "schema_version": 1
+}

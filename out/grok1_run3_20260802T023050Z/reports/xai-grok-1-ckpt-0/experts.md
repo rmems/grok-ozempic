@@ -1,7 +1,7 @@
 # xai-dissect expert atlas
 
 - **model_family**: `grok-1`
-- **checkpoint**: `grok-1-official/ckpt-0`
+- **checkpoint**: `/home/raulmc/.models/xai-grok-1/ckpt-0`
 - **shards**: 770
 - **relevant_blocks**: 64
 - **expected_experts_per_block**: 8
@@ -75,3 +75,45 @@
 | 61 | 8 | 3 | 0, 1, 2 | expert_slot_00 (8, 6144, 32768)<br>expert_slot_01 (8, 32768, 6144)<br>expert_slot_02 (8, 6144, 32768) |
 | 62 | 8 | 3 | 0, 1, 2 | expert_slot_00 (8, 6144, 32768)<br>expert_slot_01 (8, 32768, 6144)<br>expert_slot_02 (8, 6144, 32768) |
 | 63 | 8 | 3 | 0, 1, 2 | expert_slot_00 (8, 6144, 32768)<br>expert_slot_01 (8, 32768, 6144)<br>expert_slot_02 (8, 6144, 32768) |
+
+## Tensor naming patterns
+
+| Family | Pattern | Projection | Slots | Shapes | Blocks |
+| ------ | ------- | ---------- | ----- | ------ | -----: |
+| expert_slot_00 | `block_{block}.expert_slot_00.expert_{expert}` | gate | 0 | (8, 6144, 32768) | 64 |
+| expert_slot_01 | `block_{block}.expert_slot_01.expert_{expert}` | down | 1 | (8, 32768, 6144) | 64 |
+| expert_slot_02 | `block_{block}.expert_slot_02.expert_{expert}` | up | 2 | (8, 6144, 32768) | 64 |
+
+## Naming consistency checks
+
+| Check | Result | Detail |
+| ----- | ------ | ------ |
+| expert_blocks_present | pass | discovered expert tensors in 64 blocks |
+| expert_count_consistent | pass | expected 8 experts per block |
+| expert_family_count_consistent | pass | expected 3 expert tensor families per block |
+| expert_layout_pattern_consistent | pass | canonical inferred pattern: ["expert_slot_00|gate|int8|(8, 6144, 32768)", "expert_slot_01|down|int8|(8, 32768, 6144)", "expert_slot_02|up|int8|(8, 6144, 32768)"] |
+
+## Missing or irregular expert tensors
+
+None detected.
+
+## Layout anomalies
+
+None detected.
+
+## Naming consistency issues
+
+None detected.
+
+## Exemplar block (`block_000`)
+
+| Expert | Tensor associations |
+| -----: | ------------------- |
+| 0 | `block_000.expert_slot_00.expert_00` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_00` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_00` up `(6144, 32768)` |
+| 1 | `block_000.expert_slot_00.expert_01` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_01` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_01` up `(6144, 32768)` |
+| 2 | `block_000.expert_slot_00.expert_02` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_02` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_02` up `(6144, 32768)` |
+| 3 | `block_000.expert_slot_00.expert_03` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_03` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_03` up `(6144, 32768)` |
+| 4 | `block_000.expert_slot_00.expert_04` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_04` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_04` up `(6144, 32768)` |
+| 5 | `block_000.expert_slot_00.expert_05` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_05` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_05` up `(6144, 32768)` |
+| 6 | `block_000.expert_slot_00.expert_06` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_06` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_06` up `(6144, 32768)` |
+| 7 | `block_000.expert_slot_00.expert_07` gate `(6144, 32768)`<br>`block_000.expert_slot_01.expert_07` down `(32768, 6144)`<br>`block_000.expert_slot_02.expert_07` up `(6144, 32768)` |

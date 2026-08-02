@@ -1,0 +1,1259 @@
+{
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "shard_count": 770,
+  "inferred": {
+    "vocab_size": 131072,
+    "d_model": 6144,
+    "n_experts": 8,
+    "d_ff": 32768,
+    "n_blocks": 64
+  },
+  "total_tensors": 770,
+  "total_nbytes": 318114914304,
+  "blocks": [
+    {
+      "label": "embedding",
+      "block_index": null,
+      "shard_range": {
+        "start": 0,
+        "end_inclusive": 0
+      },
+      "tensor_count": 1,
+      "total_nbytes": 3221225472,
+      "kind_labels": [
+        "token_embedding"
+      ]
+    },
+    {
+      "label": "block_000",
+      "block_index": 0,
+      "shard_range": {
+        "start": 2,
+        "end_inclusive": 13
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_001",
+      "block_index": 1,
+      "shard_range": {
+        "start": 14,
+        "end_inclusive": 25
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_002",
+      "block_index": 2,
+      "shard_range": {
+        "start": 26,
+        "end_inclusive": 37
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_003",
+      "block_index": 3,
+      "shard_range": {
+        "start": 38,
+        "end_inclusive": 49
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_004",
+      "block_index": 4,
+      "shard_range": {
+        "start": 50,
+        "end_inclusive": 61
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_005",
+      "block_index": 5,
+      "shard_range": {
+        "start": 62,
+        "end_inclusive": 73
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_006",
+      "block_index": 6,
+      "shard_range": {
+        "start": 74,
+        "end_inclusive": 85
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_007",
+      "block_index": 7,
+      "shard_range": {
+        "start": 86,
+        "end_inclusive": 97
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_008",
+      "block_index": 8,
+      "shard_range": {
+        "start": 98,
+        "end_inclusive": 109
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_009",
+      "block_index": 9,
+      "shard_range": {
+        "start": 110,
+        "end_inclusive": 121
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_010",
+      "block_index": 10,
+      "shard_range": {
+        "start": 122,
+        "end_inclusive": 133
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_011",
+      "block_index": 11,
+      "shard_range": {
+        "start": 134,
+        "end_inclusive": 145
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_012",
+      "block_index": 12,
+      "shard_range": {
+        "start": 146,
+        "end_inclusive": 157
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_013",
+      "block_index": 13,
+      "shard_range": {
+        "start": 158,
+        "end_inclusive": 169
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_014",
+      "block_index": 14,
+      "shard_range": {
+        "start": 170,
+        "end_inclusive": 181
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_015",
+      "block_index": 15,
+      "shard_range": {
+        "start": 182,
+        "end_inclusive": 193
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_016",
+      "block_index": 16,
+      "shard_range": {
+        "start": 194,
+        "end_inclusive": 205
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_017",
+      "block_index": 17,
+      "shard_range": {
+        "start": 206,
+        "end_inclusive": 217
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_018",
+      "block_index": 18,
+      "shard_range": {
+        "start": 218,
+        "end_inclusive": 229
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_019",
+      "block_index": 19,
+      "shard_range": {
+        "start": 230,
+        "end_inclusive": 241
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_020",
+      "block_index": 20,
+      "shard_range": {
+        "start": 242,
+        "end_inclusive": 253
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_021",
+      "block_index": 21,
+      "shard_range": {
+        "start": 254,
+        "end_inclusive": 265
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_022",
+      "block_index": 22,
+      "shard_range": {
+        "start": 266,
+        "end_inclusive": 277
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_023",
+      "block_index": 23,
+      "shard_range": {
+        "start": 278,
+        "end_inclusive": 289
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_024",
+      "block_index": 24,
+      "shard_range": {
+        "start": 290,
+        "end_inclusive": 301
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_025",
+      "block_index": 25,
+      "shard_range": {
+        "start": 302,
+        "end_inclusive": 313
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_026",
+      "block_index": 26,
+      "shard_range": {
+        "start": 314,
+        "end_inclusive": 325
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_027",
+      "block_index": 27,
+      "shard_range": {
+        "start": 326,
+        "end_inclusive": 337
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_028",
+      "block_index": 28,
+      "shard_range": {
+        "start": 338,
+        "end_inclusive": 349
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_029",
+      "block_index": 29,
+      "shard_range": {
+        "start": 350,
+        "end_inclusive": 361
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_030",
+      "block_index": 30,
+      "shard_range": {
+        "start": 362,
+        "end_inclusive": 373
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_031",
+      "block_index": 31,
+      "shard_range": {
+        "start": 374,
+        "end_inclusive": 385
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_032",
+      "block_index": 32,
+      "shard_range": {
+        "start": 386,
+        "end_inclusive": 397
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_033",
+      "block_index": 33,
+      "shard_range": {
+        "start": 398,
+        "end_inclusive": 409
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_034",
+      "block_index": 34,
+      "shard_range": {
+        "start": 410,
+        "end_inclusive": 421
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_035",
+      "block_index": 35,
+      "shard_range": {
+        "start": 422,
+        "end_inclusive": 433
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_036",
+      "block_index": 36,
+      "shard_range": {
+        "start": 434,
+        "end_inclusive": 445
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_037",
+      "block_index": 37,
+      "shard_range": {
+        "start": 446,
+        "end_inclusive": 457
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_038",
+      "block_index": 38,
+      "shard_range": {
+        "start": 458,
+        "end_inclusive": 469
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_039",
+      "block_index": 39,
+      "shard_range": {
+        "start": 470,
+        "end_inclusive": 481
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_040",
+      "block_index": 40,
+      "shard_range": {
+        "start": 482,
+        "end_inclusive": 493
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_041",
+      "block_index": 41,
+      "shard_range": {
+        "start": 494,
+        "end_inclusive": 505
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_042",
+      "block_index": 42,
+      "shard_range": {
+        "start": 506,
+        "end_inclusive": 517
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_043",
+      "block_index": 43,
+      "shard_range": {
+        "start": 518,
+        "end_inclusive": 529
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_044",
+      "block_index": 44,
+      "shard_range": {
+        "start": 530,
+        "end_inclusive": 541
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_045",
+      "block_index": 45,
+      "shard_range": {
+        "start": 542,
+        "end_inclusive": 553
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_046",
+      "block_index": 46,
+      "shard_range": {
+        "start": 554,
+        "end_inclusive": 565
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_047",
+      "block_index": 47,
+      "shard_range": {
+        "start": 566,
+        "end_inclusive": 577
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_048",
+      "block_index": 48,
+      "shard_range": {
+        "start": 578,
+        "end_inclusive": 589
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_049",
+      "block_index": 49,
+      "shard_range": {
+        "start": 590,
+        "end_inclusive": 601
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_050",
+      "block_index": 50,
+      "shard_range": {
+        "start": 602,
+        "end_inclusive": 613
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_051",
+      "block_index": 51,
+      "shard_range": {
+        "start": 614,
+        "end_inclusive": 625
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_052",
+      "block_index": 52,
+      "shard_range": {
+        "start": 626,
+        "end_inclusive": 637
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_053",
+      "block_index": 53,
+      "shard_range": {
+        "start": 638,
+        "end_inclusive": 649
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_054",
+      "block_index": 54,
+      "shard_range": {
+        "start": 650,
+        "end_inclusive": 661
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_055",
+      "block_index": 55,
+      "shard_range": {
+        "start": 662,
+        "end_inclusive": 673
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_056",
+      "block_index": 56,
+      "shard_range": {
+        "start": 674,
+        "end_inclusive": 685
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_057",
+      "block_index": 57,
+      "shard_range": {
+        "start": 686,
+        "end_inclusive": 697
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_058",
+      "block_index": 58,
+      "shard_range": {
+        "start": 698,
+        "end_inclusive": 709
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_059",
+      "block_index": 59,
+      "shard_range": {
+        "start": 710,
+        "end_inclusive": 721
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_060",
+      "block_index": 60,
+      "shard_range": {
+        "start": 722,
+        "end_inclusive": 733
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_061",
+      "block_index": 61,
+      "shard_range": {
+        "start": 734,
+        "end_inclusive": 745
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_062",
+      "block_index": 62,
+      "shard_range": {
+        "start": 746,
+        "end_inclusive": 757
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "block_063",
+      "block_index": 63,
+      "shard_range": {
+        "start": 758,
+        "end_inclusive": 769
+      },
+      "tensor_count": 12,
+      "total_nbytes": 4920213504,
+      "kind_labels": [
+        "attn_proj_i8.model_width",
+        "attn_proj_i8.narrow",
+        "block_norm",
+        "moe_expert.down",
+        "moe_expert.gate",
+        "moe_expert.up",
+        "router"
+      ]
+    },
+    {
+      "label": "final_norm",
+      "block_index": null,
+      "shard_range": {
+        "start": 1,
+        "end_inclusive": 1
+      },
+      "tensor_count": 1,
+      "total_nbytes": 24576,
+      "kind_labels": [
+        "final_norm"
+      ]
+    }
+  ],
+  "schema_version": 2
+}

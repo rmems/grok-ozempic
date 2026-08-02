@@ -1,0 +1,30 @@
+{
+  "analysis": "saaq-readiness",
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "checkpoint_slug": "xai-grok-1-ckpt-0",
+  "headline": "448 SAAQ candidates ranked",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "candidate_targets",
+      "detail": "448 candidate targets, 64 routing-critical tensors"
+    },
+    {
+      "severity": "info",
+      "category": "layer_readiness",
+      "detail": "65 layer readiness rows"
+    },
+    {
+      "severity": "info",
+      "category": "top_candidate",
+      "detail": "top candidate block_030.slot_01.moe_expert.down with readiness 0.188 and risk 0.156"
+    },
+    {
+      "severity": "warning",
+      "category": "highest_risk",
+      "detail": "highest-risk tensor block_063.slot_11.router at 0.727"
+    }
+  ],
+  "schema_version": 2
+}

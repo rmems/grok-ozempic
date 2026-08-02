@@ -1,0 +1,25 @@
+{
+  "analysis": "inventory",
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "checkpoint_slug": "xai-grok-1-ckpt-0",
+  "headline": "770 tensors across 770 shards",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "checkpoint_scale",
+      "detail": "770 shards, 770 tensors, 318114914304 bytes"
+    },
+    {
+      "severity": "info",
+      "category": "block_structure",
+      "detail": "66 block summaries, inferred d_model 6144, inferred experts 8"
+    },
+    {
+      "severity": "info",
+      "category": "quantization_layout",
+      "detail": "448 quantized tensors alongside 322 f32 tensors"
+    }
+  ],
+  "schema_version": 2
+}

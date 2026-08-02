@@ -1,0 +1,20 @@
+{
+  "analysis": "experts",
+  "model_family": "grok-1",
+  "checkpoint_path": "/home/raulmc/.models/xai-grok-1/ckpt-0",
+  "checkpoint_slug": "xai-grok-1-ckpt-0",
+  "headline": "64 relevant expert blocks",
+  "findings": [
+    {
+      "severity": "info",
+      "category": "expert_blocks",
+      "detail": "64 relevant blocks, expected experts per block 8"
+    },
+    {
+      "severity": "info",
+      "category": "expert_count_consistency",
+      "detail": "expert count is structurally consistent at 8"
+    }
+  ],
+  "schema_version": 1
+}

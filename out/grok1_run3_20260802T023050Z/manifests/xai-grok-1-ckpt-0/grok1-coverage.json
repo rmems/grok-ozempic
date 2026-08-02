@@ -1,0 +1,23 @@
+{
+  "model_family": "grok-1",
+  "baseline_profile": "grok1-map-v1-clean",
+  "schema_version": 2,
+  "coverage_schema_version": 2,
+  "validation": "pass",
+  "checksum": "fnv1a64:de5a1c978121c62c",
+  "expected": {
+    "blocks": 64,
+    "tensors": 770,
+    "routers": 64,
+    "expert_families": 192,
+    "unknown_tensors": 0
+  },
+  "discovered": {
+    "blocks": 64,
+    "tensors": 770,
+    "routers": 64,
+    "expert_families": 192,
+    "unknown_tensors": 0
+  },
+  "unknown_slots": []
+}
