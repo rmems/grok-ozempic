@@ -93,8 +93,8 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 ### Critical pipeline facts
 
 1. Official Grok-1 pickle shards are **not** accepted by `quantize-goz1` — export npy first.
-2. Runtime V2 structural manifests are **rejected** in `resolve_manifest` until **#40 / RM-191**.
-3. Use `dissect/grok-1/baseline.json` for real packs today; structural-manifest is alignment/dry-run.
+2. Runtime V2 structural manifests are **accepted** in `resolve_manifest` (**#40 / RM-191**); V2 requires structural-named inputs and hard-errors on any unmatched tensor (no defaults fallthrough).
+3. Prefer `dissect/grok-1/structural-manifest.json` for real packs when inputs are structural-named (export-script npy stems); `baseline.json` (V1) remains for legacy `blk.*` names. Authoritative structural names: `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/`.
 4. Preserve > fp16 > ternary_candidates > defaults — a name mismatch that ternary-quantizes routers/norms is a classification bug (fix the matcher; do not paper over with defaults).
 
 ### Open critical path

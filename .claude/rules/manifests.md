@@ -4,10 +4,10 @@
 
 | File | Convention | Runtime `quantize-goz1` / `stream::resolve_manifest` |
 |------|------------|------------------------------------------------------|
-| `dissect/grok-1/baseline.json` | V1 | **Accepted** today |
-| `dissect/grok-1/structural-manifest.json` | V2 `block_{NNN}.slot_{SS}.{kind}` | **Rejected** until #40 |
+| `dissect/grok-1/baseline.json` | V1 | **Accepted** (defaults fallthrough allowed) |
+| `dissect/grok-1/structural-manifest.json` | V2 `block_{NNN}.slot_{SS}.{kind}` | **Accepted** (#40 / RM-191) — fail-closed |
 
-V2 is valid for **alignment / dry-run** (`src/core/alignment.rs`, embedded structural fixture). `stream::resolve_manifest` hard-errors on `MANIFEST_NAME_CONVENTION_V2` until checkpoint↔structural name translation (or structural-named inputs) is wired — GitHub **#40** / Linear **RM-191**.
+V2 requires **structural-named inputs** (export-script npy stems, `__` → `.`). Under a V2 manifest, a tensor matching no explicit rule is a **hard error** (`ManifestV2UnmatchedTensor`) — never a `defaults` fallthrough. That is the #40 guarantee: routers/norms cannot be silently ternary-quantized by a name-convention mismatch. V2 also remains valid for **alignment / dry-run** (`src/core/alignment.rs`, embedded structural fixture).
 
 ## Classification order
 
@@ -23,7 +23,7 @@ Example of a **real** V1 vs V2 string mismatch (router preserve):
 | V1 baseline preserve (different convention) | `blk.*.moe_gate.weight` / `blk.*.expert_router.weight` |
 | NPY file → logical name | stem `embedding__slot_00__token_embedding` → logical `embedding.slot_00.token_embedding` (`__` → `.`); that logical name **is** a V2 ternary candidate, not a preserve mismatch |
 
-If the stream classifies checkpoint/logical names against the wrong convention’s rule list, preserve entries never match → default `ternary_snn` wins incorrectly. That is what #40’s name bridge must prevent.
+If the stream classifies checkpoint/logical names against the wrong convention’s rule list, preserve entries never match. Under V1 that silently defaults to `ternary_snn`; under V2 the run **aborts** on the first unmatched tensor (`ManifestV2UnmatchedTensor`) — the #40 name-bridge guarantee.
 
 ## Authority
 
