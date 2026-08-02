@@ -303,6 +303,32 @@ def _print_human(result: dict) -> None:
         _print_ternary_human(t)
 
 
+def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:
+    """True if --json-out would overwrite the input pack (path or same inode)."""
+    out_path = json_out.expanduser()
+    out_resolved = out_path.resolve()
+    if out_resolved == pack_path:
+        return True
+    if not out_path.exists():
+        return False
+    try:
+        return out_resolved.samefile(pack_path)
+    except OSError:
+        return False
+
+
+def _emit_result(result: dict, *, as_json: bool, json_out: Path | None) -> None:
+    if json_out is not None:
+        json_out.expanduser().write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
+    if as_json:
+        json.dump(result, sys.stdout, indent=2)
+        print()
+    else:
+        _print_human(result)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("pack", type=Path, help="path to .goz1 file")
@@ -315,34 +341,18 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
     try:
         pack_path = args.pack.expanduser().resolve()
-        if args.json_out is not None:
-            # Reject same path / same inode (hard links, symlinks to the pack).
-            out_path = args.json_out.expanduser()
-            out_resolved = out_path.resolve()
-            same = out_resolved == pack_path
-            if not same and out_path.exists():
-                try:
-                    same = out_resolved.samefile(pack_path)
-                except OSError:
-                    same = False
-            if same:
-                raise Goz1Error(
-                    f"--json-out {args.json_out} resolves to the input pack; "
-                    "refusing to overwrite the GOZ1 artifact"
-                )
+        if args.json_out is not None and _json_out_conflicts_with_pack(
+            args.json_out, pack_path
+        ):
+            raise Goz1Error(
+                f"--json-out {args.json_out} resolves to the input pack; "
+                "refusing to overwrite the GOZ1 artifact"
+            )
         result = analyze(pack_path)
     except (OSError, Goz1Error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    if args.json_out is not None:
-        args.json_out.expanduser().write_text(
-            json.dumps(result, indent=2) + "\n", encoding="utf-8"
-        )
-    if args.json:
-        json.dump(result, sys.stdout, indent=2)
-        print()
-    else:
-        _print_human(result)
+    _emit_result(result, as_json=args.json, json_out=args.json_out)
     return 0
 
 
