@@ -91,8 +91,39 @@ for TAU in $TAUS; do
     --gif-threshold "$TAU" \
     --verify 2>&1 | tee "$LOG"
   # One pack analysis: JSON artifact + human summary (no double full-file scan).
+  HIST_JSON="$ART/logs/tau-${TAU}.hist.json"
   python3 "$REPO/scripts/goz1_trit_histogram.py" "$OUT" \
-    --json-out "$ART/logs/tau-${TAU}.hist.json" | tee -a "$LOG"
+    --json-out "$HIST_JSON" | tee -a "$LOG"
+
+  # Enforce τ fidelity: pack metadata must match CLI TAU; no invalid trit codes.
+  python3 - "$HIST_JSON" "$TAU" <<'PYEOF' | tee -a "$LOG"
+import json, sys
+path, tau_s = sys.argv[1], sys.argv[2]
+want = float(tau_s)
+with open(path) as f:
+    hist = json.load(f)
+raw = hist.get("metadata", {}).get("oz.gif_threshold")
+if raw is None:
+    print(f"error: pack missing oz.gif_threshold metadata (wanted gif_threshold={want})", file=sys.stderr)
+    sys.exit(1)
+got = float(raw)
+if abs(got - want) > 1e-9:
+    print(
+        f"error: effective oz.gif_threshold={got} != requested TAU={want} "
+        f"(manifest default may have overridden CLI)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+for t in hist.get("tensors", []):
+    if t.get("type") != "ternary":
+        continue
+    inv = int(t.get("histogram", {}).get("invalid", 0))
+    if inv:
+        print(f"error: tensor {t['name']} has {inv} invalid trit codes", file=sys.stderr)
+        sys.exit(1)
+    zeros_pct = 100.0 * t["histogram"]["zeros"] / t["num_elements"] if t["num_elements"] else 0.0
+    print(f"  ok: oz.gif_threshold={got} matches TAU={want}; zeros%={zeros_pct:.4f}")
+PYEOF
 done
 
 echo "== done; packs + logs under $ART"

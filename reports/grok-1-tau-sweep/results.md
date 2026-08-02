@@ -107,6 +107,8 @@ from `baseline.json` at runtime; nothing under `dissect/` is modified
 (xai-dissect stays authoritative).
 **Always check `oz.gif_threshold` in the pack metadata** — it records the
 effective baseline multiplier, which is how you catch this trap after the fact.
+The sweep driver (`scripts/tau_sweep_embedding.sh`) **fails the run** if pack
+metadata does not match the requested TAU or if any invalid trit codes appear.
 
 ## Second tensor family: blocked-by-export (evidence)
 
