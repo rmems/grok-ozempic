@@ -66,17 +66,28 @@ if [ "${#NPYS[@]}" -ne 1 ] ||
   exit 1
 fi
 
-# Sweep manifest = baseline.json minus defaults.gif_threshold (CLI controls τ).
+# Sweep manifest: strip every gif_threshold so CLI --gif-threshold wins.
+# resolve_threshold precedence is per-tensor candidate > defaults > config;
+# oz.gif_threshold metadata only records defaults||config, so per-tensor
+# overrides would silently beat CLI and still pass the fidelity check.
 MANI="$WORK/sweep-manifest.json"
 python3 - "$REPO/dissect/grok-1/baseline.json" "$MANI" <<'PYEOF'
 import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 with open(src) as f:
     m = json.load(f)
-m["defaults"].pop("gif_threshold", None)
+m.setdefault("defaults", {}).pop("gif_threshold", None)
+stripped = 0
+for entry in m.get("ternary_candidates") or []:
+    if isinstance(entry, dict) and "gif_threshold" in entry:
+        entry.pop("gif_threshold", None)
+        stripped += 1
 with open(dst, "w") as f:
     json.dump(m, f, indent=2)
-print(f"sweep manifest -> {dst} (defaults: {m['defaults']})")
+print(
+    f"sweep manifest -> {dst} "
+    f"(defaults: {m.get('defaults')}; stripped {stripped} per-tensor gif_threshold)"
+)
 PYEOF
 
 for TAU in $TAUS; do
@@ -95,22 +106,23 @@ for TAU in $TAUS; do
   python3 "$REPO/scripts/goz1_trit_histogram.py" "$OUT" \
     --json-out "$HIST_JSON" | tee -a "$LOG"
 
-  # Enforce τ fidelity: pack metadata must match CLI TAU; no invalid trit codes.
+  # Enforce τ fidelity: pack metadata must match CLI TAU (f32); no invalid trits.
   python3 - "$HIST_JSON" "$TAU" <<'PYEOF' | tee -a "$LOG"
-import json, sys
+import json, struct, sys
 path, tau_s = sys.argv[1], sys.argv[2]
-want = float(tau_s)
+# CLI parses --gif-threshold as f32; metadata serializes that f32.
+want = struct.unpack("<f", struct.pack("<f", float(tau_s)))[0]
 with open(path) as f:
     hist = json.load(f)
 raw = hist.get("metadata", {}).get("oz.gif_threshold")
 if raw is None:
     print(f"error: pack missing oz.gif_threshold metadata (wanted gif_threshold={want})", file=sys.stderr)
     sys.exit(1)
-got = float(raw)
-if abs(got - want) > 1e-9:
+got = struct.unpack("<f", struct.pack("<f", float(raw)))[0]
+if got != want:
     print(
         f"error: effective oz.gif_threshold={got} != requested TAU={want} "
-        f"(manifest default may have overridden CLI)",
+        f"(manifest default/per-tensor may have overridden CLI)",
         file=sys.stderr,
     )
     sys.exit(1)

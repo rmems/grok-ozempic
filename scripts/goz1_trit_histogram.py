@@ -195,6 +195,45 @@ def _type_name(tensor_type: int, name: str) -> str:
     )
 
 
+def _payload_nbytes(tensor_type: int, n_elements: int, name: str) -> int:
+    if tensor_type == TENSOR_TERNARY:
+        return (n_elements + 3) // 4
+    if tensor_type == TENSOR_F16:
+        return n_elements * 2
+    raise Goz1Error(
+        f"unsupported tensor_type {tensor_type} for {name} "
+        f"(expected {TENSOR_F16}=f16 or {TENSOR_TERNARY}=ternary)"
+    )
+
+
+def _validate_tensor_layout(
+    tensors: list[dict], data_start: int, file_size: int
+) -> None:
+    """Match weight_pack_read::verify_pack_file cumulative offsets + bounds."""
+    expected_rel = 0
+    for i, t in enumerate(tensors):
+        name = t["name"]
+        off = t["data_offset"]
+        if off != expected_rel:
+            raise Goz1Error(
+                f"tensor {i} ({name}) data_offset {off} != expected cumulative {expected_rel}"
+            )
+        n = _num_elements(t["shape"])
+        nbytes = _payload_nbytes(t["tensor_type"], n, name)
+        abs_off = data_start + off
+        end = abs_off + nbytes
+        if end > file_size:
+            raise Goz1Error(
+                f"tensor {i} ({name}) blob end {end} exceeds file size {file_size}"
+            )
+        expected_rel = _align_up(expected_rel + nbytes, DATA_ALIGNMENT)
+    if data_start + expected_rel > file_size:
+        raise Goz1Error(
+            f"declared tensor payloads need {expected_rel} bytes past data start; "
+            f"file has {file_size - data_start}"
+        )
+
+
 def _analyze_ternary(f, abs_offset: int, name: str, n: int) -> dict[str, object]:
     hist = histogram_ternary(f, abs_offset, n)
     total = hist["zeros"] + hist["pos"] + hist["neg"] + hist["invalid"]
@@ -207,8 +246,10 @@ def _analyze_ternary(f, abs_offset: int, name: str, n: int) -> dict[str, object]
 
 
 def analyze(path: Path) -> dict:
+    file_size = path.stat().st_size
     with path.open("rb") as f:
         version, metadata, tensors, data_start = read_header(f)
+        _validate_tensor_layout(tensors, data_start, file_size)
         out_tensors = []
         for t in tensors:
             n = _num_elements(t["shape"])
@@ -225,7 +266,7 @@ def analyze(path: Path) -> dict:
             out_tensors.append(entry)
     return {
         "file": str(path),
-        "file_size": path.stat().st_size,
+        "file_size": file_size,
         "version": version,
         "metadata": metadata,
         "tensors": out_tensors,
@@ -273,12 +314,30 @@ def main(argv: list[str]) -> int:
     )
     args = ap.parse_args(argv)
     try:
-        result = analyze(args.pack)
+        pack_path = args.pack.expanduser().resolve()
+        if args.json_out is not None:
+            # Reject same path / same inode (hard links, symlinks to the pack).
+            out_path = args.json_out.expanduser()
+            out_resolved = out_path.resolve()
+            same = out_resolved == pack_path
+            if not same and out_path.exists():
+                try:
+                    same = out_resolved.samefile(pack_path)
+                except OSError:
+                    same = False
+            if same:
+                raise Goz1Error(
+                    f"--json-out {args.json_out} resolves to the input pack; "
+                    "refusing to overwrite the GOZ1 artifact"
+                )
+        result = analyze(pack_path)
     except (OSError, Goz1Error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if args.json_out is not None:
-        args.json_out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        args.json_out.expanduser().write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
     if args.json:
         json.dump(result, sys.stdout, indent=2)
         print()

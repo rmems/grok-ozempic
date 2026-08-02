@@ -100,15 +100,16 @@ quantize-goz1 --manifest dissect/grok-1/baseline.json --gif-threshold 0.5 ...
 → oz.gif_threshold = 0.05        # pack metadata records what actually applied
 ```
 
-**Rule for sweeps:** use a manifest without `defaults.gif_threshold` (then the
-CLI flag controls the multiplier), or bake the per-run value into `defaults`.
-The driver script (`scripts/tau_sweep_embedding.sh`) derives such a manifest
-from `baseline.json` at runtime; nothing under `dissect/` is modified
-(xai-dissect stays authoritative).
+**Rule for sweeps:** strip **both** `defaults.gif_threshold` **and** any
+`ternary_candidates[].gif_threshold` (per-tensor wins over defaults and CLI;
+`oz.gif_threshold` metadata only records defaults||config, so it cannot detect
+per-tensor overrides). The driver derives such a manifest from `baseline.json`
+at runtime; nothing under `dissect/` is modified (xai-dissect stays authoritative).
 **Always check `oz.gif_threshold` in the pack metadata** — it records the
-effective baseline multiplier, which is how you catch this trap after the fact.
+effective baseline multiplier for the defaults/CLI path.
 The sweep driver (`scripts/tau_sweep_embedding.sh`) **fails the run** if pack
-metadata does not match the requested TAU or if any invalid trit codes appear.
+metadata does not match the requested TAU (compared at CLI `f32` precision) or
+if any invalid trit codes appear.
 
 ## Second tensor family: blocked-by-export (evidence)
 
