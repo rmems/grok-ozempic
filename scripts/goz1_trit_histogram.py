@@ -131,6 +131,35 @@ def _num_elements(shape: list[int]) -> int:
     return n
 
 
+def _apply_lut_counts(
+    chunk: bytes, zeros: int, pos: int, neg: int, invalid: int
+) -> tuple[int, int, int, int]:
+    """Accumulate trit totals for full payload bytes via the 4-trit LUT."""
+    for value, count in Counter(chunk).items():
+        z, p, m, bad = _LUT[value]
+        zeros += z * count
+        pos += p * count
+        neg += m * count
+        invalid += bad * count
+    return zeros, pos, neg, invalid
+
+
+def _count_trailing_trits(last_byte: int, n_trits: int) -> tuple[int, int, int, int]:
+    """Decode the final partial byte (1–3 LSB-first trits); ignore pad bits."""
+    zeros = pos = neg = invalid = 0
+    for i in range(n_trits):
+        t = (last_byte >> (2 * i)) & 0b11
+        if t == 0b00:
+            zeros += 1
+        elif t == 0b01:
+            pos += 1
+        elif t == 0b10:
+            neg += 1
+        else:
+            invalid += 1
+    return zeros, pos, neg, invalid
+
+
 def histogram_ternary(f, abs_offset: int, n_elements: int) -> dict[str, int]:
     """Count trits for one ternary blob of ``n_elements`` values."""
     nbytes = (n_elements + 3) // 4
@@ -138,31 +167,43 @@ def histogram_ternary(f, abs_offset: int, n_elements: int) -> dict[str, int]:
     zeros = pos = neg = invalid = 0
     remaining = nbytes
     last_byte: int | None = None
+    pad = n_elements % 4
     while remaining > 0:
         chunk = _read_exact(f, min(CHUNK, remaining))
         remaining -= len(chunk)
-        if remaining == 0 and n_elements % 4 != 0:
+        if remaining == 0 and pad != 0:
             last_byte = chunk[-1]
             chunk = chunk[:-1]
-        # Single-pass byte frequencies (avoids re-scanning the chunk per unique value).
-        for value, count in Counter(chunk).items():
-            z, p, m, bad = _LUT[value]
-            zeros += z * count
-            pos += p * count
-            neg += m * count
-            invalid += bad * count
+        zeros, pos, neg, invalid = _apply_lut_counts(chunk, zeros, pos, neg, invalid)
     if last_byte is not None:
-        for i in range(n_elements % 4):
-            t = (last_byte >> (2 * i)) & 0b11
-            if t == 0b00:
-                zeros += 1
-            elif t == 0b01:
-                pos += 1
-            elif t == 0b10:
-                neg += 1
-            else:
-                invalid += 1
+        z, p, m, bad = _count_trailing_trits(last_byte, pad)
+        zeros += z
+        pos += p
+        neg += m
+        invalid += bad
     return {"zeros": zeros, "pos": pos, "neg": neg, "invalid": invalid}
+
+
+def _type_name(tensor_type: int, name: str) -> str:
+    if tensor_type == TENSOR_TERNARY:
+        return "ternary"
+    if tensor_type == TENSOR_F16:
+        return "f16"
+    raise Goz1Error(
+        f"unsupported tensor_type {tensor_type} for {name} "
+        f"(expected {TENSOR_F16}=f16 or {TENSOR_TERNARY}=ternary)"
+    )
+
+
+def _analyze_ternary(f, abs_offset: int, name: str, n: int) -> dict[str, object]:
+    hist = histogram_ternary(f, abs_offset, n)
+    total = hist["zeros"] + hist["pos"] + hist["neg"] + hist["invalid"]
+    if total != n:
+        raise Goz1Error(f"trit count {total} != num_elements {n} for {name}")
+    return {
+        "histogram": hist,
+        "sparsity": hist["zeros"] / n if n else 1.0,
+    }
 
 
 def analyze(path: Path) -> dict:
@@ -171,31 +212,16 @@ def analyze(path: Path) -> dict:
         out_tensors = []
         for t in tensors:
             n = _num_elements(t["shape"])
-            tt = t["tensor_type"]
-            if tt == TENSOR_TERNARY:
-                type_name = "ternary"
-            elif tt == TENSOR_F16:
-                type_name = "f16"
-            else:
-                raise Goz1Error(
-                    f"unsupported tensor_type {tt} for {t['name']} "
-                    f"(expected {TENSOR_F16}=f16 or {TENSOR_TERNARY}=ternary)"
-                )
             entry: dict[str, object] = {
                 "name": t["name"],
                 "shape": t["shape"],
                 "num_elements": n,
-                "type": type_name,
+                "type": _type_name(t["tensor_type"], t["name"]),
             }
-            if tt == TENSOR_TERNARY:
-                hist = histogram_ternary(f, data_start + t["data_offset"], n)
-                total = hist["zeros"] + hist["pos"] + hist["neg"] + hist["invalid"]
-                if total != n:
-                    raise Goz1Error(
-                        f"trit count {total} != num_elements {n} for {t['name']}"
-                    )
-                entry["histogram"] = hist
-                entry["sparsity"] = hist["zeros"] / n if n else 1.0
+            if t["tensor_type"] == TENSOR_TERNARY:
+                entry.update(
+                    _analyze_ternary(f, data_start + t["data_offset"], t["name"], n)
+                )
             out_tensors.append(entry)
     return {
         "file": str(path),
@@ -206,31 +232,34 @@ def analyze(path: Path) -> dict:
     }
 
 
+def _print_ternary_human(t: dict) -> None:
+    shape = "x".join(str(d) for d in t["shape"])
+    h = t["histogram"]
+    n = t["num_elements"]
+    print(f"  {t['name']}  [{shape}]  n={n}")
+    if n == 0:
+        inv = f"  INVALID={h['invalid']}" if h["invalid"] else ""
+        print(f"    empty tensor (zeros=0, +1=0, -1=0); sparsity=1.0 by convention{inv}")
+        return
+    inv = f"  INVALID={h['invalid']}" if h["invalid"] else ""
+    print(
+        f"    zeros={h['zeros']} ({100.0 * h['zeros'] / n:.4f}%)  "
+        f"+1={h['pos']} ({100.0 * h['pos'] / n:.4f}%)  "
+        f"-1={h['neg']} ({100.0 * h['neg'] / n:.4f}%){inv}"
+    )
+
+
 def _print_human(result: dict) -> None:
     print(f"{result['file']}  ({result['file_size']} bytes, version {result['version']})")
     gif = result["metadata"].get("oz.gif_threshold")
     if gif is not None:
         print(f"  oz.gif_threshold = {gif}")
     for t in result["tensors"]:
-        shape = "x".join(str(d) for d in t["shape"])
         if t["type"] != "ternary":
+            shape = "x".join(str(d) for d in t["shape"])
             print(f"  {t['name']}  [{shape}]  f16/preserve (not histogrammed)")
             continue
-        h = t["histogram"]
-        n = t["num_elements"]
-        print(f"  {t['name']}  [{shape}]  n={n}")
-        if n == 0:
-            print(
-                "    empty tensor (zeros=0, +1=0, -1=0); sparsity=1.0 by convention"
-                + (f"  INVALID={h['invalid']}" if h["invalid"] else "")
-            )
-            continue
-        print(
-            f"    zeros={h['zeros']} ({100.0 * h['zeros'] / n:.4f}%)  "
-            f"+1={h['pos']} ({100.0 * h['pos'] / n:.4f}%)  "
-            f"-1={h['neg']} ({100.0 * h['neg'] / n:.4f}%)"
-            + (f"  INVALID={h['invalid']}" if h["invalid"] else "")
-        )
+        _print_ternary_human(t)
 
 
 def main(argv: list[str]) -> int:
