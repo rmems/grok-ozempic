@@ -89,6 +89,18 @@ pub struct DissectManifest {
     pub blocks: Vec<ManifestBlock>,
 }
 
+impl DissectManifest {
+    /// True when this manifest declares the V2 structural naming convention
+    /// ([`MANIFEST_NAME_CONVENTION_V2`], `block_{NNN}.slot_{SS}.{kind}`).
+    ///
+    /// Runtime classification treats V2 manifests fail-closed: a tensor that
+    /// matches no explicit rule is a hard error instead of falling through to
+    /// `defaults` (see `crate::core::stream`).
+    pub fn is_structural_v2(&self) -> bool {
+        self.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2
+    }
+}
+
 /// Model identity carried in the manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestModel {
@@ -176,8 +188,8 @@ pub struct ManifestBlock {
 /// - the JSON is malformed ([`GrokOzempicError::ManifestParse`]),
 /// - `schema_version` is not [`MANIFEST_SCHEMA_VERSION`]
 ///   ([`GrokOzempicError::ManifestSchemaVersion`]),
-/// - `model.tensor_name_convention` is not
-///   [`MANIFEST_NAME_CONVENTION_V1`]
+/// - `model.tensor_name_convention` is neither
+///   [`MANIFEST_NAME_CONVENTION_V1`] nor [`MANIFEST_NAME_CONVENTION_V2`]
 ///   ([`GrokOzempicError::ManifestNameConventionMismatch`]).
 ///
 /// Unknown top-level fields are tolerated.

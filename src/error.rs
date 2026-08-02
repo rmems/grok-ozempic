@@ -46,6 +46,14 @@ pub enum GrokOzempicError {
     #[error("unsupported manifest precision tier: {got:?}")]
     ManifestInvalidPrecision { got: String },
 
+    #[error(
+        "tensor {name:?} matches no rule in the V2 structural manifest; refusing defaults \
+         fallthrough so preserve tensors (routers/norms) cannot be silently ternary-quantized. \
+         Use structural input names (block_{{NNN}}.slot_{{SS}}.{{kind}}, e.g. export-script npy \
+         stems) or supply a V1 manifest for legacy-named inputs"
+    )]
+    ManifestV2UnmatchedTensor { name: String },
+
     #[error("artifact validation error: {0}")]
     ArtifactValidation(String),
 
