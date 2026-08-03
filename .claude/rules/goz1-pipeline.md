@@ -23,18 +23,29 @@ Default stem mapping: `embedding__slot_00__token_embedding.npy` → logical `emb
 
 ## Real pack recipes
 
-**NPY directory** (JAX export path):
+**NPY directory** (JAX export path; stems are structural, so prefer the V2 structural manifest):
 
 ```bash
 cargo run --release --features cli --locked -- quantize-goz1 \
   --input-dir /path/to/npy-dir \
   --output /path/to/out.goz1 \
-  --manifest dissect/grok-1/baseline.json \
+  --manifest dissect/grok-1/structural-manifest.json \
   --input-format npy \
   --verify
 ```
 
-**Safetensors directory** (do not use `--input-format npy`):
+**Safetensors — structural names** (V2):
+
+```bash
+cargo run --release --features cli --locked -- quantize-goz1 \
+  --input-dir /path/to/safetensors-dir \
+  --output /path/to/out.goz1 \
+  --manifest dissect/grok-1/structural-manifest.json \
+  --input-format safetensors \
+  --verify
+```
+
+**Safetensors — legacy `blk.*` names** (V1; do not pair with V2):
 
 ```bash
 cargo run --release --features cli --locked -- quantize-goz1 \
@@ -45,7 +56,7 @@ cargo run --release --features cli --locked -- quantize-goz1 \
   --verify
 ```
 
-Until #40 / RM-191 lands, **runtime** packs use V1 `baseline.json` (default ternary). Prefer `--verify`.
+Since #40 / RM-191, **runtime** packs prefer the V2 `structural-manifest.json` whenever tensor names are structural (`block_{NNN}.slot_{SS}.{kind}`, export-script stems). V2 is fail-closed: an unmatched name hard-errors instead of defaulting to ternary. For legacy `blk.*`-named inputs use V1 `baseline.json` (defaults fallthrough allowed). Prefer `--verify`. Authoritative structural names / planning surface: `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (tests honor `GROK_OZEMPIC_DISSECT_RUN`).
 
 **Evidence sources:**
 

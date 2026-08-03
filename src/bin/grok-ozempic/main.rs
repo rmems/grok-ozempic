@@ -131,7 +131,9 @@ enum Commands {
         #[arg(long)]
         output: PathBuf,
 
-        /// Optional xai-dissect manifest JSON (V1 names for runtime quantize)
+        /// Optional xai-dissect manifest JSON: V1 `blk.*` names or V2 structural
+        /// `block_{NNN}.slot_{SS}.{kind}` names. V2 requires structural-named
+        /// inputs and hard-errors on any unmatched tensor (no defaults fallthrough)
         #[arg(long)]
         manifest: Option<PathBuf>,
 

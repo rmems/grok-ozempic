@@ -5,8 +5,9 @@ analysis produced by the upstream [`xai-dissect`](https://github.com/rmems/xai-d
 repository, without depending on it as a runtime crate.
 
 This document freezes **schema v1**. The loader and runtime resolution path in
-`stream::resolve_manifest` are active; V2 structural naming is still rejected
-for runtime GOZ1 packs until #40 / RM-191.
+`stream::resolve_manifest` are active; V2 structural naming
+(`block_{NNN}.slot_{SS}.{kind}`) is accepted for runtime GOZ1 packs as of
+GitHub #40 / RM-191, with a fail-closed rule for unmatched tensors (see below).
 
 ## Authority and source of truth
 
@@ -29,9 +30,21 @@ Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins)
    automatically just because it exists on disk.
 4. Otherwise `None` → legacy `router_patterns` substring heuristic in selection.
 
-**V2 structural naming** (`block_{NNN}.slot_{SS}.{kind}`) parses for alignment /
-dry-run but is **rejected** by `resolve_manifest` for runtime GOZ1 packs until
-GitHub #40 / RM-191 (checkpoint↔structural name bridge).
+**V2 structural naming** (`block_{NNN}.slot_{SS}.{kind}`) is accepted by
+`resolve_manifest` for runtime GOZ1 packs (GitHub #40 / RM-191). V2 requires
+**structural-named inputs** (e.g. npy stems from
+`scripts/export_grok1_embedding_npy.py`, `__` → `.`): under a V2 manifest a
+tensor that matches **no explicit rule hard-errors**
+(`ManifestV2UnmatchedTensor`) instead of falling through to `defaults` — this
+is what keeps routers/norms from being silently ternary-quantized on a name
+mismatch. V1 manifests keep defaults fallthrough.
+
+The authoritative source of structural names and planning surface is the
+latest xai-dissect run
+(`~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/`,
+override with `GROK_OZEMPIC_DISSECT_RUN`); the in-tree
+`dissect/grok-1/structural-manifest.json` is the non-authoritative policy
+reference consumed by `--manifest`.
 
 ## Manifest precedence over legacy `router_patterns`
 
@@ -122,11 +135,17 @@ Reject with typed errors rather than best-effort parse:
 
 Unknown top-level fields are **tolerated** for forward compatibility.
 
-### Runtime GOZ1 stream (`resolve_manifest`)
+### Runtime GOZ1 stream (V2 fail-closed classification)
 
-Even when a V2 manifest **parses**, `stream::resolve_manifest` **rejects** V2
-for live `quantize-goz1` / `run_quantization` until #40. Alignment and dry-run
-may still load embedded V2 fixtures via other entry points (`alignment.rs`).
+`stream::resolve_manifest` accepts both V1 and V2 manifests (#40 / RM-191).
+Under a **V2** manifest, classification is fail-closed: any input tensor that
+matches no `preserve` / `fp16` / `ternary_candidates` rule aborts the run with
+`GrokOzempicError::ManifestV2UnmatchedTensor` naming the tensor. V2 manifests
+are authored for full explicit coverage, so an unmatched name means the inputs
+do not follow the structural convention (or a rule is missing) — the exact
+scenario that would otherwise ternary-quantize a router/norm via `defaults`.
+Alignment and dry-run continue to load embedded V2 fixtures via their own
+entry points (`alignment.rs`).
 
 ## Versioning
 

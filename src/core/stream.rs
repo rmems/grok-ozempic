@@ -24,9 +24,7 @@ use safetensors::SafeTensors;
 
 use crate::{
     core::{
-        manifest::{
-            DissectManifest, MANIFEST_NAME_CONVENTION_V2, embedded_grok1_baseline, load_manifest,
-        },
+        manifest::{DissectManifest, embedded_grok1_baseline, load_manifest},
         npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
         precision::decide as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
@@ -94,6 +92,21 @@ pub fn append_grok1_arch_metadata(meta: &mut BTreeMap<String, PackMetaValue>) {
 /// is `None`.
 pub const MANIFEST_ENV_VAR: &str = "GROK_OZEMPIC_MANIFEST";
 
+/// Path from `GROK_OZEMPIC_MANIFEST`, or a test-only override.
+///
+/// Under `cfg(test)`, unit tests inject a path (or force unset) via
+/// `test_manifest_env` so they never call process-wide `set_var` /
+/// `remove_var` (unsafe on Unix when other threads may read the env).
+fn manifest_env_path() -> Option<String> {
+    #[cfg(test)]
+    if let Some(forced) = test_manifest_env::current() {
+        return forced;
+    }
+    std::env::var(MANIFEST_ENV_VAR)
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Resolve the xai-dissect manifest that governs this `run_quantization`
 /// call.
 ///
@@ -109,27 +122,11 @@ pub const MANIFEST_ENV_VAR: &str = "GROK_OZEMPIC_MANIFEST";
 ///    [`crate::core::selection::classify`].
 fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifest>> {
     if let Some(path) = &config.manifest_path {
-        let m = load_manifest(path)?;
-        if m.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
-            return Err(GrokOzempicError::ManifestNameConventionMismatch {
-                got: m.model.tensor_name_convention.clone(),
-                expected: "V1 only for runtime quantization (block_{NNN}.slot_{SS}.{kind} / V2 structural naming is accepted only for embedded alignment verification in core/alignment.rs until checkpoint-to-structural name translation is added in npy/stream build_manifest_*; see Codex P1 review on PR #26)".to_string(),
-            });
-        }
-        return Ok(Some(m));
+        return Ok(Some(load_manifest(path)?));
     }
-    if let Ok(env_path) = std::env::var(MANIFEST_ENV_VAR)
-        && !env_path.is_empty()
-    {
+    if let Some(env_path) = manifest_env_path() {
         let p = std::path::PathBuf::from(env_path);
-        let m = load_manifest(&p)?;
-        if m.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
-            return Err(GrokOzempicError::ManifestNameConventionMismatch {
-                got: m.model.tensor_name_convention.clone(),
-                expected: "V1 only for runtime quantization (block_{NNN}.slot_{SS}.{kind} / V2 structural naming is accepted only for embedded alignment verification in core/alignment.rs until checkpoint-to-structural name translation is added in npy/stream build_manifest_*; see Codex P1 review on PR #26)".to_string(),
-            });
-        }
-        return Ok(Some(m));
+        return Ok(Some(load_manifest(&p)?));
     }
     if config.use_embedded_baseline {
         // Embedded baseline: clone once so callers own a DissectManifest.
@@ -137,6 +134,53 @@ fn resolve_manifest(config: &QuantizationConfig) -> Result<Option<DissectManifes
         return Ok(Some(embedded_grok1_baseline()?.clone()));
     }
     Ok(None)
+}
+
+/// Test-only injection for [`manifest_env_path`] — thread-local so parallel
+/// tests do not race and so no process `set_var` is required.
+#[cfg(test)]
+mod test_manifest_env {
+    use std::cell::RefCell;
+
+    thread_local! {
+        /// `None` = use real process env.
+        /// `Some(None)` = force unset.
+        /// `Some(Some(path))` = force this path.
+        static OVERRIDE: RefCell<Option<Option<String>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn current() -> Option<Option<String>> {
+        OVERRIDE.with(|c| c.borrow().clone())
+    }
+
+    /// Restores the previous override on drop (including panic unwind).
+    pub(super) struct Guard {
+        prev: Option<Option<String>>,
+    }
+
+    impl Guard {
+        pub(super) fn set(path: impl Into<String>) -> Self {
+            let path = path.into();
+            let prev = OVERRIDE.with(|c| c.borrow().clone());
+            OVERRIDE.with(|c| *c.borrow_mut() = Some(Some(path)));
+            Self { prev }
+        }
+
+        pub(super) fn unset() -> Self {
+            let prev = OVERRIDE.with(|c| c.borrow().clone());
+            OVERRIDE.with(|c| *c.borrow_mut() = Some(None));
+            Self { prev }
+        }
+    }
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let prev = self.prev.take();
+            // `prev` was `Option<Option<String>>` stored as the cell value;
+            // restore it even when it was `None` (no override).
+            OVERRIDE.with(|c| *c.borrow_mut() = prev);
+        }
+    }
 }
 
 /// Return `true` if a deprecation warning about `router_patterns`
@@ -488,6 +532,16 @@ fn classify_and_decide(
         &config.router_patterns
     };
     let class = classify(name, dissect_manifest, legacy_patterns);
+    // V2 structural manifests are fail-closed: they are authored for full
+    // explicit coverage, so a Default classification means the input name
+    // does not follow the structural convention (or a rule is missing).
+    // Falling through to defaults here is how routers/norms would get
+    // silently ternary-quantized — hard-error instead (GH #40 / RM-191).
+    if matches!(class, TensorClass::Default)
+        && dissect_manifest.is_some_and(|m| m.is_structural_v2())
+    {
+        return Err(GrokOzempicError::ManifestV2UnmatchedTensor { name: name.into() });
+    }
     let (precision, gif_threshold) = precision_decide(&class, dissect_manifest, config)?;
     Ok((class, precision, gif_threshold))
 }
@@ -511,6 +565,11 @@ fn build_manifest_safetensors(
             if dtype == SourceDtype::Other {
                 // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
                 // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
+                // Under V2 still classify the name so fail-closed applies to *all* present tensors
+                // (including unsupported dtypes) before the intentional skip — GH #40 / RM-191.
+                if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+                    let _ = classify_and_decide(&name, dissect_manifest, config)?;
+                }
                 continue;
             }
             let (_class, precision, gif_threshold) =
@@ -537,16 +596,20 @@ fn build_manifest_npy(
     for path in paths {
         let npy = MmapNpy::map_path(path)?;
         let dtype = npy_dtype_to_source(npy.dtype());
-        if dtype == SourceDtype::Other {
-            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
-            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
-            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
-            continue;
-        }
         let stem = path.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
             GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
         })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
+        if dtype == SourceDtype::Other {
+            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
+            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
+            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
+            // Under V2 still classify the name so fail-closed applies before the skip (GH #40 / RM-191).
+            if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+                let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
+            }
+            continue;
+        }
         let (_class, precision, gif_threshold) =
             classify_and_decide(&tensor_name, dissect_manifest, config)?;
         let shape: Vec<u64> = npy.shape().iter().map(|&d| d as u64).collect();
@@ -592,12 +655,6 @@ fn bytemuck_cast_f16(raw: &[u8]) -> &[f16] {
     assert_eq!(raw.len() % 2, 0, "f16 data length must be a multiple of 2");
     unsafe { std::slice::from_raw_parts(raw.as_ptr().cast::<f16>(), raw.len() / 2) }
 }
-
-/// Serialises env-var mutations across tests that touch
-/// `GROK_OZEMPIC_MANIFEST`. Declared at the module level so the
-/// `#[cfg(test)]` test module can refer to it via `super::`.
-#[cfg(test)]
-static ENV_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn bf16_bytes_to_f32(raw: &[u8]) -> Vec<f32> {
     assert_eq!(raw.len() % 2, 0, "bf16 data length must be a multiple of 2");
@@ -659,6 +716,43 @@ mod tests {
         for v in data {
             bytes.extend_from_slice(&v.to_le_bytes());
         }
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(&bytes).unwrap();
+    }
+
+    /// Minimal i8 `.npy` (descr `<i1`) so `SourceDtype::Other` is exercised
+    /// without needing safetensors fixtures.
+    fn write_npy_i8(path: &std::path::Path, shape: &[usize], data: &[i8]) {
+        use std::io::Write as _;
+        let expected: usize = shape.iter().product();
+        assert_eq!(expected, data.len(), "data length must match shape");
+        let shape_str = if shape.is_empty() {
+            "()".to_string()
+        } else if shape.len() == 1 {
+            format!("({},)", shape[0])
+        } else {
+            let inner = shape
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({inner})")
+        };
+        let dict = format!("{{'descr': '<i1', 'fortran_order': False, 'shape': {shape_str}, }}");
+        let magic = b"\x93NUMPY";
+        let preamble_len = magic.len() + 1 + 1 + 2;
+        let raw_header_len = dict.len();
+        let total_unpadded = preamble_len + raw_header_len;
+        let pad = (64 - (total_unpadded % 64)) % 64;
+        let header_len = raw_header_len + pad;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(magic);
+        bytes.push(1);
+        bytes.push(0);
+        bytes.extend_from_slice(&(header_len as u16).to_le_bytes());
+        bytes.extend_from_slice(dict.as_bytes());
+        bytes.extend(std::iter::repeat_n(b' ', pad));
+        bytes.extend(data.iter().map(|&v| v as u8));
         let mut f = std::fs::File::create(path).unwrap();
         f.write_all(&bytes).unwrap();
     }
@@ -811,10 +905,8 @@ mod tests {
     /// byte-identical GOZ1 output.
     #[test]
     fn parity_legacy_vs_baseline_is_byte_identical() {
-        // Hold ENV_TEST_MUTEX so a parallel env-var test cannot leak
-        // GROK_OZEMPIC_MANIFEST into the legacy run below.
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        // Force-unset so a real process env cannot leak into the legacy path.
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("parity-input");
         write_parity_fixture(&dir);
@@ -855,8 +947,7 @@ mod tests {
     /// value of the manifest wiring.
     #[test]
     fn divergence_on_ffn_gate_false_positive() {
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("diverge-input");
         write_parity_fixture(&dir);
@@ -932,22 +1023,22 @@ mod tests {
         let out_a = scratch_dir("prec-out-a").join("a.goz1");
         let out_b = scratch_dir("prec-out-b").join("b.goz1");
 
-        // Serialize env-var mutations for test-safety.
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // SAFETY: mutation guarded by the single-threaded test mutex.
-        unsafe { std::env::set_var(MANIFEST_ENV_VAR, &env_path) };
-
         // A: explicit + env — explicit must win.
-        let mut config = base_config(&dir, &out_a);
-        config.manifest_path = Some(explicit_path.clone());
-        run_quantization(&config).expect("explicit+env run");
+        {
+            let _env = super::test_manifest_env::Guard::set(env_path.to_string_lossy());
+            let mut config = base_config(&dir, &out_a);
+            config.manifest_path = Some(explicit_path.clone());
+            run_quantization(&config).expect("explicit+env run");
+        }
 
         // B: explicit only — same explicit manifest, no env. Should
         // produce identical bytes to A if explicit truly won.
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-        let mut config = base_config(&dir, &out_b);
-        config.manifest_path = Some(explicit_path.clone());
-        run_quantization(&config).expect("explicit only run");
+        {
+            let _env = super::test_manifest_env::Guard::unset();
+            let mut config = base_config(&dir, &out_b);
+            config.manifest_path = Some(explicit_path.clone());
+            run_quantization(&config).expect("explicit only run");
+        }
 
         let a = goz1_bytes(&out_a);
         let b = goz1_bytes(&out_b);
@@ -985,17 +1076,19 @@ mod tests {
         let out_legacy = scratch_dir("env-out-legacy").join("a.goz1");
         let out_env = scratch_dir("env-out-env").join("b.goz1");
 
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        // Legacy run (env var unset).
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
-        let config = base_config(&dir, &out_legacy);
-        run_quantization(&config).expect("legacy run");
+        // Legacy run (env path forced unset).
+        {
+            let _env = super::test_manifest_env::Guard::unset();
+            let config = base_config(&dir, &out_legacy);
+            run_quantization(&config).expect("legacy run");
+        }
 
         // Env-var run.
-        unsafe { std::env::set_var(MANIFEST_ENV_VAR, &env_path) };
-        let config = base_config(&dir, &out_env);
-        run_quantization(&config).expect("env var run");
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        {
+            let _env = super::test_manifest_env::Guard::set(env_path.to_string_lossy());
+            let config = base_config(&dir, &out_env);
+            run_quantization(&config).expect("env var run");
+        }
 
         assert_ne!(
             goz1_bytes(&out_legacy),
@@ -1017,8 +1110,7 @@ mod tests {
     /// silent drift.
     #[test]
     fn preserve_and_fp16_tiers_emit_identical_goz1_bytes() {
-        let _lock = super::ENV_TEST_MUTEX.lock().unwrap();
-        unsafe { std::env::remove_var(MANIFEST_ENV_VAR) };
+        let _env = super::test_manifest_env::Guard::unset();
 
         let dir = scratch_dir("preserve-fp16-input");
         let ffn_up = [0.3f32, -0.3, 0.01, -0.01];
@@ -1085,6 +1177,208 @@ mod tests {
                 a.get(first_diff),
                 b.get(first_diff),
             );
+        }
+    }
+
+    // ---------- V2 structural manifest bridge (GH #40 / RM-191) ----------
+
+    fn in_tree_structural_manifest() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("dissect/grok-1/structural-manifest.json")
+    }
+
+    /// Structural-named npy fixture, one tensor per file so per-file
+    /// `ShardStats` is an exact per-tensor classification oracle.
+    ///
+    /// Expected classes under `dissect/grok-1/structural-manifest.json`:
+    /// - `block_000.slot_11.router`            preserve  → fp16-at-rest
+    /// - `block_000.slot_07.block_norm`        preserve  → fp16-at-rest
+    /// - `block_000.slot_00.moe_expert.gate`   ternary candidate
+    /// - `embedding.slot_00.token_embedding`   ternary candidate
+    fn write_structural_fixture(dir: &std::path::Path) {
+        write_npy_f32(
+            &dir.join("block_000__slot_00__moe_expert__gate.npy"),
+            &[2, 2],
+            &[0.1f32, -0.2, 0.3, -0.4],
+        );
+        write_npy_f32(
+            &dir.join("block_000__slot_07__block_norm.npy"),
+            &[2, 2],
+            &[1.0f32, -1.0, 0.5, -0.5],
+        );
+        write_npy_f32(
+            &dir.join("block_000__slot_11__router.npy"),
+            &[2, 2],
+            &[0.05f32, 0.9, -0.05, -0.9],
+        );
+        write_npy_f32(
+            &dir.join("embedding__slot_00__token_embedding.npy"),
+            &[2, 2],
+            &[0.3f32, -0.3, 0.01, -0.01],
+        );
+    }
+
+    fn assert_structural_fixture_stats(stats: &[ShardStats]) {
+        assert_eq!(stats.len(), 4, "one ShardStats per npy file");
+        for s in stats {
+            let stem = s
+                .shard_path
+                .file_stem()
+                .and_then(|f| f.to_str())
+                .expect("utf-8 stem");
+            let preserved = stem.contains("router") || stem.contains("block_norm");
+            if preserved {
+                assert_eq!(
+                    (s.tensors_fp16, s.tensors_ternary),
+                    (1, 0),
+                    "{stem} must be preserved (fp16-at-rest), not ternary"
+                );
+            } else {
+                assert_eq!(
+                    (s.tensors_ternary, s.tensors_fp16),
+                    (1, 0),
+                    "{stem} must be a ternary candidate"
+                );
+            }
+        }
+    }
+
+    /// End-to-end: the in-tree V2 structural manifest drives a real
+    /// `run_quantization` over structural-named npy inputs — routers and
+    /// norms are preserved, embedding and MoE gate go ternary.
+    #[test]
+    fn v2_structural_manifest_end_to_end_npy() {
+        let dir = scratch_dir("v2-e2e-input");
+        write_structural_fixture(&dir);
+        let out = scratch_dir("v2-e2e-out").join("v2.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let stats = run_quantization(&config).expect("V2 structural manifest must be accepted");
+        assert_structural_fixture_stats(&stats);
+    }
+
+    /// Fail-closed regression for the #40 disaster scenario: legacy-named
+    /// inputs against a V2 structural manifest must hard-error on the
+    /// unmatched tensor instead of silently ternary-quantizing it through
+    /// `defaults.precision`.
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_name() {
+        let dir = scratch_dir("v2-fail-closed-input");
+        write_npy_f32(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[2, 2],
+            &[0.1f32, -0.2, 0.3, -0.4],
+        );
+        let out = scratch_dir("v2-fail-closed-out").join("bad.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("V1-named input under a V2 manifest must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// Unsupported dtypes are skipped by the float stream, but under V2 their
+    /// names must still be classified so a legacy/misspelled stem cannot
+    /// silently disappear past fail-closed (Codex/CodeAnt on PR #55).
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_other_dtype() {
+        let dir = scratch_dir("v2-fail-closed-other-input");
+        write_npy_i8(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[4],
+            &[1i8, -1, 0, 2],
+        );
+        let out = scratch_dir("v2-fail-closed-other-out").join("bad.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("unmatched Other-dtype name under V2 must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// The `GROK_OZEMPIC_MANIFEST` env path accepts V2 structural
+    /// manifests too (same policy as the explicit `manifest_path`).
+    #[test]
+    fn v2_manifest_accepted_via_env_var() {
+        let dir = scratch_dir("v2-env-input");
+        write_structural_fixture(&dir);
+        let out = scratch_dir("v2-env-out").join("v2env.goz1");
+
+        // Thread-local env override — no process set_var (Codacy/CodeRabbit).
+        let _env =
+            super::test_manifest_env::Guard::set(in_tree_structural_manifest().to_string_lossy());
+        let config = base_config(&dir, &out);
+        let stats = run_quantization(&config).expect("V2 manifest via env var must be accepted");
+        assert_structural_fixture_stats(&stats);
+    }
+
+    /// Path-gated oracle against the latest authoritative xai-dissect run:
+    /// every `structural_name` in run3's `conversion-manifest.json` must
+    /// classify to an explicit rule of the in-tree structural manifest
+    /// (routers/norms preserve, everything else ternary, zero Default).
+    ///
+    /// Skips (passes trivially) when the run directory is absent, e.g. CI.
+    /// Override the location with `GROK_OZEMPIC_DISSECT_RUN`.
+    #[test]
+    fn run3_conversion_manifest_names_fully_classified() {
+        let run_dir = std::env::var("GROK_OZEMPIC_DISSECT_RUN")
+            .map(std::path::PathBuf::from)
+            .ok()
+            .or_else(|| {
+                std::env::var("HOME").ok().map(|h| {
+                    std::path::PathBuf::from(h).join(
+                        "rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0",
+                    )
+                })
+            });
+        let Some(conversion) = run_dir.map(|d| d.join("conversion-manifest.json")) else {
+            eprintln!("skip: no GROK_OZEMPIC_DISSECT_RUN and no HOME");
+            return;
+        };
+        if !conversion.is_file() {
+            eprintln!(
+                "skip: {} not present (xai-dissect run not mounted)",
+                conversion.display()
+            );
+            return;
+        }
+
+        let bytes = std::fs::read(&conversion).expect("read conversion manifest");
+        let doc: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("conversion manifest JSON");
+        let tensors = doc["tensors"].as_array().expect("tensors array");
+        assert_eq!(tensors.len(), 770, "run3 must list all 770 tensors");
+
+        let manifest = load_manifest(&in_tree_structural_manifest()).expect("structural manifest");
+        assert!(manifest.is_structural_v2());
+
+        for t in tensors {
+            let name = t["structural_name"].as_str().expect("structural_name");
+            let kind = t["kind"].as_str().expect("kind");
+            let class = classify(name, Some(&manifest), &[]);
+            match kind {
+                "router" | "block_norm" | "final_norm" => assert!(
+                    matches!(class, TensorClass::Preserve { .. }),
+                    "{name} (kind {kind}) must be Preserve, got {class:?}"
+                ),
+                _ => assert!(
+                    matches!(class, TensorClass::TernaryCandidate { .. }),
+                    "{name} (kind {kind}) must be TernaryCandidate, got {class:?}"
+                ),
+            }
         }
     }
 }

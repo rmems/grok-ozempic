@@ -52,7 +52,7 @@ if [ "${#NPYS[@]}" -ne 1 ] || [ "$(basename "${NPYS[0]}")" != "embedding__slot_0
 fi
 ```
 
-## 2. Pack GOZ1 (V1 baseline until #40)
+## 2. Pack GOZ1 (V2 structural manifest since #40)
 
 ```bash
 ART="${ART:-$HOME/.models/xai-grok-1/artifacts}"
@@ -61,7 +61,7 @@ cargo build --release --features cli --locked &&
 "${TIME_V[@]}" ./target/release/grok-ozempic quantize-goz1 \
   --input-dir "$STAGE" \
   --output "$ART/grok1-first-embed.goz1" \
-  --manifest dissect/grok-1/baseline.json \
+  --manifest dissect/grok-1/structural-manifest.json \
   --input-format npy \
   --verify
 # Clean the 3 GiB stage now for persistent shells; the trap remains fail-safe.
@@ -77,4 +77,4 @@ trap - EXIT
 - Stage dir had only the embedding `.npy`
 - Wall / max RSS from `TIME_V`
 
-Do **not** use `structural-manifest.json` for runtime pack until #40 is done.
+`structural-manifest.json` (V2) is the runtime manifest since #40 — the export stem `embedding__slot_00__token_embedding` maps to the structural ternary candidate `embedding.slot_00.token_embedding`. V2 hard-errors on any name it does not match; fall back to V1 `baseline.json` only for legacy `blk.*`-named inputs.

@@ -15,7 +15,7 @@ description: Pack Grok weights into GOZ1 via quantize-goz1 / run_quantization. U
 
 1. **No pickle inputs** to `quantize-goz1` — export with `scripts/export_grok1_embedding_npy.py` first.
 2. Prefer `--input-format npy` for JAX-export paths; safetensors also supported.
-3. Runtime manifest: **`dissect/grok-1/baseline.json`** until #40; structural V2 is alignment-only today.
+3. Runtime manifest: prefer **`dissect/grok-1/structural-manifest.json`** (V2, #40) for structural-named inputs — fail-closed on unmatched names; V1 `baseline.json` for legacy `blk.*` names.
 4. Use `--verify` on real packs.
 5. Cloud VMs lack multi-GiB home checkpoints — code/tests only unless weights are mounted.
 
@@ -32,8 +32,24 @@ description: Pack Grok weights into GOZ1 via quantize-goz1 / run_quantization. U
 
 ## Commands
 
+Pick the manifest that matches the **tensor-name convention** of the inputs.
+V2 is fail-closed (unmatched names hard-error); V1 allows defaults fallthrough.
+
+**Structural-named npy** (export-script stems, `block_*.slot_*.{kind}`):
+
 ```bash
 cargo run --features cli -- quantize-goz1 --help
+cargo run --release --features cli -- quantize-goz1 \
+  --input-dir "$OUT" \
+  --output "$ART/model.goz1" \
+  --manifest dissect/grok-1/structural-manifest.json \
+  --input-format npy \
+  --verify
+```
+
+**Legacy `blk.*` names** (V1 baseline):
+
+```bash
 cargo run --release --features cli -- quantize-goz1 \
   --input-dir "$OUT" \
   --output "$ART/model.goz1" \
