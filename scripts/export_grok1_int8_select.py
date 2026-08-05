@@ -87,15 +87,23 @@ def load_manifest(path: Path) -> list[dict]:
     tensors = doc.get("tensors")
     if not isinstance(tensors, list) or not tensors:
         raise ExportError(f"{path}: no `tensors` array (not an xai-dissect conversion manifest?)")
+    _validate_entries(path, tensors)
+    return tensors
+
+
+_REQUIRED_TENSOR_KEYS = ("structural_name", "source_shard_path", "shape")
+
+
+def _validate_entries(path: Path, tensors: list) -> None:
+    """Reject entries the exporter would otherwise fail on far from the cause."""
     for i, t in enumerate(tensors):
         if not isinstance(t, dict):
             raise ExportError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
-        missing = [k for k in ("structural_name", "source_shard_path", "shape") if k not in t]
+        missing = [k for k in _REQUIRED_TENSOR_KEYS if k not in t]
         if missing:
             raise ExportError(
                 f"{path}: tensors[{i}] missing required key(s): {', '.join(missing)}"
             )
-    return tensors
 
 
 def select_tensors(
