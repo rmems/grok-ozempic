@@ -372,7 +372,11 @@ def measure_routing(
     d_model = router_ref.shape[0]
     norm_name, x = _resolve_activations(npy_dir, preserve, d_model, tokens, seed)
 
-    square = [n for n, e in ternary.items() if list(e["shape"]) == [d_model, d_model]]
+    square = [
+        n
+        for n, e in ternary.items()
+        if tuple(int(d) for d in e["shape"]) == (d_model, d_model)
+    ]
     if not square:
         # A weight-only mode (e.g. expert_only) legitimately has no d_model x
         # d_model projection. Aborting here would discard the weight and

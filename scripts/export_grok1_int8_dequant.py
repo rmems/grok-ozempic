@@ -145,19 +145,30 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".partial")
+    # The header is verified separately; payload must be exactly numel * 4 bytes.
+    expected = int(np.prod(shape, dtype=np.int64)) * 4
+    written = 0
     try:
         with open(tmp, "wb") as fh:
             fh.write(npy_header(tuple(shape)))
             if streaming:
-                fh.writelines(
-                    np.ascontiguousarray(chunk, dtype="<f4").tobytes() for chunk in source
-                )
+                for chunk in source:
+                    data = np.ascontiguousarray(chunk, dtype="<f4").tobytes()
+                    fh.write(data)
+                    written += len(data)
             else:
                 rows = _chunk_rows(chunk_mib, max(1, source[0].nbytes))
-                fh.writelines(
-                    np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
-                    for r0 in range(0, len(source), rows)
-                )
+                for r0 in range(0, len(source), rows):
+                    data = np.ascontiguousarray(
+                        source[r0 : r0 + rows], dtype="<f4"
+                    ).tobytes()
+                    fh.write(data)
+                    written += len(data)
+        if written != expected:
+            raise ExportError(
+                f"{out_path.name}: wrote {written} payload bytes, expected {expected} "
+                f"for shape {shape}; partial .npy not promoted"
+            )
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)

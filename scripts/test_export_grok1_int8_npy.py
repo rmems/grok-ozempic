@@ -7,13 +7,13 @@ frames -- the same shape the official Grok-1 ckpt-0 shards have.
 
 from __future__ import annotations
 
-from typing import ClassVar
-
+import json
 import sys
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 
@@ -414,6 +414,107 @@ class StemTests(unittest.TestCase):
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.structural_stem(bad)
             self.assertIn("colon", str(ctx.exception).lower())
+
+
+class ManifestValidationTests(unittest.TestCase):
+    def _manifest(self, tensors):
+        return json.dumps({"tensors": tensors}).encode("utf-8")
+
+    def test_load_manifest_rejects_non_object_root(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_text("[]")
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("root", str(ctx.exception).lower())
+
+    def test_load_manifest_rejects_missing_required_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest([{"structural_name": "a.b"}]))
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("missing required key", str(ctx.exception).lower())
+
+    def test_load_manifest_rejects_non_string_name(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(
+                self._manifest(
+                    [{"structural_name": 123, "source_shard_path": "s", "shape": [1]}]
+                )
+            )
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("structural_name", str(ctx.exception).lower())
+
+    def test_load_manifest_rejects_non_int_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(
+                self._manifest(
+                    [
+                        {
+                            "structural_name": "a.b",
+                            "source_shard_path": "s",
+                            "shape": ["x"],
+                        }
+                    ]
+                )
+            )
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("shape", str(ctx.exception).lower())
+
+    def test_load_manifest_rejects_duplicate_structural_names(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(
+                self._manifest(
+                    [
+                        {
+                            "structural_name": "a.b",
+                            "source_shard_path": "s1",
+                            "shape": [1],
+                        },
+                        {
+                            "structural_name": "a.b",
+                            "source_shard_path": "s2",
+                            "shape": [1],
+                        },
+                    ]
+                )
+            )
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("duplicate", str(ctx.exception).lower())
+
+
+class RunExportsTests(unittest.TestCase):
+    def test_duplicate_selected_stem_is_rejected(self) -> None:
+        """Two different names mapping to the same stem must not overwrite."""
+        a = np.arange(4, dtype="<f4")
+        b = np.arange(4, dtype="<f4")
+        with tempfile.TemporaryDirectory() as td:
+            shard_a, shard_b = Path(td) / "sa", Path(td) / "sb"
+            _write_shard(shard_a, a)
+            _write_shard(shard_b, b)
+            # structural_stem rejects '__', but a literal duplicate name would.
+            picked = [
+                {
+                    "structural_name": "block_000.slot_00.foo",
+                    "source_shard_path": str(shard_a),
+                    "shape": [4],
+                },
+                {
+                    "structural_name": "block_000.slot_00.foo",
+                    "source_shard_path": str(shard_b),
+                    "shape": [4],
+                },
+            ]
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.run_exports(picked, Path(td), chunk_mib=1, dry_run=False)
+            self.assertIn("duplicate output stem", str(ctx.exception).lower())
 
 
 class HeaderStateTests(unittest.TestCase):

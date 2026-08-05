@@ -96,6 +96,7 @@ _REQUIRED_TENSOR_KEYS = ("structural_name", "source_shard_path", "shape")
 
 def _validate_entries(path: Path, tensors: list) -> None:
     """Reject entries the exporter would otherwise fail on far from the cause."""
+    seen: set[str] = set()
     for i, t in enumerate(tensors):
         if not isinstance(t, dict):
             raise ExportError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
@@ -104,6 +105,35 @@ def _validate_entries(path: Path, tensors: list) -> None:
             raise ExportError(
                 f"{path}: tensors[{i}] missing required key(s): {', '.join(missing)}"
             )
+        name = t["structural_name"]
+        if not isinstance(name, str):
+            raise ExportError(
+                f"{path}: tensors[{i}].structural_name is {type(name).__name__}, "
+                "expected a string"
+            )
+        if name in seen:
+            raise ExportError(
+                f"{path}: duplicate structural_name {name!r} at tensors[{i}]"
+            )
+        seen.add(name)
+        shard = t["source_shard_path"]
+        if not isinstance(shard, str):
+            raise ExportError(
+                f"{path}: tensors[{i}].source_shard_path is {type(shard).__name__}, "
+                "expected a string"
+            )
+        shape = t["shape"]
+        if not isinstance(shape, (list, tuple)):
+            raise ExportError(
+                f"{path}: tensors[{i}].shape is {type(shape).__name__}, "
+                "expected a list of ints"
+            )
+        try:
+            tuple(int(d) for d in shape)
+        except (TypeError, ValueError) as exc:
+            raise ExportError(
+                f"{path}: tensors[{i}].shape {shape!r} is not a list of ints"
+            ) from exc
 
 
 def select_tensors(
@@ -120,6 +150,12 @@ def select_tensors(
 
 
 def _select_by_names(tensors: list[dict], names: list[str]) -> list[dict]:
+    if len(names) != len(set(names)):
+        counts: dict[str, int] = {}
+        for n in names:
+            counts[n] = counts.get(n, 0) + 1
+        dups = [n for n, c in counts.items() if c > 1]
+        raise ExportError(f"duplicate --structural-name entries: {', '.join(sorted(dups))}")
     by_name = {t["structural_name"]: t for t in tensors}
     missing = [n for n in names if n not in by_name]
     if missing:

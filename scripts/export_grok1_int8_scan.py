@@ -572,7 +572,7 @@ def _scan_mmap(mm, size: int, name: str) -> list[ArraySpec]:
                 raise ExportError(
                     f"{name}: corrupted pickle after {len(specs)} array(s): {exc}"
                 ) from exc
-            break
+            raise ExportError(f"{name}: no ndarray payload found: {exc}") from exc
         if spec is None:
             break
         _reject_unsupported(spec, size, name)

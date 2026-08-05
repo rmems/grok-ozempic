@@ -94,12 +94,23 @@ def build_parser() -> argparse.ArgumentParser:
 def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: bool) -> int:
     """Export each selected tensor; return total f32 bytes planned or written."""
     total = 0
+    stems: dict[str, str] = {}
     for t in sorted(picked, key=lambda x: x["structural_name"]):
         name = t["structural_name"]
         shard = Path(t["source_shard_path"])
         if not shard.exists():
             raise ExportError(f"{name}: shard missing: {shard}")
         out = _safe_out_path(output_dir, name)
+        # Two distinct structural names can collide after __-encoding (e.g.
+        # ``a.b`` and ``a__b``); structural_stem rejects ``__`` in names, but
+        # preflight the selected set too so a malformed manifest cannot silently
+        # overwrite one tensor with another.
+        stem = out.stem
+        if stem in stems:
+            raise ExportError(
+                f"duplicate output stem {stem!r} for {stems[stem]!r} and {name!r}"
+            )
+        stems[stem] = name
         # expect_shape cross-checks the manifest against the shard before writing.
         info = export_tensor(
             shard, out, chunk_mib=chunk_mib, dry_run=dry_run, expect_shape=t["shape"]
