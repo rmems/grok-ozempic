@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,17 +36,28 @@ from route_preservation_surface import build_summary  # noqa: E402
 
 ROUTING_MODES = {"attention_only", "attention_plus_expert"}
 
-def report_gates(summary: list[dict]) -> int:
+def _print_gate_row(m: dict) -> None:
+    obs = "null" if m["observed"] is None else f"{m['observed']:.6f}"
+    print(f"  {m['name']:<28} {m['status']:>10}  observed={obs}  threshold={m['threshold']}")
+
+
+def report_gates(summary: list[dict], *, certified: bool = True) -> int:
     """Print the gate table; return the process exit code.
 
-    Fail-closed: a threshold that is not ``pass`` must not exit 0, or a caller
-    cannot tell a passing pilot from a failing one.
+    Fail-closed twice over: a threshold that is not ``pass`` must not exit 0, and
+    an *uncertified* run must not exit 0 either — otherwise a caller cannot tell
+    a passing pilot from one that never proved which tensors it measured.
     """
     gated = [m for m in summary if m["threshold"]]
     print("\nroute-preservation gates:")
     for m in gated:
-        obs = "null" if m["observed"] is None else f"{m['observed']:.6f}"
-        print(f"  {m['name']:<28} {m['status']:>7}  observed={obs}  threshold={m['threshold']}")
+        _print_gate_row(m)
+    if not certified:
+        print(
+            "\nDIAGNOSTIC ONLY — no --conversion-manifest, so the pack inventory is "
+            "unverified and no gate was certified."
+        )
+        return GATE_FAILURE_EXIT
     failing = sum(m["status"] != "pass" for m in gated)
     if failing:
         print(f"\n{failing} of {len(gated)} gates not passing")
@@ -202,10 +214,47 @@ def _load_manifest_tensors(path: Path | None) -> list[dict] | None:
     tensors = doc.get("tensors")
     if not isinstance(tensors, list):
         raise MetricsError(f"{path}: no `tensors` array")
-    bad = [i for i, t in enumerate(tensors) if not isinstance(t, dict)]
-    if bad:
-        raise MetricsError(f"{path}: tensors[{bad[0]}] is not an object")
+    if not tensors:
+        raise MetricsError(f"{path}: `tensors` array is empty; nothing to certify against")
+    for i, t in enumerate(tensors):
+        _validate_manifest_entry(path, i, t)
     return tensors
+
+
+def _validate_manifest_entry(path: Path, i: int, t: object) -> None:
+    """Reject entries that cannot support certification.
+
+    `structural_name`, `kind` and `block` are what the inventory checks match on,
+    so a wrongly typed one silently shrinks the *expected* set and the pack then
+    "matches" an inventory that was never really computed. Fail before measuring.
+    """
+    if not isinstance(t, dict):
+        raise MetricsError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
+    for key in ("structural_name", "kind"):
+        _require_str_field(path, i, t, key)
+    _require_block_field(path, i, t)
+
+
+def _require_str_field(path: Path, i: int, t: dict, key: str) -> None:
+    if key not in t:
+        raise MetricsError(f"{path}: tensors[{i}] missing required key: {key}")
+    if not isinstance(t[key], str):
+        raise MetricsError(
+            f"{path}: tensors[{i}].{key} is {type(t[key]).__name__}, expected str"
+        )
+
+
+def _require_block_field(path: Path, i: int, t: dict) -> None:
+    """int for a block tensor, null for a model-level one (e.g. the embedding)."""
+    if "block" not in t:
+        raise MetricsError(f"{path}: tensors[{i}] missing required key: block")
+    block = t["block"]
+    if block is None:
+        return
+    if not isinstance(block, int) or isinstance(block, bool):
+        raise MetricsError(
+            f"{path}: tensors[{i}].block is {type(block).__name__}, expected int or null"
+        )
 
 
 def _read_json(path: Path) -> object:
@@ -243,67 +292,124 @@ def _measure_routing(
     )
 
 
-def _build_result(
-    args: argparse.Namespace,
-    metadata: dict,
-    ternary: dict[str, dict],
-    preserve: dict[str, dict],
-    weights: dict[str, dict],
-    preserve_err: dict[str, dict],
-    routing: dict[str, dict],
-) -> dict:
-    summary = build_summary(weights, routing)
+@dataclass(frozen=True)
+class _Measured:
+    """Everything one metrics run produced, so `_build_result` stays narrow."""
+
+    metadata: dict
+    ternary: dict[str, dict]
+    preserve: dict[str, dict]
+    weights: dict[str, dict]
+    preserve_err: dict[str, dict]
+    routing: dict[str, dict]
+    certified: bool = True
+
+
+def _certification_block(args: argparse.Namespace, certified: bool) -> dict:
+    return {
+        "certified": certified,
+        "basis": (
+            "pack inventory verified against the xai-dissect conversion manifest"
+            if certified
+            else "DIAGNOSTIC ONLY: no conversion manifest supplied, so the pack "
+            "inventory is unverified; thresholded rows are not gate verdicts"
+        ),
+        "conversion_manifest": (
+            str(args.conversion_manifest) if args.conversion_manifest else None
+        ),
+    }
+
+
+def _build_result(args: argparse.Namespace, m: _Measured) -> dict:
     return {
         "model_family": "grok-1",
         "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
-        "pilot": _pilot_provenance(args, metadata, len(ternary), len(preserve)),
-        "summary": summary,
-        "weights": weights,
-        "preserve_fp16_roundtrip": preserve_err,
-        "routing": routing,
+        "certification": _certification_block(args, m.certified),
+        "pilot": _pilot_provenance(args, m.metadata, len(m.ternary), len(m.preserve)),
+        "summary": build_summary(m.weights, m.routing, certified=m.certified),
+        "weights": m.weights,
+        "preserve_fp16_roundtrip": m.preserve_err,
+        "routing": m.routing,
     }
+
+
+def _expand_paths(args: argparse.Namespace) -> None:
+    """Expand every path argument up front.
+
+    A quoted "~/..." is not expanded by the shell, and writing the report into a
+    directory literally named "~" would look like success while the file lands
+    somewhere nobody looks.
+    """
+    args.pack = args.pack.expanduser()
+    args.npy_dir = args.npy_dir.expanduser()
+    for attr in ("json_out", "conversion_manifest", "embedding_shard"):
+        value = getattr(args, attr, None)
+        if value is not None:
+            setattr(args, attr, value.expanduser())
+
+
+def _validate_paths(args: argparse.Namespace) -> None:
+    if args.embedding_shard is not None and args.block != 0:
+        # Only block 0's attention input is the embedding lookup; for a later
+        # block the real input is the residual stream after every preceding
+        # block, which needs a full forward pass this pilot does not run.
+        raise MetricsError(
+            f"--embedding-shard is only valid for block 0 (got block {args.block}); "
+            "later blocks see the residual stream, not the embedding lookup"
+        )
+    if args.json_out is not None and _json_out_conflicts_with_pack(
+        args.json_out, args.pack.resolve()
+    ):
+        raise MetricsError(
+            f"--json-out {args.json_out} resolves to the input pack; "
+            "refusing to overwrite the GOZ1 artifact"
+        )
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     _validate_tokens(args)
-    # Expand every path argument up front. A quoted "~/..." is not expanded by
-    # the shell, and writing the report to a literal directory named "~" would
-    # look like success while the file lands somewhere nobody looks.
-    args.pack = args.pack.expanduser()
-    args.npy_dir = args.npy_dir.expanduser()
-    if args.json_out is not None:
-        args.json_out = args.json_out.expanduser()
-    if getattr(args, "conversion_manifest", None) is not None:
-        args.conversion_manifest = args.conversion_manifest.expanduser()
-    if args.embedding_shard is not None:
-        args.embedding_shard = args.embedding_shard.expanduser()
-        if args.block != 0:
-            # Only block 0's attention input is the embedding lookup; for a later
-            # block the real input is the residual stream after every preceding
-            # block, which needs a full forward pass this pilot does not run.
-            raise MetricsError(
-                f"--embedding-shard is only valid for block 0 (got block {args.block}); "
-                "later blocks see the residual stream, not the embedding lookup"
-            )
-    pack_path = args.pack.resolve()
-    if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
-        raise MetricsError(
-            f"--json-out {args.json_out} resolves to the input pack; "
-            "refusing to overwrite the GOZ1 artifact"
-        )
+    _expand_paths(args)
+    _validate_paths(args)
+
     manifest_tensors = _load_manifest_tensors(args.conversion_manifest)
+    # Certification requires proving the pack inventory against the conversion
+    # manifest. A kinds-only check cannot do that: it confirms which *kinds* are
+    # present, never that every expected tensor is there, so it cannot detect an
+    # under-packed block. Without the manifest the run is diagnostic only.
+    certified = manifest_tensors is not None
+    if not certified:
+        print(
+            "warning: no --conversion-manifest; running DIAGNOSTIC ONLY "
+            "(inventory unverified, no gate will be certified)"
+        )
     metadata, index = load_pack_index(args.pack)
     _validate_pilot_args(args, index, manifest_tensors)
     ternary, preserve = _split_tiers(index)
     print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
 
     weights = measure_weights(args.npy_dir, args.pack, ternary)
-    preserve_err = measure_preserve(args.npy_dir, args.pack, preserve)
+    preserve_err = measure_preserve(
+        args.npy_dir, args.pack, preserve, _manifest_shapes(manifest_tensors)
+    )
     routing = _measure_routing(args, ternary, preserve, weights)
-    result = _build_result(args, metadata, ternary, preserve, weights, preserve_err, routing)
+    result = _build_result(
+        args,
+        _Measured(metadata, ternary, preserve, weights, preserve_err, routing, certified),
+    )
     _write_json(result, args.json_out)
-    return report_gates(result["summary"])
+    return report_gates(result["summary"], certified=certified)
+
+
+def _manifest_shapes(manifest_tensors: list[dict] | None) -> dict[str, tuple[int, ...]] | None:
+    """`structural_name` -> declared shape, for cross-checking measured tensors."""
+    if manifest_tensors is None:
+        return None
+    return {
+        t["structural_name"]: tuple(int(d) for d in t["shape"])
+        for t in manifest_tensors
+        if isinstance(t.get("shape"), (list, tuple))
+    }
 
 
 def _activation_provenance(args: argparse.Namespace) -> str:

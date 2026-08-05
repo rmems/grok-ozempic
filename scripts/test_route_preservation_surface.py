@@ -186,3 +186,66 @@ class ReportGatesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CertificationTests(unittest.TestCase):
+    """A run that cannot prove its inventory must not emit a gate verdict.
+
+    The kinds-only fallback confirms which *kinds* appear in the pack; it can
+    never show that every expected tensor is present, so it cannot detect an
+    under-packed block. Certification therefore requires the conversion manifest.
+    """
+
+    def _perfect(self) -> tuple[dict, dict]:
+        """Weights/routing good enough that every gate would otherwise pass."""
+        routing = {
+            "p": {
+                "router_top1_agreement": 1.0,
+                "router_top2_set_agreement": 1.0,
+                "router_logit_rank_correlation": 1.0,
+                "expert_load_distribution_delta": 0.0,
+                "expert_load_js_divergence": 0.0,
+                "block_output_cosine": 1.0,
+                "block_output_rmse": 0.0,
+                "residual_stream_drift": 0.0,
+            }
+        }
+        weights = {
+            "t": {
+                "weight_reconstruction_mse": 0.0,
+                "weight_cosine_similarity": 1.0,
+                "weight_max_absolute_error": 0.0,
+                "per_channel_scale_error": {"relative_error_max": 0.0},
+            }
+        }
+        return weights, routing
+
+    def test_certified_run_can_pass(self) -> None:
+        weights, routing = self._perfect()
+        summary = rps.build_summary(weights, routing, certified=True)
+        gated = [m for m in summary if m["threshold"]]
+        self.assertTrue(gated)
+        self.assertTrue(all(m["status"] == "pass" for m in gated))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(rpm.report_gates(summary, certified=True), 0)
+
+    def test_uncertified_run_cannot_pass_even_with_perfect_metrics(self) -> None:
+        weights, routing = self._perfect()
+        summary = rps.build_summary(weights, routing, certified=False)
+        gated = [m for m in summary if m["threshold"]]
+        self.assertTrue(gated)
+        for m in gated:
+            self.assertEqual(m["status"], rps.DIAGNOSTIC_STATUS)
+            self.assertIn("NOT CERTIFIED", m["detail"])
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = rpm.report_gates(summary, certified=False)
+        self.assertEqual(rc, GATE_FAILURE_EXIT)
+        self.assertIn("DIAGNOSTIC ONLY", buf.getvalue())
+
+    def test_uncertified_keeps_observed_values_for_inspection(self) -> None:
+        """Diagnostic mode still reports numbers; it just refuses to grade them."""
+        weights, routing = self._perfect()
+        summary = rps.build_summary(weights, routing, certified=False)
+        top1 = next(m for m in summary if m["name"] == "router_top1_agreement")
+        self.assertEqual(top1["observed"], 1.0)

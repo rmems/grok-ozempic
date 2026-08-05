@@ -203,20 +203,47 @@ class _HeaderState:
         self.fortran: bool | None = None
 
     @staticmethod
-    def _clone(value: object) -> object:
+    def _clone(value: object, seen: dict[int, object] | None = None) -> object:
         """Copy a container so a retry cannot observe in-place mutation.
 
         Not ``copy.deepcopy``: that would clone the ``_MARK`` sentinel and break
         the identity test in :meth:`_pop_to_mark`. Everything the scanner pushes
         is either immutable or one of these containers.
+
+        ``seen`` maps ``id()`` to the clone already made for that object, which
+        does two things: a pickle memo can legitimately reference one container
+        from several places, and it keeps that sharing intact; and a
+        *self-referential* container (which a hostile shard can encode) would
+        otherwise recurse until ``RecursionError`` escaped as a traceback instead
+        of the controlled ``ExportError`` path.
         """
+        if seen is None:
+            seen = {}
+        key = id(value)
+        if key in seen:
+            return seen[key]
         if isinstance(value, list):
-            return [_HeaderState._clone(v) for v in value]
+            return _HeaderState._clone_list(value, seen, key)
         if isinstance(value, dict):
-            return {k: _HeaderState._clone(v) for k, v in value.items()}
+            return _HeaderState._clone_dict(value, seen, key)
         if isinstance(value, set):
             return set(value)
         return value
+
+    @staticmethod
+    def _clone_list(value: list, seen: dict[int, object], key: int) -> list:
+        out: list = []
+        seen[key] = out  # registered before recursing, so a cycle terminates
+        out.extend(_HeaderState._clone(v, seen) for v in value)
+        return out
+
+    @staticmethod
+    def _clone_dict(value: dict, seen: dict[int, object], key: int) -> dict:
+        out: dict = {}
+        seen[key] = out
+        for k, v in value.items():
+            out[k] = _HeaderState._clone(v, seen)
+        return out
 
     def snapshot(self) -> tuple:
         """Copy all mutable state so a grown-window retry restarts cleanly."""

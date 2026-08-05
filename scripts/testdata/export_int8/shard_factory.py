@@ -55,6 +55,10 @@ def write_quantized_string_dtype(
     if raw.count(old) != 1:
         raise ValueError(f"expected one u2 descr, found {raw.count(old)}")
     text = descr.encode("utf-8")
+    # SHORT_BINUNICODE carries a single length byte, so >255 would raise an opaque
+    # "bytes must be in range" from bytes([...]) instead of naming the cause.
+    if len(text) > 255:
+        raise ValueError(f"descr {descr!r} too long for SHORT_BINUNICODE ({len(text)} bytes)")
     path.write_bytes(raw.replace(old, b"\x8c" + bytes([len(text)]) + text + b"\x94"))
 
 

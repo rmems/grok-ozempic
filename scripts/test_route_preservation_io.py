@@ -219,3 +219,65 @@ class ReadF16Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreserveShapeAgreementTests(unittest.TestCase):
+    """Every shape source must agree exactly before the fp16 subtraction.
+
+    NumPy broadcasts (6144,) against (6144, 1) happily and returns a plausible
+    error figure computed over the wrong pairing, so a disagreement has to raise.
+    """
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import route_preservation_measure as rpm
+
+        self.rpm = rpm
+
+    def _entry(self, shape):
+        return {"name": "block_000.slot_11.router", "shape": list(shape)}
+
+    def test_all_sources_agreeing_is_accepted(self) -> None:
+        ref = np.zeros((6144, 8), dtype=np.float32)
+        got = np.zeros((6144, 8), dtype=np.float32)
+        self.rpm._require_matching_shapes(
+            "block_000.slot_11.router", ref, got, self._entry((6144, 8)),
+            {"block_000.slot_11.router": (6144, 8)},
+        )
+
+    def test_npy_disagreeing_with_pack_raises(self) -> None:
+        ref = np.zeros((8, 6144), dtype=np.float32)  # transposed
+        got = np.zeros((6144, 8), dtype=np.float32)
+        with self.assertRaises(rio.MetricsError) as ctx:
+            self.rpm._require_matching_shapes(
+                "block_000.slot_11.router", ref, got, self._entry((6144, 8)), None
+            )
+        self.assertIn("shape disagreement", str(ctx.exception))
+
+    def test_broadcastable_mismatch_still_raises(self) -> None:
+        """(6144,) vs (6144, 1) would broadcast silently — must not be allowed."""
+        ref = np.zeros((6144,), dtype=np.float32)
+        got = np.zeros((6144, 1), dtype=np.float32)
+        with self.assertRaises(rio.MetricsError):
+            self.rpm._require_matching_shapes(
+                "block_000.slot_07.block_norm", ref, got, self._entry((6144,)), None
+            )
+
+    def test_manifest_shape_disagreement_raises(self) -> None:
+        """npy, decoded array and pack header agree, but the manifest does not."""
+        ref = np.zeros((6144, 8), dtype=np.float32)
+        got = np.zeros((6144, 8), dtype=np.float32)
+        with self.assertRaises(rio.MetricsError) as ctx:
+            self.rpm._require_matching_shapes(
+                "block_000.slot_11.router", ref, got, self._entry((6144, 8)),
+                {"block_000.slot_11.router": (6144, 4)},
+            )
+        self.assertIn("conversion manifest", str(ctx.exception))
+
+    def test_name_absent_from_manifest_map_is_tolerated(self) -> None:
+        """A manifest without this tensor simply contributes no constraint."""
+        ref = np.zeros((6144,), dtype=np.float32)
+        got = np.zeros((6144,), dtype=np.float32)
+        self.rpm._require_matching_shapes(
+            "block_000.slot_07.block_norm", ref, got, self._entry((6144,)), {}
+        )

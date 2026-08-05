@@ -396,18 +396,58 @@ def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict
     return weights
 
 
-def measure_preserve(npy_dir: Path, pack: Path, preserve: dict[str, dict]) -> dict[str, dict]:
+def _shape_sources(
+    ref: np.ndarray,
+    got: np.ndarray,
+    entry: dict,
+    declared: tuple[int, ...] | None,
+) -> dict[str, tuple[int, ...]]:
+    """Every independent statement of this tensor's shape, labelled by origin."""
+    shapes = {
+        "source npy": tuple(int(d) for d in ref.shape),
+        "decoded pack array": tuple(int(d) for d in got.shape),
+        "pack header": tuple(int(d) for d in entry["shape"]),
+    }
+    if declared is not None:
+        shapes["conversion manifest"] = declared
+    return shapes
+
+
+def _require_matching_shapes(
+    name: str,
+    ref: np.ndarray,
+    got: np.ndarray,
+    entry: dict,
+    manifest_shapes: dict[str, tuple[int, ...]] | None,
+) -> None:
+    """Require source npy, decoded pack array, pack header and manifest to agree.
+
+    All four must match *exactly* before any subtraction. NumPy would happily
+    broadcast e.g. ``(6144,)`` against ``(6144, 1)`` and return a plausible
+    error figure computed over the wrong pairing, so a mismatch has to raise
+    rather than reshape.
+    """
+    shapes = _shape_sources(ref, got, entry, (manifest_shapes or {}).get(name))
+    if len(set(shapes.values())) != 1:
+        detail = ", ".join(f"{src}={shape}" for src, shape in shapes.items())
+        raise MetricsError(
+            f"{name}: preserve-tier shape disagreement ({detail}); refusing to "
+            "compare — broadcasting would report an error over the wrong pairing"
+        )
+
+
+def measure_preserve(
+    npy_dir: Path,
+    pack: Path,
+    preserve: dict[str, dict],
+    manifest_shapes: dict[str, tuple[int, ...]] | None = None,
+) -> dict[str, dict]:
     """fp16 round-trip error for the preserve tier (fp16-at-rest in GOZ1 v1)."""
     errors: dict[str, dict] = {}
     for name in sorted(preserve):
         ref = _require_npy(npy_dir, name)
         got = read_f16(pack, preserve[name])
-        expected = tuple(int(d) for d in preserve[name]["shape"])
-        if tuple(ref.shape) != expected:
-            raise MetricsError(
-                f"{name}: npy shape {tuple(ref.shape)} != pack shape {expected}; "
-                "a reshaped or transposed preserve tensor would silently mis-measure"
-            )
+        _require_matching_shapes(name, ref, got, preserve[name], manifest_shapes)
         d = np.abs(ref - got).astype(np.float64)
         rms = float(np.sqrt((ref.astype(np.float64) ** 2).mean()))
         errors[name] = {

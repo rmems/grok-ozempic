@@ -94,12 +94,19 @@ def load_manifest(path: Path) -> list[dict]:
 
 
 # Required keys and the type each must carry, checked declaratively so adding a
-# key does not add a branch.
+# key does not add a branch. `kind` and `block` drive whole-block selection, so a
+# wrongly typed one would silently change which tensors get exported: a numeric
+# `kind` matches no mode, and a stringy `block` never equals `--block`, so the
+# selector would quietly under-pick instead of failing.
 _REQUIRED_TENSOR_KEYS: dict[str, tuple[type, ...]] = {
     "structural_name": (str,),
     "source_shard_path": (str,),
     "shape": (list, tuple),
+    "kind": (str,),
 }
+# `block` is int for block tensors and null for model-level ones (the embedding),
+# so it is checked separately rather than in the table above.
+_BLOCK_TYPES: tuple[type, ...] = (int,)
 
 
 def _validate_entries(path: Path, tensors: list) -> None:
@@ -117,7 +124,21 @@ def _validate_entry(path: Path, i: int, t: object, seen: set[str]) -> None:
     if name in seen:
         raise ExportError(f"{path}: duplicate structural_name {name!r} at tensors[{i}]")
     seen.add(name)
+    _validate_block(path, i, t)
     _validate_shape(path, i, t["shape"])
+
+
+def _validate_block(path: Path, i: int, t: dict) -> None:
+    """`block` must be an int (block tensor) or null (model-level, e.g. embedding)."""
+    if "block" not in t:
+        raise ExportError(f"{path}: tensors[{i}] missing required key: block")
+    block = t["block"]
+    if block is None:
+        return
+    if not isinstance(block, _BLOCK_TYPES) or isinstance(block, bool):
+        raise ExportError(
+            f"{path}: tensors[{i}].block is {type(block).__name__}, expected int or null"
+        )
 
 
 def _require_keys(path: Path, i: int, t: dict) -> None:

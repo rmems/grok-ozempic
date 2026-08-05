@@ -120,17 +120,41 @@ def _observe(agg: str, key: str, weights: dict, routing: dict):
     return min(values) if agg.endswith("min") else max(values)
 
 
-def build_summary(weights: dict[str, dict], routing: dict[str, dict]) -> list[dict]:
-    """Assemble run3's route-preservation surface with observed values filled in."""
+DIAGNOSTIC_STATUS = "diagnostic"
+
+
+def _row_status(observed, agg: str, limit, certified: bool) -> str:
+    """Status for one surface row: graded, measured, unknown, or diagnostic."""
+    if limit is not None:
+        return gate(observed, limit) if certified else DIAGNOSTIC_STATUS
+    if agg == "none":
+        return "unknown"
+    return "measured" if observed is not None else "unknown"
+
+
+def build_summary(
+    weights: dict[str, dict],
+    routing: dict[str, dict],
+    *,
+    certified: bool = True,
+) -> list[dict]:
+    """Assemble run3's route-preservation surface with observed values filled in.
+
+    ``certified=False`` means the run could not verify the pack against the
+    xai-dissect conversion manifest, so its inventory is unproven. Thresholded
+    rows then report :data:`DIAGNOSTIC_STATUS` instead of ``pass``/``fail``:
+    observed values are still useful for inspection, but a run that cannot prove
+    *which* tensors it measured must not emit a certifying gate verdict.
+    """
     summary = []
     for name, scope, agg, key, threshold, limit, detail in _SUMMARY_SPECS:
         observed = _observe(agg, key, weights, routing)
-        if limit is not None:
-            status = gate(observed, limit)
-        elif agg == "none":
-            status = "unknown"
-        else:
-            status = "measured" if observed is not None else "unknown"
+        status = _row_status(observed, agg, limit, certified)
+        if not certified and limit is not None:
+            detail = (
+                f"{detail} NOT CERTIFIED: no conversion manifest was supplied, so the "
+                "pack inventory is unverified and this threshold was not evaluated."
+            )
         summary.append(
             {
                 "name": name,

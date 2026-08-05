@@ -482,6 +482,75 @@ class ManifestValidationTests(unittest.TestCase):
     def _manifest(self, tensors):
         return json.dumps({"tensors": tensors}).encode("utf-8")
 
+    def _entry(self, **overrides):
+        """A well-formed entry, so each test isolates the one field it breaks."""
+        base = {
+            "structural_name": "block_000.slot_00.moe_expert.gate",
+            "source_shard_path": "s",
+            "shape": [1],
+            "kind": "moe_expert.gate",
+            "block": 0,
+        }
+        base.update(overrides)
+        return base
+
+    def test_well_formed_entry_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest([self._entry()]))
+            self.assertEqual(len(exp.load_manifest(p)), 1)
+
+    def test_null_block_accepted_for_model_level_tensor(self) -> None:
+        """The token embedding legitimately carries `block: null`."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(
+                self._manifest(
+                    [self._entry(structural_name="embedding.slot_00.token_embedding",
+                                 kind="token_embedding", block=None)]
+                )
+            )
+            self.assertEqual(len(exp.load_manifest(p)), 1)
+
+    def test_missing_kind_rejected(self) -> None:
+        entry = self._entry()
+        del entry["kind"]
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest([entry]))
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("kind", str(ctx.exception).lower())
+
+    def test_non_string_kind_rejected(self) -> None:
+        """A numeric kind matches no mode, so selection would silently under-pick."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest([self._entry(kind=7)]))
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("kind", str(ctx.exception).lower())
+
+    def test_missing_block_rejected(self) -> None:
+        entry = self._entry()
+        del entry["block"]
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest([entry]))
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.load_manifest(p)
+            self.assertIn("block", str(ctx.exception).lower())
+
+    def test_non_int_block_rejected(self) -> None:
+        """A stringy block never equals --block, so the selector would under-pick."""
+        for bad in ("0", 1.5, True):
+            with tempfile.TemporaryDirectory() as td:
+                p = Path(td) / "m.json"
+                p.write_bytes(self._manifest([self._entry(block=bad)]))
+                with self.assertRaises(exp.ExportError, msg=repr(bad)) as ctx:
+                    exp.load_manifest(p)
+                self.assertIn("block", str(ctx.exception).lower())
+
     def test_load_manifest_rejects_non_object_root(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "m.json"
@@ -502,9 +571,7 @@ class ManifestValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "m.json"
             p.write_bytes(
-                self._manifest(
-                    [{"structural_name": 123, "source_shard_path": "s", "shape": [1]}]
-                )
+                self._manifest([self._entry(structural_name=123)])
             )
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.load_manifest(p)
@@ -514,15 +581,7 @@ class ManifestValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "m.json"
             p.write_bytes(
-                self._manifest(
-                    [
-                        {
-                            "structural_name": "a.b",
-                            "source_shard_path": "s",
-                            "shape": ["x"],
-                        }
-                    ]
-                )
+                self._manifest([self._entry(shape=["x"])])
             )
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.load_manifest(p)
@@ -534,16 +593,8 @@ class ManifestValidationTests(unittest.TestCase):
             p.write_bytes(
                 self._manifest(
                     [
-                        {
-                            "structural_name": "a.b",
-                            "source_shard_path": "s1",
-                            "shape": [1],
-                        },
-                        {
-                            "structural_name": "a.b",
-                            "source_shard_path": "s2",
-                            "shape": [1],
-                        },
+                        self._entry(source_shard_path="s1"),
+                        self._entry(source_shard_path="s2"),
                     ]
                 )
             )
@@ -618,3 +669,55 @@ class HeaderStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeaderStateCloneTests(unittest.TestCase):
+    """`snapshot`/`restore` must survive shared and self-referential containers.
+
+    A pickle memo can reference one container from several places, and a hostile
+    shard can encode a self-referential one. Naive recursion would either break
+    the sharing or blow the stack with an uncaught RecursionError.
+    """
+
+    def _state(self):
+        import export_grok1_int8_scan as scan
+
+        return scan._HeaderState()
+
+    def test_shared_container_stays_shared(self) -> None:
+        st = self._state()
+        shared: list = [1, 2]
+        st.stack = [shared, shared]
+        snap = st.snapshot()
+        st.restore(snap)
+        self.assertEqual(st.stack[0], [1, 2])
+        self.assertIs(st.stack[0], st.stack[1], "sharing must be preserved")
+
+    def test_self_referential_container_does_not_recurse_forever(self) -> None:
+        st = self._state()
+        cyclic: list = [1]
+        cyclic.append(cyclic)
+        st.memo = {0: cyclic}
+        snap = st.snapshot()  # must not raise RecursionError
+        st.restore(snap)
+        restored = st.memo[0]
+        self.assertEqual(restored[0], 1)
+        self.assertIs(restored[1], restored, "cycle must be rebuilt as a cycle")
+
+    def test_mark_sentinel_identity_preserved(self) -> None:
+        """_pop_to_mark compares by identity, so the sentinel must not be copied."""
+        st = self._state()
+        st.stack = [st._MARK, 3]
+        st.restore(st.snapshot())
+        self.assertIs(st.stack[0], st._MARK)
+
+
+class ShardFactoryGuardTests(unittest.TestCase):
+    def test_overlong_descriptor_named_clearly(self) -> None:
+        rng = np.random.default_rng(1)
+        w = rng.integers(-128, 128, size=(8, 4), dtype=np.int8)
+        s = rng.random((1, 4), dtype=np.float32) + 0.25
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(ValueError) as ctx:
+                _sf.write_quantized_string_dtype(Path(td) / "s", w, s, descr="x" * 256)
+            self.assertIn("too long", str(ctx.exception))

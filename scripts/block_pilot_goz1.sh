@@ -408,6 +408,12 @@ pilot = rep.get("pilot", {})
 for key in ("pack", "npy_dir"):
     if key in pilot:
         pilot[f"{key}_basename"] = os.path.basename(str(pilot.pop(key)).rstrip("/"))
+# Same for the conversion-manifest path in the certification block.
+cert = rep.get("certification")
+if isinstance(cert, dict) and cert.get("conversion_manifest"):
+    cert["conversion_manifest_basename"] = os.path.basename(
+        str(cert.pop("conversion_manifest")).rstrip("/")
+    )
 # Same for the activation provenance recorded per projection.
 for entry in rep.get("routing", {}).values():
     acts = entry.get("activations")

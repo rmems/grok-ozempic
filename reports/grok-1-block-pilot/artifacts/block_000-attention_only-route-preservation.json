@@ -1,6 +1,11 @@
 {
   "model_family": "grok-1",
   "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
+  "certification": {
+    "certified": true,
+    "basis": "pack inventory verified against the xai-dissect conversion manifest",
+    "conversion_manifest_basename": "conversion-manifest.json"
+  },
   "pilot": {
     "block": 0,
     "mode": "attention_only",

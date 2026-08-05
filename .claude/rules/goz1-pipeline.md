@@ -30,7 +30,16 @@ python3 scripts/export_grok1_int8_npy.py \
   --output-dir "$OUT"
 ```
 
-`--structural-name` (repeatable; may omit `--block`) is a **debug/repair hatch** for re-exporting individual tensors — not part of the pilot contract. Partial exports are fine for inspection or fixing a single bad npy; V2 packing is fail-closed on unmatched names, so an incomplete directory cannot silently under-pack. Do not treat `--structural-name` as the supported production export mode.
+`--structural-name` (repeatable; may omit `--block`) is a **debug/repair hatch** for re-exporting individual tensors — not part of the pilot contract. Partial exports are fine for inspection or fixing a single bad npy. Do not treat `--structural-name` as the supported production export mode.
+
+⚠ **V2 fail-closed does not detect under-packing.** It rejects an *input name that matches no rule* — a misclassification guard. A tensor that is simply **absent** from the npy directory produces no name to match, so V2 is silent about it and the pack comes out short. Completeness is enforced separately, by explicit inventory and counter checks against the xai-dissect **conversion manifest**:
+
+| Check | Where |
+|-------|-------|
+| Expected ternary / preserve names per block+mode vs pack contents | `scripts/route_preservation_metrics.py` (`_validate_ternary_inventory`, `_validate_preserve_inventory`) |
+| Pack ternary / preserve counters vs the selected mode | `scripts/block_pilot_goz1.sh` step 4b |
+
+Without `--conversion-manifest` the metrics run is **diagnostic-only**: it prints observed values but reports thresholded rows as `diagnostic`, records `certification.certified: false`, and exits non-zero. A kinds-only check cannot certify a gate, because matching the *kinds present* says nothing about whether every expected tensor is there.
 
 Scales are **grouped along the contracting axis**: weight `(*lead, K, N)`, scales `(*lead, G, N)`, `K % G == 0`, so `w_f32 = weight.reshape(*lead, G, K//G, N) * scales[..., :, None, :]`. `G` is the tensor-parallel shard count of that axis (8 when `K` was sharded, 1 when `N` was). Verified bit-exact against unpickled ground truth — see `reports/grok-1-block-pilot/results.md`.
 
