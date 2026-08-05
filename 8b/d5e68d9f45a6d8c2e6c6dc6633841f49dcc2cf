@@ -1,0 +1,52 @@
+Cargo.toml
+  s_f430523a053518::t_f0346b3a088739 3
+reports/grok-1-block-pilot/results.md
+  s_f430523a053518::t_251c20c1867977 1-314
+scripts/test_export_grok1_int8_npy.py
+  s_f430523a053518::t_cd58b9b10a296f 1-278
+reports/grok-1-block-pilot/artifacts/block_000-attention_plus_expert-route-preservation.json
+  s_f430523a053518::t_a529d0f4212103 1-380
+.github/workflows/python-scripts.yml
+  s_f430523a053518::t_966aa4ee9a45b5 19
+  s_f430523a053518::t_362049c1be5a17 30,32-34
+reports/grok-1-block-pilot/artifacts/block_000-attention_plus_expert-histogram.json
+  s_f430523a053518::t_a529d0f4212103 1-176
+reports/grok-1-block-pilot/artifacts/block_000-attention_plus_expert-manifest.json
+  s_f430523a053518::t_a529d0f4212103 1-76
+scripts/block_pilot_goz1.sh
+  s_f430523a053518::t_c62a321570610e 1-157
+reports/grok-1-block-pilot/artifacts/block_000-attention_only-histogram.json
+  s_f430523a053518::t_a529d0f4212103 1-125
+reports/grok-1-block-pilot/artifacts/block_000-attention_only-route-preservation.json
+  s_f430523a053518::t_a529d0f4212103 1-320
+.claude/rules/goz1-pipeline.md
+  s_f430523a053518::t_a636e0f56a5827 14-16,24-45
+  s_f430523a053518::t_2b5cf9d861cf6e 91-92,96
+CLAUDE.md
+  s_f430523a053518::t_b8646081fa615c 75-82
+.beads/issues.jsonl
+  s_f430523a053518::t_e447be9c982ef3 38,76
+scripts/export_grok1_int8_npy.py
+  s_f430523a053518::t_12f9a0ab4c1ac2 1-445
+scripts/route_preservation_metrics.py
+  s_f430523a053518::t_c0ee6eff019c85 110
+  s_f430523a053518::t_5b684c9de842c9 68,77
+  s_f430523a053518::t_b571179738c5db 1-67,69-76,78-109,111-157,168-608
+  s_f430523a053518::t_54669910c5ff76 158-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8bd5e68d9f45a6d8c2e6c6dc6633841f49dcc2cf",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
