@@ -79,7 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         dest="names",
-        help="export one tensor by structural name (repeatable; overrides --block/--mode)",
+        help=(
+            "debug/repair: export one tensor by structural name "
+            "(repeatable; overrides --block/--mode; not the pilot whole-block path)"
+        ),
     )
     p.add_argument("--output-dir", type=Path, help="destination directory for .npy files")
     p.add_argument("--chunk-mib", type=int, default=DEFAULT_CHUNK_MIB, help="write chunk size")

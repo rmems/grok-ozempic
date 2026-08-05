@@ -21,7 +21,7 @@ python3 scripts/export_grok1_embedding_npy.py \
   --output-dir "$OUT"
 ```
 
-`scripts/export_grok1_int8_npy.py` (**requires numpy**) handles everything the f32 exporter cannot: official ckpt-0 ships all attention projections and MoE experts as `__main__.QuantizedWeight8bit` (int8 `weight` × bfloat16 `scales`), which the float stream rejects. It is manifest-driven and exports a whole pilot block (quantized *and* f32 preserve tiers) per invocation.
+`scripts/export_grok1_int8_npy.py` (**requires numpy**) handles everything the f32 exporter cannot: official ckpt-0 ships all attention projections and MoE experts as `__main__.QuantizedWeight8bit` (int8 `weight` × bfloat16 `scales`), which the float stream rejects. The **pilot contract** is manifest-driven whole-block export via `--block`/`--mode` (quantized *and* f32 preserve tiers in one invocation). `scripts/block_pilot_goz1.sh` uses only that path.
 
 ```bash
 python3 scripts/export_grok1_int8_npy.py \
@@ -29,6 +29,8 @@ python3 scripts/export_grok1_int8_npy.py \
   --block 0 --mode attention_plus_expert \
   --output-dir "$OUT"
 ```
+
+`--structural-name` (repeatable; may omit `--block`) is a **debug/repair hatch** for re-exporting individual tensors — not part of the pilot contract. Partial exports are fine for inspection or fixing a single bad npy; V2 packing is fail-closed on unmatched names, so an incomplete directory cannot silently under-pack. Do not treat `--structural-name` as the supported production export mode.
 
 Scales are **grouped along the contracting axis**: weight `(*lead, K, N)`, scales `(*lead, G, N)`, `K % G == 0`, so `w_f32 = weight.reshape(*lead, G, K//G, N) * scales[..., :, None, :]`. `G` is the tensor-parallel shard count of that axis (8 when `K` was sharded, 1 when `N` was). Verified bit-exact against unpickled ground truth — see `reports/grok-1-block-pilot/results.md`.
 

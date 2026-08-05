@@ -77,7 +77,7 @@ Python 3 is only required for Grok-1 pickle → `.npy` export and host-side anal
 | Script | Deps | Scope |
 |--------|------|-------|
 | `scripts/export_grok1_embedding_npy.py` | **stdlib only** | one f32 tensor per invocation (byte copy) |
-| `scripts/export_grok1_int8_npy.py` | **numpy** | int8 `QuantizedWeight8bit` → f32 dequant export; manifest-driven, whole pilot block per invocation |
+| `scripts/export_grok1_int8_npy.py` | **numpy** | int8 `QuantizedWeight8bit` → f32 dequant export; manifest-driven, whole pilot block per invocation (`--block`/`--mode`). `--structural-name` is a debug/repair hatch for partial re-export — not the pilot contract |
 | `scripts/goz1_trit_histogram.py` | stdlib only | exact GOZ1 trit counts |
 | `scripts/route_preservation_metrics.py` | numpy | fills the run3 route-preservation surface from a pack |
 
