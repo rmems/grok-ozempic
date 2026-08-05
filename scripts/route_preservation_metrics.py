@@ -79,6 +79,9 @@ from export_grok1_int8_npy import (  # noqa: E402
     PRESERVE_KINDS as EXPORT_PRESERVE_KINDS,
 )
 
+# Routing metrics need a d_model x d_model attention projection to drive the router.
+ROUTING_MODES = {"attention_only", "attention_plus_expert"}
+
 CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole rows)
 DEFAULT_TOKENS = 4096
 DEFAULT_SEED = 20260805
@@ -147,9 +150,15 @@ def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
 
 
 def read_f16(pack: Path, entry: dict) -> np.ndarray:
+    """Read an fp16 preserve-tier tensor and fail closed on truncated payloads."""
     with pack.open("rb") as f:
         f.seek(entry["abs_offset"])
         raw = f.read(entry["nbytes"])
+    if len(raw) != entry["nbytes"]:
+        raise MetricsError(
+            f"{entry['name']}: truncated pack -- wanted {entry['nbytes']} bytes for fp16 payload, "
+            f"got {len(raw)}"
+        )
     return np.frombuffer(raw, dtype="<f2").astype(np.float32).reshape(entry["shape"])
 
 
@@ -184,7 +193,7 @@ class _TernaryAccumulator:
         self.s2 += float(np.einsum("ij,ij->", w, w))
         self.s1_fired += float(af.sum())
         self.n_fired += int(np.count_nonzero(fired))
-        self.sign_mismatch += int(np.count_nonzero(fired & ((w > 0) != (t > 0))))
+        self.sign_mismatch += int(np.count_nonzero(fired & (np.sign(w).astype(np.int8) != t)))
 
         self.max_abs_fired = max(
             self.max_abs_fired, float(np.max(aw, where=fired, initial=0.0))
@@ -406,8 +415,12 @@ def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict
     """Streamed reconstruction stats for every quantized tensor in the pack."""
     weights: dict[str, dict] = {}
     for name in sorted(ternary):
-        _require_npy(npy_dir, name)  # existence guard; ternary_stats reloads via memmap
-        st = ternary_stats(npy_dir / f"{stem_of(name)}.npy", pack, ternary[name])
+        npy = npy_dir / f"{stem_of(name)}.npy"
+        if not npy.exists():
+            raise MetricsError(f"{name}: source npy missing at {npy}")
+        # ternary_stats is the first reader; it streams via np.memmap and must not
+        # be preceded by a full _require_npy load, which would materialize huge npys.
+        st = ternary_stats(npy, pack, ternary[name])
         weights[name] = st
         print(
             f"  ternary {name:<46} zeros={st['sparsity'] * 100:6.2f}%  "
@@ -532,10 +545,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--npy-dir", type=Path, required=True, help="f32 npy the pack was built from")
     p.add_argument("--pack", type=Path, required=True, help="GOZ1 pack to read back")
     p.add_argument("--block", type=int, required=True)
-    p.add_argument("--mode", required=True, choices=sorted(EXPORT_MODES))
+    p.add_argument("--mode", required=True, choices=sorted(EXPORT_MODES.keys()))
     p.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--json-out", type=Path)
+    p.add_argument("--conversion-manifest", type=Path, help="xai-dissect run3 conversion-manifest.json")
     return p.parse_args(argv)
 
 
@@ -553,7 +567,11 @@ def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:
         return False
 
 
-def _validate_pilot_args(args: argparse.Namespace, index: dict[str, dict]) -> None:
+def _validate_pilot_args(
+    args: argparse.Namespace,
+    index: dict[str, dict],
+    manifest_tensors: list[dict] | None = None,
+) -> None:
     """Make sure --block and --mode match the pack contents."""
     if args.tokens <= 0:
         raise MetricsError(f"--tokens must be positive, got {args.tokens}")
@@ -566,14 +584,32 @@ def _validate_pilot_args(args: argparse.Namespace, index: dict[str, dict]) -> No
             )
 
     expected_ternary_kinds = set(EXPORT_MODES[args.mode]) - set(EXPORT_PRESERVE_KINDS)
-    actual_ternary_kinds = {
-        kind_of(n) for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY
-    }
-    if actual_ternary_kinds != expected_ternary_kinds:
-        raise MetricsError(
-            f"pack ternary kinds {sorted(actual_ternary_kinds)} do not match --mode "
-            f"{args.mode} expected {sorted(expected_ternary_kinds)}"
+    actual_ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
+
+    if manifest_tensors is not None:
+        # Exact inventory: a missing duplicate projection has the same kind
+        # but a different structural_name, so a set comparison is insufficient.
+        expected_names = sorted(
+            t["structural_name"]
+            for t in manifest_tensors
+            if t.get("block") == args.block
+            and t.get("kind") in expected_ternary_kinds
         )
+        actual_names = sorted(actual_ternary)
+        if actual_names != expected_names:
+            missing = [n for n in expected_names if n not in actual_ternary]
+            extra = [n for n in actual_names if n not in expected_names]
+            raise MetricsError(
+                f"pack ternary inventory for block {args.block} mode {args.mode} "
+                f"does not match conversion-manifest: missing={missing}, extra={extra}"
+            )
+    else:
+        actual_ternary_kinds = {kind_of(n) for n in actual_ternary}
+        if actual_ternary_kinds != expected_ternary_kinds:
+            raise MetricsError(
+                f"pack ternary kinds {sorted(actual_ternary_kinds)} do not match --mode "
+                f"{args.mode} expected {sorted(expected_ternary_kinds)}"
+            )
 
 
 def main(argv: list[str]) -> int:
@@ -586,17 +622,28 @@ def main(argv: list[str]) -> int:
             f"--json-out {args.json_out} resolves to the input pack; "
             "refusing to overwrite the GOZ1 artifact"
         )
+    manifest_tensors: list[dict] | None = None
+    if args.conversion_manifest is not None:
+        with args.conversion_manifest.open("rb") as f:
+            doc = json.load(f)
+        manifest_tensors = doc.get("tensors")
+        if not isinstance(manifest_tensors, list):
+            raise MetricsError(f"{args.conversion_manifest}: no `tensors` array")
     metadata, index = load_pack_index(args.pack)
-    _validate_pilot_args(args, index)
+    _validate_pilot_args(args, index, manifest_tensors)
     ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
     preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
     print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
 
     weights = measure_weights(args.npy_dir, args.pack, ternary)
     preserve_err = measure_preserve(args.npy_dir, args.pack, preserve)
-    routing = measure_routing(
-        args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
-    )
+    if args.mode in ROUTING_MODES:
+        routing = measure_routing(
+            args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
+        )
+    else:
+        print(f"  mode {args.mode}: no d_model x d_model attention projection, skipping routing")
+        routing = {}
     summary = build_summary(weights, routing)
     result = {
         "model_family": "grok-1",

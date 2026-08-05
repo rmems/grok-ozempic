@@ -187,28 +187,230 @@ class _StopAtPayload(io.BytesIO):
         return super().read(size)
 
 
+class _Descr:
+    """A dtype descriptor recovered from a pickle `numpy.dtype` reduce."""
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _DtypeBuilder:
+    """Placeholder for `numpy.dtype` as a callable in a `REDUCE` frame."""
+
+
+class _Global:
+    """A `STACK_GLOBAL` callable that has not been reduced yet."""
+
+    __slots__ = ("module", "name")
+
+    def __init__(self, module: str, name: str) -> None:
+        self.module = module
+        self.name = name
+
+
+class _Unknown:
+    """Any other pickle object we do not need to model precisely."""
+
+    __slots__ = ("tag",)
+
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+
+
 class _HeaderState:
-    """ndarray header facts accumulated as opcodes stream past."""
+    """ndarray header facts accumulated as opcodes stream past.
+
+    Maintains a minimal pickle value stack and memo so `BINGET`-referenced dtype
+    strings (and memoized `numpy.dtype` objects) survive across scanner windows
+    and can supply the descriptor for later arrays in the same shard.
+    """
+
+    _MARK = object()
 
     def __init__(self) -> None:
+        self.stack: list = []
+        self.memo: dict[int, object] = {}
+        self.memo_next = 0
         self.ints: list[int] = []
         self.shape: tuple[int, ...] | None = None
         self.descr: str | None = None
         self.fortran: bool | None = None
 
+    def _push(self, value: object) -> None:
+        self.stack.append(value)
+
+    def _pop(self) -> object:
+        return self.stack.pop()
+
+    def _pop_to_mark(self) -> list[object]:
+        """Pop items until the most recent MARK, discarding the mark."""
+        items: list[object] = []
+        while self.stack:
+            v = self.stack.pop()
+            if v is self._MARK:
+                break
+            items.append(v)
+        items.reverse()
+        return items
+
+    def _maybe_set_shape(self, items: list[object]) -> None:
+        if items and all(isinstance(x, int) for x in items):
+            self.shape = tuple(items)
+            self.ints = []
+
+    def _set_descr(self, value: object) -> None:
+        """Extract a known dtype descriptor from a value if possible."""
+        if isinstance(value, _Descr):
+            self.descr = value.text
+            return
+        if isinstance(value, str) and value in _KNOWN_DESCR:
+            self.descr = value
+            return
+        if isinstance(value, bytes):
+            try:
+                s = value.decode("ascii")
+            except UnicodeDecodeError:
+                return
+            if s in _KNOWN_DESCR:
+                self.descr = s
+
+    def _memoize_top(self, idx: int) -> None:
+        if self.stack:
+            self.memo[idx] = self.stack[-1]
+
     def feed(self, opname: str, arg) -> None:
-        if opname in ("BININT", "BININT1", "BININT2"):
-            self.ints.append(int(arg))
+        if opname == "FRAME" or opname == "PROTO":
+            return
+        if opname in ("SHORT_BINUNICODE", "BINUNICODE", "UNICODE"):
+            s = str(arg)
+            self._push(s)
+            self._set_descr(s)
+        elif opname in ("SHORT_BINSTRING", "BINSTRING", "SHORT_BINBYTES", "BINBYTES", "BINBYTES8"):
+            self._push(arg)
+        elif opname in ("BININT", "BININT1", "BININT2", "LONG_BININT", "INT", "LONG"):
+            i = int(arg)
+            self._push(i)
+            self.ints.append(i)
+        elif opname in ("FLOAT", "BINFLOAT"):
+            self._push(float(arg))
+        elif opname == "NONE":
+            self._push(None)
+        elif opname == "NEWTRUE":
+            self._push(True)
+            self.fortran = True
+        elif opname == "NEWFALSE":
+            self._push(False)
+            self.fortran = False
+        elif opname == "EMPTY_TUPLE":
+            self._push(())
+        elif opname == "EMPTY_LIST":
+            self._push([])
+        elif opname == "EMPTY_DICT":
+            self._push({})
+        elif opname == "EMPTY_SET":
+            self._push(set())
+        elif opname == "MARK":
+            self._push(self._MARK)
         elif opname in ("TUPLE1", "TUPLE2", "TUPLE3"):
             k = int(opname[-1])
-            if len(self.ints) >= k:
-                self.shape = tuple(self.ints[-k:])
-            self.ints = []
-        elif opname == "SHORT_BINUNICODE" and arg in _KNOWN_DESCR:
-            self.descr = str(arg)
-        elif opname in ("NEWFALSE", "NEWTRUE"):
-            # numpy's `_reconstruct` state writes is_fortran right before data.
-            self.fortran = opname == "NEWTRUE"
+            items = [self._pop() for _ in range(k)]
+            items.reverse()
+            t = tuple(items)
+            self._push(t)
+            self._maybe_set_shape(items)
+            if items and all(isinstance(x, int) for x in items):
+                self.ints = []
+        elif opname == "TUPLE":
+            items = self._pop_to_mark()
+            t = tuple(items)
+            self._push(t)
+            self._maybe_set_shape(items)
+        elif opname == "LIST":
+            self._push(self._pop_to_mark())
+        elif opname == "DICT":
+            items = self._pop_to_mark()
+            d: dict[object, object] = {}
+            for i in range(0, len(items), 2):
+                d[items[i]] = items[i + 1]
+            self._push(d)
+        elif opname == "SETITEM":
+            v = self._pop()
+            k = self._pop()
+            d = self._pop()
+            if isinstance(d, dict):
+                d[k] = v
+            self._push(d)
+        elif opname == "APPEND":
+            v = self._pop()
+            lst = self._pop()
+            if isinstance(lst, list):
+                lst.append(v)
+            self._push(lst)
+        elif opname == "SETITEMS":
+            pairs = self._pop_to_mark()
+            d = self._pop()
+            if isinstance(d, dict):
+                for i in range(0, len(pairs), 2):
+                    d[pairs[i]] = pairs[i + 1]
+            self._push(d)
+        elif opname == "APPENDS":
+            vals = self._pop_to_mark()
+            lst = self._pop()
+            if isinstance(lst, list):
+                lst.extend(vals)
+            self._push(lst)
+        elif opname == "ADDITEMS":
+            vals = self._pop_to_mark()
+            s = self._pop()
+            if isinstance(s, set):
+                s.update(vals)
+            self._push(s)
+        elif opname == "STACK_GLOBAL":
+            name = self._pop()
+            module = self._pop()
+            if module in ("numpy", "numpy.core.multiarray", "numpy._core.multiarray") and name == "dtype":
+                self._push(_DtypeBuilder())
+            else:
+                self._push(_Global(str(module), str(name)))
+        elif opname == "REDUCE":
+            args = self._pop()
+            func = self._pop()
+            if isinstance(func, _DtypeBuilder) and isinstance(args, tuple) and len(args) == 1:
+                text = str(args[0])
+                d = _Descr(text)
+                self._push(d)
+                self._set_descr(d)
+            else:
+                self._push(_Unknown("reduce"))
+        elif opname == "BUILD":
+            state = self._pop()
+            inst = self._pop()
+            self._push(_Unknown("object"))
+        elif opname in ("NEWOBJ", "NEWOBJ_EX"):
+            args = self._pop()
+            cls = self._pop()
+            self._push(_Unknown("newobj"))
+        elif opname in ("GET", "BINGET", "LONG_BINGET"):
+            idx = int(arg)
+            v = self.memo.get(idx, _Unknown("missing"))
+            self._push(v)
+            self._set_descr(v)
+        elif opname in ("PUT", "BINPUT", "LONG_BINPUT"):
+            idx = int(arg)
+            self._memoize_top(idx)
+            self.memo_next = max(self.memo_next, idx + 1)
+        elif opname == "MEMOIZE":
+            self._memoize_top(self.memo_next)
+            self.memo_next += 1
+        elif opname in ("POP", "POP_MARK"):
+            self._pop_to_mark()
+        elif opname == "DUP":
+            if self.stack:
+                self._push(self.stack[-1])
+        elif opname in ("PERSID", "BINPERSID"):
+            self._push(_Unknown("persid"))
 
     def spec(self, name: str, offset: int, nbytes: int) -> ArraySpec:
         if self.shape is None or self.descr is None:
@@ -234,18 +436,20 @@ def _payload_at(
         return None
     nbytes = len(arg) if isinstance(arg, bytes) else int(arg)
     if nbytes < _MIN_PAYLOAD_BYTES:
+        state.feed(opname, arg)
         return None
     return state.spec(name, base + pos + header, nbytes)
 
 
-def _scan_window(window: bytes, base: int, name: str) -> ArraySpec | None:
+def _scan_window(
+    window: bytes, base: int, name: str, state: _HeaderState
+) -> ArraySpec | None:
     """Return the first ndarray payload in ``window``, or ``None`` if there is none.
 
     ``base`` is the window's absolute offset in the file; returned offsets are
     absolute. A truncated window (the payload lies past its end) still yields a
     complete spec, because the payload is intercepted by size before it is read.
     """
-    state = _HeaderState()
     stream = _StopAtPayload(window)
     try:
         for op, arg, pos in pickletools.genops(stream):
@@ -257,10 +461,6 @@ def _scan_window(window: bytes, base: int, name: str) -> ArraySpec | None:
     except _PayloadBoundary as boundary:
         # tell() sits just past the length field, i.e. at the payload itself.
         return state.spec(name, base + boundary.offset, boundary.nbytes)
-    except (ValueError, IndexError, AssertionError, struct.error, EOFError):
-        # Window ended mid-opcode with no payload in it: nothing more to find.
-        # Narrow on purpose so an ExportError from state.spec still propagates.
-        return None
     return None
 
 
@@ -280,12 +480,22 @@ def scan_shard(path: Path) -> list[ArraySpec]:
         raise ExportError(f"{path.name}: empty file, no ndarray payload found")
 
     specs: list[ArraySpec] = []
+    state = _HeaderState()
     with open(path, "rb") as fh:
         mm = mmap_mod.mmap(fh.fileno(), 0, access=mmap_mod.ACCESS_READ)
         try:
             base = 0
             while base < size:
-                spec = _scan_window(mm[base : min(size, base + _SCAN_WINDOW)], base, path.name)
+                try:
+                    spec = _scan_window(
+                        mm[base : min(size, base + _SCAN_WINDOW)], base, path.name, state
+                    )
+                except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
+                    if specs:
+                        raise ExportError(
+                            f"{path.name}: corrupted pickle after {len(specs)} array(s): {exc}"
+                        ) from exc
+                    break
                 if spec is None:
                     break
                 _reject_unsupported(spec, size, path.name)
@@ -488,17 +698,35 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
 def structural_stem(name: str) -> str:
     """``block_000.slot_04.attn_proj_i8.model_width`` -> filename stem.
 
-    Rejects path separators and parent-reference segments so a malformed
-    conversion manifest cannot write outside ``--output-dir``.
+    Rejects path separators, Windows drive letters, and parent-reference
+    segments so a malformed conversion manifest cannot write outside
+    ``--output-dir``.
     """
     if any(sep in name for sep in "/\\"):
         raise ExportError(f"structural name contains path separator: {name!r}")
+    if ":" in name:
+        raise ExportError(f"structural name contains colon (drive-relative path): {name!r}")
     parts = name.split(".")
     if any(part in ("", "..") for part in parts):
         raise ExportError(
             f"structural name has empty or parent-reference segment: {name!r}"
         )
     return name.replace(".", "__")
+
+
+def _safe_out_path(output_dir: Path, name: str) -> Path:
+    """Resolve the final output path and enforce it stays under ``output_dir``.
+
+    The structural name is sanitized above, but a literal ``..`` or absolute
+    prefix could still be introduced by platform-specific path handling.
+    """
+    out = (output_dir / f"{structural_stem(name)}.npy").resolve()
+    base = output_dir.resolve()
+    if base not in out.parents and out != base:
+        raise ExportError(
+            f"resolved output path {out} escapes --output-dir {base} for name {name!r}"
+        )
+    return out
 
 
 def load_manifest(path: Path) -> list[dict]:
@@ -570,7 +798,7 @@ def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: b
         shard = Path(t["source_shard_path"])
         if not shard.exists():
             raise ExportError(f"{name}: shard missing: {shard}")
-        out = output_dir / f"{structural_stem(name)}.npy"
+        out = _safe_out_path(output_dir, name)
         # expect_shape cross-checks the manifest against the shard before writing.
         info = export_tensor(
             shard, out, chunk_mib=chunk_mib, dry_run=dry_run, expect_shape=t["shape"]

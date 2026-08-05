@@ -115,6 +115,18 @@ class ScanShardTests(unittest.TestCase):
                 exp.scan_shard(p)
             self.assertIn("Fortran", str(ctx.exception))
 
+    def test_memoized_dtype_reused_across_arrays(self) -> None:
+        """A dtype object memoized by the pickler (BINGET) must not lose the descriptor."""
+        a = np.arange(24, dtype="<f4").reshape(4, 6)
+        b = np.arange(48, dtype="<f4").reshape(6, 8)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            _write_shard(p, (a, b))
+            specs = exp.scan_shard(p)
+        self.assertEqual(len(specs), 2)
+        self.assertEqual([s.descr for s in specs], ["f4", "f4"])
+        self.assertEqual([s.shape for s in specs], [(4, 6), (6, 8)])
+
     def test_large_payload_is_not_materialized(self) -> None:
         """The scanner reports payload offsets without reading the payload."""
         a = np.zeros(1 << 20, dtype="<f4")  # 4 MiB, far above _PAYLOAD_READ_LIMIT
@@ -250,7 +262,8 @@ class DequantTests(unittest.TestCase):
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.export_tensor(shard, out, expect_shape=(4, 5))
             self.assertIn("refusing to write", str(ctx.exception))
-        self.assertFalse(out.exists())
+            self.assertFalse(out.exists())
+            self.assertFalse(out.with_suffix(out.suffix + ".partial").exists())
 
     def test_matching_expect_shape_writes(self) -> None:
         a = np.arange(16, dtype="<f4").reshape(4, 4)
@@ -266,7 +279,8 @@ class DequantTests(unittest.TestCase):
             shard, out = Path(td) / "s", Path(td) / "o.npy"
             _write_shard(shard, a)
             info = exp.export_tensor(shard, out, dry_run=True)
-        self.assertFalse(out.exists())
+            self.assertFalse(out.exists())
+            self.assertFalse(out.with_suffix(out.suffix + ".partial").exists())
         self.assertEqual(info["out_bytes"], 64)
 
     def test_nonpositive_chunk_mib_rejected(self) -> None:
@@ -370,6 +384,12 @@ class StemTests(unittest.TestCase):
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.structural_stem(bad)
             self.assertIn("parent-reference", str(ctx.exception).lower())
+
+    def test_drive_relative_rejected(self) -> None:
+        for bad in ("C:foo.bar", "D:foo", "foo:Dbar"):
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.structural_stem(bad)
+            self.assertIn("colon", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":

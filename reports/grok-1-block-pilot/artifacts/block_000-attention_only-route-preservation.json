@@ -11,9 +11,10 @@
     "ternary_tensors": 4,
     "preserve_tensors": 5,
     "pack_metadata": {
-      "oz.gif_threshold": "per-tensor (0.4 attn_proj_i8.*, 0.9 moe_expert.*); pipeline default 0.05",
+      "oz.gif_threshold": "0.05",
       "oz.name": "grok-ozempic",
-      "oz.quantization_version": 1
+      "oz.quantization_version": 1,
+      "oz.gif_threshold_note": "per-tensor (0.4 attn_proj_i8.*, 0.9 moe_expert.*); pipeline default 0.05"
     },
     "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
     "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",

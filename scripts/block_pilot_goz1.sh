@@ -71,10 +71,21 @@ allowed = []
 if isinstance(plan, list):
     allowed = [(p.get("block"), p.get("mode")) for p in plan if isinstance(p, dict)]
 elif isinstance(plan, dict):
-    for key in ("pilots", "selected", "runs", "matrix"):
-        if key in plan and isinstance(plan[key], list):
-            allowed = [(p.get("block"), p.get("mode")) for p in plan[key] if isinstance(p, dict)]
-            break
+    # run3 schema: selected_blocks[{block_index, ...}] x modes[...]
+    selected_blocks = plan.get("selected_blocks")
+    modes = plan.get("modes")
+    if isinstance(selected_blocks, list) and isinstance(modes, list):
+        allowed = [
+            (p.get("block_index"), m)
+            for p in selected_blocks
+            if isinstance(p, dict)
+            for m in modes
+        ]
+    else:
+        for key in ("pilots", "selected", "runs", "matrix"):
+            if key in plan and isinstance(plan[key], list):
+                allowed = [(p.get("block"), p.get("mode")) for p in plan[key] if isinstance(p, dict)]
+                break
     if not allowed:
         for k, v in plan.items():
             if isinstance(v, dict) and "modes" in v:
@@ -105,10 +116,22 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== [1/5] dequant export: $BLOCK_LABEL / $MODE -> $STAGE"
+set +e
 "${TIME_V[@]}" python3 "$REPO/scripts/export_grok1_int8_npy.py" \
   --conversion-manifest "$RUN3/conversion-manifest.json" \
   --block "$BLOCK" --mode "$MODE" \
   --output-dir "$STAGE" 2>&1 | tee "$ART/logs/$TAG-export.log"
+EXPORT_RC="${PIPESTATUS[0]}"
+EXPORT_TEE_RC="${PIPESTATUS[1]}"
+set -e
+if [ "$EXPORT_TEE_RC" -ne 0 ]; then
+  echo "error: export log tee failed (exit $EXPORT_TEE_RC)" >&2
+  exit "$EXPORT_TEE_RC"
+fi
+if [ "$EXPORT_RC" -ne 0 ]; then
+  echo "error: export failed (exit $EXPORT_RC)" >&2
+  exit "$EXPORT_RC"
+fi
 
 echo "== [2/5] derive tier-aware V2 pilot manifest"
 MANIFEST="$ART/$TAG-manifest.json"
@@ -174,16 +197,40 @@ PY
 
 echo "== [3/5] pack GOZ1 (--verify)"
 PACK="$ART/$TAG.goz1"
+set +e
 "${TIME_V[@]}" "$BIN" quantize-goz1 \
   --input-dir "$STAGE" \
   --output "$PACK" \
   --manifest "$MANIFEST" \
   --input-format npy \
   --verify 2>&1 | tee "$ART/logs/$TAG-pack.log"
+PACK_RC="${PIPESTATUS[0]}"
+PACK_TEE_RC="${PIPESTATUS[1]}"
+set -e
+if [ "$PACK_TEE_RC" -ne 0 ]; then
+  echo "error: pack log tee failed (exit $PACK_TEE_RC)" >&2
+  exit "$PACK_TEE_RC"
+fi
+if [ "$PACK_RC" -ne 0 ]; then
+  echo "error: GOZ1 pack failed (exit $PACK_RC)" >&2
+  exit "$PACK_RC"
+fi
 
 echo "== [4/5] exact trit histogram"
+set +e
 python3 "$REPO/scripts/goz1_trit_histogram.py" "$PACK" \
   --json-out "$ART/$TAG-histogram.json" 2>&1 | tee "$ART/logs/$TAG-histogram.log"
+HIST_RC="${PIPESTATUS[0]}"
+HIST_TEE_RC="${PIPESTATUS[1]}"
+set -e
+if [ "$HIST_TEE_RC" -ne 0 ]; then
+  echo "error: histogram log tee failed (exit $HIST_TEE_RC)" >&2
+  exit "$HIST_TEE_RC"
+fi
+if [ "$HIST_RC" -ne 0 ]; then
+  echo "error: histogram failed (exit $HIST_RC)" >&2
+  exit "$HIST_RC"
+fi
 
 echo "== [4a/5] annotate histogram with per-tensor effective τ"
 python3 - "$ART/$TAG-histogram.json" "$TAU_ATTN" "$TAU_EXPERT" <<'PY'
@@ -193,9 +240,10 @@ hist = json.load(open(hist_path))
 def kind_of(name):
     return name.split(".", 2)[2] if name.count(".") >= 2 else name
 default = hist["metadata"].get("oz.gif_threshold", "?")
-hist["metadata"]["oz.gif_threshold"] = (
-    f"per-tensor ({tau_attn} attn_proj_i8.*, {tau_expert} moe_expert.*); "
-    f"pipeline default {default}"
+hist["metadata"]["oz.gif_threshold"] = default
+hist["metadata"]["oz.gif_threshold_note"] = (
+    f"per-tensor effective_tau: {tau_attn} for attn_proj_i8.*, "
+    f"{tau_expert} for moe_expert.*; pipeline default {default}"
 )
 for t in hist["tensors"]:
     if t["type"] != "ternary":
@@ -240,12 +288,18 @@ set +e
 python3 "$REPO/scripts/route_preservation_metrics.py" \
   --npy-dir "$STAGE" \
   --pack "$PACK" \
+  --conversion-manifest "$RUN3/conversion-manifest.json" \
   --block "$BLOCK" \
   --mode "$MODE" \
   --json-out "$ART/$TAG-route-preservation.json" 2>&1 |
   tee "$ART/logs/$TAG-metrics.log"
 METRICS_RC="${PIPESTATUS[0]}"
+TEE_RC="${PIPESTATUS[1]}"
 set -e
+if [ "$TEE_RC" -ne 0 ]; then
+  echo "error: metrics log tee failed (exit $TEE_RC)" >&2
+  exit "$TEE_RC"
+fi
 if [ "$METRICS_RC" -eq 3 ]; then
   echo "note: route-preservation gates did not all pass (exit 3) — recorded, not fatal"
 elif [ "$METRICS_RC" -ne 0 ]; then
@@ -262,9 +316,10 @@ def kind_of(name):
     return name.split(".", 2)[2] if name.count(".") >= 2 else name
 md = rep.setdefault("pilot", {}).setdefault("pack_metadata", {})
 default = md.get("oz.gif_threshold", "?")
-md["oz.gif_threshold"] = (
-    f"per-tensor ({tau_attn} attn_proj_i8.*, {tau_expert} moe_expert.*); "
-    f"pipeline default {default}"
+md["oz.gif_threshold"] = default
+md["oz.gif_threshold_note"] = (
+    f"per-tensor effective_tau: {tau_attn} for attn_proj_i8.*, "
+    f"{tau_expert} for moe_expert.*; pipeline default {default}"
 )
 rep["pilot"]["effective_tau_policy"] = {
     "attn_proj_i8.*": float(tau_attn),
