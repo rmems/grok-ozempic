@@ -459,6 +459,41 @@ def _scan_window(
     return None
 
 
+def _shard_byte_size(path: Path) -> int:
+    """Return file size or raise ExportError for unreadable/empty shards."""
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise ExportError(f"{path}: cannot stat shard: {exc}") from exc
+    if size == 0:
+        raise ExportError(f"{path.name}: empty file, no ndarray payload found")
+    return size
+
+
+def _scan_mmap(mm, size: int, name: str) -> list[ArraySpec]:
+    """Walk one mmap window-by-window, collecting every ndarray payload."""
+    specs: list[ArraySpec] = []
+    state = _HeaderState()
+    base = 0
+    while base < size:
+        try:
+            spec = _scan_window(
+                mm[base : min(size, base + _SCAN_WINDOW)], base, name, state
+            )
+        except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
+            if specs:
+                raise ExportError(
+                    f"{name}: corrupted pickle after {len(specs)} array(s): {exc}"
+                ) from exc
+            break
+        if spec is None:
+            break
+        _reject_unsupported(spec, size, name)
+        specs.append(spec)
+        base = spec.offset + spec.nbytes
+    return specs
+
+
 def scan_shard(path: Path) -> list[ArraySpec]:
     """Recover every ndarray in a pickle shard without unpickling it.
 
@@ -467,35 +502,11 @@ def scan_shard(path: Path) -> list[ArraySpec]:
     memory here. Raises on unknown dtypes or Fortran order so an unrecognized
     layout fails loudly instead of exporting garbage.
     """
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise ExportError(f"{path}: cannot stat shard: {exc}") from exc
-    if size == 0:
-        raise ExportError(f"{path.name}: empty file, no ndarray payload found")
-
-    specs: list[ArraySpec] = []
-    state = _HeaderState()
+    size = _shard_byte_size(path)
     with open(path, "rb") as fh:
         mm = mmap_mod.mmap(fh.fileno(), 0, access=mmap_mod.ACCESS_READ)
         try:
-            base = 0
-            while base < size:
-                try:
-                    spec = _scan_window(
-                        mm[base : min(size, base + _SCAN_WINDOW)], base, path.name, state
-                    )
-                except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
-                    if specs:
-                        raise ExportError(
-                            f"{path.name}: corrupted pickle after {len(specs)} array(s): {exc}"
-                        ) from exc
-                    break
-                if spec is None:
-                    break
-                _reject_unsupported(spec, size, path.name)
-                specs.append(spec)
-                base = spec.offset + spec.nbytes
+            specs = _scan_mmap(mm, size, path.name)
         finally:
             mm.close()
     if not specs:

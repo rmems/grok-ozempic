@@ -7,6 +7,8 @@ frames -- the same shape the official Grok-1 ckpt-0 shards have.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import sys
 import tempfile
 import unittest

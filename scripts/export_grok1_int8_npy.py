@@ -13,25 +13,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from export_grok1_int8_dequant import (  # noqa: F401
+from export_grok1_int8_dequant import (
     DEFAULT_CHUNK_MIB,
     export_tensor,
-    grouping,
+    grouping as grouping,
     npy_header,
 )
-from export_grok1_int8_scan import (  # noqa: F401
-    ArraySpec,
+from export_grok1_int8_scan import (
+    ArraySpec as ArraySpec,
     ExportError,
-    _HeaderState,
-    _PAYLOAD_READ_LIMIT,
-    _StopAtPayload,
-    _Unknown,
+    _HeaderState as _HeaderState,
+    _PAYLOAD_READ_LIMIT as _PAYLOAD_READ_LIMIT,
+    _StopAtPayload as _StopAtPayload,
+    _Unknown as _Unknown,
     scan_shard,
-    split_quantized,
+    split_quantized as split_quantized,
 )
-from export_grok1_int8_select import (  # noqa: F401
-    ATTENTION_KINDS,
-    EXPERT_KINDS,
+from export_grok1_int8_select import (
+    ATTENTION_KINDS as ATTENTION_KINDS,
+    EXPERT_KINDS as EXPERT_KINDS,
     MODES,
     PRESERVE_KINDS,
     load_manifest,
@@ -39,6 +39,31 @@ from export_grok1_int8_select import (  # noqa: F401
     structural_stem,
     _safe_out_path,
 )
+
+# Public re-exports for `import export_grok1_int8_npy as exp` unit tests.
+__all__ = [
+    "ATTENTION_KINDS",
+    "ArraySpec",
+    "DEFAULT_CHUNK_MIB",
+    "EXPERT_KINDS",
+    "ExportError",
+    "MODES",
+    "PRESERVE_KINDS",
+    "export_tensor",
+    "grouping",
+    "load_manifest",
+    "npy_header",
+    "scan_shard",
+    "select_tensors",
+    "split_quantized",
+    "structural_stem",
+    "_HeaderState",
+    "_PAYLOAD_READ_LIMIT",
+    "_StopAtPayload",
+    "_Unknown",
+    "_safe_out_path",
+]
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
