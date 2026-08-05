@@ -16,6 +16,10 @@ jobs:
   review:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    # Advisory only: SuperGrok OIDC in GROK_AUTH_JSON expires (~hours) and must be
+    # re-uploaded from ~/.grok/auth.json; auth misses and review findings must not
+    # block merge. Real gates are rust/python/codacy workflows.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,7 +29,8 @@ jobs:
         with:
           grok_auth_json: ${{ secrets.GROK_AUTH_JSON }}
           roast_level: professional
-          fail_on: bugs
+          # Post comments when auth works; never fail the check on findings.
+          fail_on: never
           effort: high
           max_diff_kb: "300"
           custom_instructions: |
