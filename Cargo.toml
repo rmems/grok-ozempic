@@ -1,10 +1,10 @@
 [package]
 name = "grok-ozempic"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "SNN-logic quantization for Grok models — turning fat into spikes"
 repository = "https://github.com/rmems/grok-ozempic"
-license = "GPL-3.0-or-later"
+license = "Apache-2.0 OR MIT"
 keywords = ["snn", "spiking", "quantization", "moe", "grok"]
 categories = ["science", "algorithms"]
 readme = "README.md"
