@@ -14,7 +14,9 @@
 #
 # The pilot manifest is derived at runtime from the in-tree V2 structural
 # manifest; nothing under dissect/ is modified (xai-dissect stays authoritative).
-# defaults.gif_threshold is stripped and per-tensor τ set instead, because
+# The deriver is fail-closed: unknown ternary families abort rather than silently
+# inheriting the attention τ. defaults.gif_threshold is stripped and per-tensor
+# τ set instead, because
 # defaults silently override CLI --gif-threshold (the #51 τ trap,
 # src/core/precision.rs::resolve_threshold).
 #
@@ -118,7 +120,12 @@ for e in m["ternary_candidates"]:
         continue  # token_embedding: deferred, and dropped so a stray npy hard-errors
     if k not in pilot:
         sys.exit(f"error: ternary candidate {e['name']!r} (kind {k!r}) not in quant-plan pilot_quantize")
-    tau = float(tau_expert) if k.startswith("moe_expert") else float(tau_attn)
+    if k.startswith("moe_expert"):
+        tau = float(tau_expert)
+    elif k.startswith("attn_proj_i8"):
+        tau = float(tau_attn)
+    else:
+        sys.exit(f"error: ternary candidate {e['name']!r} (kind {k!r}) has no defined τ; supported families are attn_proj_i8.* and moe_expert.*")
     cands.append({**e, "gif_threshold": tau})
 
 m["ternary_candidates"] = cands
