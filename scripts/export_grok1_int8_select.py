@@ -20,9 +20,16 @@ MODES = {
 
 
 def structural_stem(name: str) -> str:
-    """``block_000.slot_04.attn_proj_i8.model_width`` -> filename stem."""
+    """``block_000.slot_04.attn_proj_i8.model_width`` -> filename stem.
+
+    Rejects path separators, Windows drive letters, and parent-reference
+    segments so a malformed conversion manifest cannot write outside
+    ``--output-dir``.
+    """
     if any(sep in name for sep in "/\\"):
         raise ExportError(f"structural name contains path separator: {name!r}")
+    if ":" in name:
+        raise ExportError(f"structural name contains colon (drive-relative path): {name!r}")
     parts = name.split(".")
     if any(part in ("", "..") for part in parts):
         raise ExportError(
@@ -31,14 +38,27 @@ def structural_stem(name: str) -> str:
     return name.replace(".", "__")
 
 
+def _safe_out_path(output_dir: Path, name: str) -> Path:
+    """Resolve the final output path and enforce it stays under ``output_dir``.
+
+    The structural name is sanitized above, but a literal ``..`` or absolute
+    prefix could still be introduced by platform-specific path handling.
+    """
+    out = (output_dir / f"{structural_stem(name)}.npy").resolve()
+    base = output_dir.resolve()
+    if base not in out.parents and out != base:
+        raise ExportError(
+            f"resolved output path {out} escapes --output-dir {base} for name {name!r}"
+        )
+    return out
+
+
 def load_manifest(path: Path) -> list[dict]:
     with open(path, "rb") as fh:
         doc = json.load(fh)
     tensors = doc.get("tensors")
     if not isinstance(tensors, list) or not tensors:
-        raise ExportError(
-            f"{path}: no `tensors` array (not an xai-dissect conversion manifest?)"
-        )
+        raise ExportError(f"{path}: no `tensors` array (not an xai-dissect conversion manifest?)")
     return tensors
 
 
@@ -49,6 +69,7 @@ def select_tensors(
     mode: str,
     names: list[str],
 ) -> list[dict]:
+    """Pick explicit structural names, or every tensor of one block in ``mode``."""
     if names:
         return _select_by_names(tensors, names)
     return _select_by_block(tensors, block, mode)
@@ -68,3 +89,5 @@ def _select_by_block(tensors: list[dict], block: int | None, mode: str) -> list[
     if not picked:
         raise ExportError(f"no tensors for block {block} in mode {mode}")
     return picked
+
+

@@ -18,7 +18,6 @@ from goz1_trit_histogram import (  # noqa: E402
     read_header,
 )
 
-# Re-export tensor type constants for callers.
 __all__ = [
     "MetricsError",
     "TENSOR_F16",
@@ -29,6 +28,8 @@ __all__ = [
 ]
 
 # Trit code -> value, matching quantizer.rs encode_trit (0b00=0, 0b01=+1, 0b10=-1).
+# 0b11 is not a valid code; it is tracked separately so a corrupt pack raises
+# instead of being silently counted as a zero (mirrors goz1_trit_histogram.py).
 _TRIT_LUT = np.zeros((256, 4), dtype=np.int8)
 _INVALID_LUT = np.zeros((256, 4), dtype=bool)
 for _b in range(256):
@@ -52,9 +53,7 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
         n = _num_elements(t["shape"])
         nbytes = _payload_nbytes(t["tensor_type"], n, t["name"])
         if t["data_offset"] != rel:
-            raise MetricsError(
-                f"{t['name']}: data_offset {t['data_offset']} != cumulative {rel}"
-            )
+            raise MetricsError(f"{t['name']}: data_offset {t['data_offset']} != cumulative {rel}")
         index[t["name"]] = {
             **t,
             "numel": n,
@@ -66,7 +65,12 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
 
 
 def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
-    """Decode ``count`` trits starting at flat index ``start``."""
+    """Decode ``count`` trits starting at flat index ``start``.
+
+    Any flat start is accepted: the read is floored to the enclosing byte and the
+    leading remainder sliced off, so callers are free to chunk by whole rows
+    regardless of whether the row length is a multiple of 4.
+    """
     byte0, skip = divmod(start, 4)
     nbytes = (skip + count + 3) // 4
     with pack.open("rb") as f:
@@ -74,8 +78,8 @@ def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
         raw = f.read(nbytes)
     if len(raw) != nbytes:
         raise MetricsError(
-            f"{entry['name']}: truncated pack -- wanted {nbytes} bytes at payload "
-            f"offset {byte0} (flat trit {start}), got {len(raw)}"
+            f"{entry['name']}: truncated pack -- wanted {nbytes} bytes at payload offset "
+            f"{byte0} (flat trit {start}), got {len(raw)}"
         )
     buf = np.frombuffer(raw, dtype=np.uint8)
     if _INVALID_LUT[buf].any():
@@ -86,13 +90,15 @@ def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
 
 
 def read_f16(pack: Path, entry: dict) -> np.ndarray:
-    """Read a preserve-tier fp16 payload; short reads are MetricsError (exit 2)."""
+    """Read an fp16 preserve-tier tensor and fail closed on truncated payloads."""
     with pack.open("rb") as f:
         f.seek(entry["abs_offset"])
         raw = f.read(entry["nbytes"])
     if len(raw) != entry["nbytes"]:
         raise MetricsError(
-            f"{entry['name']}: truncated preserve payload -- wanted {entry['nbytes']} "
-            f"bytes, got {len(raw)}"
+            f"{entry['name']}: truncated pack -- wanted {entry['nbytes']} bytes for fp16 payload, "
+            f"got {len(raw)}"
         )
     return np.frombuffer(raw, dtype="<f2").astype(np.float32).reshape(entry["shape"])
+
+

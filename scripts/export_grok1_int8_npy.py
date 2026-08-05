@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
 r"""
-Export Grok-1 official ``ckpt-0`` shards to stream-compatible f32 ``.npy`` files,
-**dequantizing** ``QuantizedWeight8bit`` (int8 weight x bfloat16 scales) payloads.
+Export Grok-1 official ckpt-0 shards to f32 .npy (int8 x bf16 dequant).
 
-Implementation is split across:
-
-* ``export_grok1_int8_scan`` — pickletools opcode scan (never unpickles)
-* ``export_grok1_int8_dequant`` — grouped-scale dequant + npy write
-* ``export_grok1_int8_select`` — conversion-manifest selection
-
-This module is the CLI entrypoint and re-export surface for tests
-(``import export_grok1_int8_npy as exp``).
-
-See GH #53 / RM-222 / beads ``goz-dus0``.
+Split modules: export_grok1_int8_scan / _dequant / _select.
+This file is the CLI entrypoint and test re-export surface (GH #53 / RM-222).
 """
-
 from __future__ import annotations
 
 import argparse
@@ -23,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from export_grok1_int8_dequant import (  # noqa: F401  re-export for tests
+from export_grok1_int8_dequant import (  # noqa: F401
     DEFAULT_CHUNK_MIB,
     export_tensor,
     grouping,
@@ -32,8 +22,10 @@ from export_grok1_int8_dequant import (  # noqa: F401  re-export for tests
 from export_grok1_int8_scan import (  # noqa: F401
     ArraySpec,
     ExportError,
+    _HeaderState,
     _PAYLOAD_READ_LIMIT,
     _StopAtPayload,
+    _Unknown,
     scan_shard,
     split_quantized,
 )
@@ -45,8 +37,8 @@ from export_grok1_int8_select import (  # noqa: F401
     load_manifest,
     select_tensors,
     structural_stem,
+    _safe_out_path,
 )
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -79,7 +71,8 @@ def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: b
         shard = Path(t["source_shard_path"])
         if not shard.exists():
             raise ExportError(f"{name}: shard missing: {shard}")
-        out = output_dir / f"{structural_stem(name)}.npy"
+        out = _safe_out_path(output_dir, name)
+        # expect_shape cross-checks the manifest against the shard before writing.
         info = export_tensor(
             shard, out, chunk_mib=chunk_mib, dry_run=dry_run, expect_shape=t["shape"]
         )
@@ -94,7 +87,18 @@ def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: b
     return total
 
 
-def _require_export_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.inspect:
+        for spec in scan_shard(args.inspect):
+            print(
+                f"{spec.descr:>9} {spec.shape!s:>24}  "
+                f"offset={spec.offset}  bytes={spec.nbytes}"
+            )
+        return 0
+
     if not args.conversion_manifest:
         parser.error("--conversion-manifest is required (or use --inspect)")
     if not args.output_dir:
@@ -104,20 +108,6 @@ def _require_export_args(parser: argparse.ArgumentParser, args: argparse.Namespa
     if args.chunk_mib <= 0:
         parser.error("--chunk-mib must be a positive integer")
 
-
-def main(argv: list[str]) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
-    if args.inspect:
-        for spec in scan_shard(args.inspect):
-            print(
-                f"{spec.descr:>9} {str(spec.shape):>24}  "
-                f"offset={spec.offset}  bytes={spec.nbytes}"
-            )
-        return 0
-
-    _require_export_args(parser, args)
     picked = select_tensors(
         load_manifest(args.conversion_manifest),
         block=args.block,

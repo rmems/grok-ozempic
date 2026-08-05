@@ -8,9 +8,13 @@ from export_grok1_int8_scan import ArraySpec, ExportError, scan_shard, split_qua
 
 DEFAULT_CHUNK_MIB = 256
 
-
 def grouping(weight: ArraySpec, scales: ArraySpec) -> tuple[tuple[int, ...], int, int, int]:
-    """Validate the grouped-scale layout; return ``(lead, K, N, G)``."""
+    """Validate the grouped-scale layout; return ``(lead, K, N, G)``.
+
+    ``weight`` is ``(*lead, K, N)`` and ``scales`` is ``(*lead, G, N)`` with
+    ``K % G == 0``. Any deviation is fatal: silently guessing a broadcast would
+    produce a plausible-looking but wrong tensor.
+    """
     if len(weight.shape) < 2 or len(scales.shape) != len(weight.shape):
         raise ExportError(
             f"rank mismatch: weight {weight.shape} vs scales {scales.shape}"
@@ -31,6 +35,7 @@ def grouping(weight: ArraySpec, scales: ArraySpec) -> tuple[tuple[int, ...], int
 
 
 def _chunk_rows(chunk_mib: int, bytes_per_row: int) -> int:
+    """Row count for a target chunk size; reject non-positive inputs."""
     if chunk_mib <= 0:
         raise ExportError(f"--chunk-mib must be a positive integer, got {chunk_mib}")
     if bytes_per_row <= 0:
@@ -56,7 +61,12 @@ def export_tensor(
     dry_run: bool = False,
     expect_shape: tuple[int, ...] | list[int] | None = None,
 ) -> dict:
-    """Dequantize (or pass through) one shard into an f32 ``.npy``."""
+    """Dequantize (or pass through) one shard into an f32 ``.npy``.
+
+    Returns a summary dict; with ``dry_run`` nothing is written. ``expect_shape``
+    is checked **before** any bytes are written, so a manifest/shard disagreement
+    never leaves a multi-GiB wrong file behind for a later pack to consume.
+    """
     import numpy as np
 
     weight, scales = split_quantized(scan_shard(shard))
@@ -97,11 +107,16 @@ def export_tensor(
 
 
 def _dequant_chunks(shard: Path, weight: ArraySpec, scales: ArraySpec, chunk_mib: int):
+    """Yield f32 row-blocks of ``weight * scales``, never holding the whole tensor.
+
+    Each block stays inside one scale group, so a single broadcast row applies.
+    """
     import numpy as np
 
     lead, k, n, g = grouping(weight, scales)
     w = np.memmap(shard, dtype=np.int8, mode="r", offset=weight.offset, shape=weight.shape)
     s_raw = np.memmap(shard, dtype="<u2", mode="r", offset=scales.offset, shape=scales.shape)
+    # bfloat16 -> f32 is an exact 16-bit left shift of the bit pattern.
     s = (s_raw.astype(np.uint32) << 16).view(np.float32)
 
     lead_n = 1
@@ -124,6 +139,7 @@ def _dequant_chunks(shard: Path, weight: ArraySpec, scales: ArraySpec, chunk_mib
 
 
 def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = False) -> None:
+    """Write an f32 ``.npy`` atomically from an array or an iterable of chunks."""
     import numpy as np
 
     out_path = Path(out_path)
@@ -133,14 +149,17 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
         with open(tmp, "wb") as fh:
             fh.write(npy_header(tuple(shape)))
             if streaming:
-                for chunk in source:
-                    fh.write(np.ascontiguousarray(chunk, dtype="<f4").tobytes())
+                fh.writelines(
+                    np.ascontiguousarray(chunk, dtype="<f4").tobytes() for chunk in source
+                )
             else:
                 rows = _chunk_rows(chunk_mib, max(1, source[0].nbytes))
-                for r0 in range(0, len(source), rows):
-                    fh.write(
-                        np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
-                    )
+                fh.writelines(
+                    np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
+                    for r0 in range(0, len(source), rows)
+                )
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)
+
+

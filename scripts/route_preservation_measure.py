@@ -15,10 +15,11 @@ from route_preservation_io import (  # noqa: E402
     read_trits,
 )
 
-CHUNK_ELEMS = 1 << 24
+CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole rows)
 DEFAULT_TOKENS = 4096
 DEFAULT_SEED = 20260805
 GATE_FAILURE_EXIT = 3
+
 
 class _TernaryAccumulator:
     """Single-pass sufficient statistics for one ternary tensor.
@@ -51,7 +52,7 @@ class _TernaryAccumulator:
         self.s2 += float(np.einsum("ij,ij->", w, w))
         self.s1_fired += float(af.sum())
         self.n_fired += int(np.count_nonzero(fired))
-        self.sign_mismatch += int(np.count_nonzero(fired & ((w > 0) != (t > 0))))
+        self.sign_mismatch += int(np.count_nonzero(fired & (np.sign(w).astype(np.int8) != t)))
 
         self.max_abs_fired = max(
             self.max_abs_fired, float(np.max(aw, where=fired, initial=0.0))
@@ -273,8 +274,12 @@ def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict
     """Streamed reconstruction stats for every quantized tensor in the pack."""
     weights: dict[str, dict] = {}
     for name in sorted(ternary):
-        _require_npy(npy_dir, name)  # existence guard; ternary_stats reloads via memmap
-        st = ternary_stats(npy_dir / f"{stem_of(name)}.npy", pack, ternary[name])
+        npy = npy_dir / f"{stem_of(name)}.npy"
+        if not npy.exists():
+            raise MetricsError(f"{name}: source npy missing at {npy}")
+        # ternary_stats is the first reader; it streams via np.memmap and must not
+        # be preceded by a full _require_npy load, which would materialize huge npys.
+        st = ternary_stats(npy, pack, ternary[name])
         weights[name] = st
         print(
             f"  ternary {name:<46} zeros={st['sparsity'] * 100:6.2f}%  "
@@ -374,6 +379,5 @@ def measure_routing(
             f"cos={r['block_output_cosine']:.6f}"
         )
     return routing
-
 
 
