@@ -74,6 +74,10 @@ from goz1_trit_histogram import (  # noqa: E402  (path shim above is deliberate)
     read_header,
 )
 from route_preservation_surface import build_summary  # noqa: E402
+from export_grok1_int8_npy import (  # noqa: E402
+    MODES as EXPORT_MODES,
+    PRESERVE_KINDS as EXPORT_PRESERVE_KINDS,
+)
 
 CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole rows)
 DEFAULT_TOKENS = 4096
@@ -385,6 +389,11 @@ def stem_of(name: str) -> str:
     return name.replace(".", "__")
 
 
+def kind_of(name: str) -> str:
+    """``block_000.slot_04.attn_proj_i8.model_width`` -> ``attn_proj_i8.model_width``."""
+    return name.split(".", 2)[2] if name.count(".") >= 2 else name
+
+
 def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict[str, dict]:
     """Streamed reconstruction stats for every quantized tensor in the pack."""
     weights: dict[str, dict] = {}
@@ -407,8 +416,7 @@ def measure_preserve(npy_dir: Path, pack: Path, preserve: dict[str, dict]) -> di
     for name in sorted(preserve):
         npy = npy_dir / f"{stem_of(name)}.npy"
         if not npy.exists():
-            print(f"  warning: {name} has no source npy at {npy}; fp16 round-trip skipped")
-            continue
+            raise MetricsError(f"{name}: source npy missing at {npy}; cannot compute fp16 round-trip error")
         ref = np.load(npy).astype(np.float32)
         got = read_f16(pack, preserve[name])
         d = np.abs(ref - got).astype(np.float64)
@@ -521,16 +529,62 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--npy-dir", type=Path, required=True, help="f32 npy the pack was built from")
     p.add_argument("--pack", type=Path, required=True, help="GOZ1 pack to read back")
     p.add_argument("--block", type=int, required=True)
-    p.add_argument("--mode", required=True)
+    p.add_argument("--mode", required=True, choices=sorted(EXPORT_MODES))
     p.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--json-out", type=Path)
     return p.parse_args(argv)
 
 
+def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:
+    """True if --json-out would overwrite the input pack (path or same inode)."""
+    out_path = json_out.expanduser()
+    out_resolved = out_path.resolve()
+    if out_resolved == pack_path:
+        return True
+    if not out_path.exists():
+        return False
+    try:
+        return out_resolved.samefile(pack_path)
+    except OSError:
+        return False
+
+
+def _validate_pilot_args(args: argparse.Namespace, index: dict[str, dict]) -> None:
+    """Make sure --block and --mode match the pack contents."""
+    if args.tokens <= 0:
+        raise MetricsError(f"--tokens must be positive, got {args.tokens}")
+
+    block_prefix = f"block_{args.block:03d}."
+    for name in index:
+        if not name.startswith(block_prefix):
+            raise MetricsError(
+                f"pack tensor {name!r} does not belong to --block {args.block}"
+            )
+
+    expected_ternary_kinds = set(EXPORT_MODES[args.mode]) - set(EXPORT_PRESERVE_KINDS)
+    actual_ternary_kinds = {
+        kind_of(n) for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY
+    }
+    if actual_ternary_kinds != expected_ternary_kinds:
+        raise MetricsError(
+            f"pack ternary kinds {sorted(actual_ternary_kinds)} do not match --mode "
+            f"{args.mode} expected {sorted(expected_ternary_kinds)}"
+        )
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.tokens <= 0:
+        raise MetricsError(f"--tokens must be a positive integer, got {args.tokens}")
+    pack_path = args.pack.expanduser().resolve()
+    if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
+        raise MetricsError(
+            f"--json-out {args.json_out} resolves to the input pack; "
+            "refusing to overwrite the GOZ1 artifact"
+        )
     metadata, index = load_pack_index(args.pack)
+    _validate_pilot_args(args, index)
     ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
     preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
     print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")

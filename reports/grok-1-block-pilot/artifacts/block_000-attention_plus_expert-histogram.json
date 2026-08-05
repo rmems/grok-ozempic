@@ -11,7 +11,7 @@
     "grok1.embedding_length": 6144,
     "grok1.expert_count": 8,
     "grok1.feed_forward_length": 32768,
-    "oz.gif_threshold": "0.05",
+    "oz.gif_threshold": "per-tensor (0.4 attn_proj_i8.*, 0.9 moe_expert.*); pipeline default 0.05",
     "oz.name": "grok-ozempic",
     "oz.quantization_version": 1
   },
@@ -31,7 +31,8 @@
         "neg": 281636429,
         "invalid": 0
       },
-      "sparsity": 0.6528487776716551
+      "sparsity": 0.6528487776716551,
+      "effective_tau": 0.9
     },
     {
       "name": "block_000.slot_01.moe_expert.down",
@@ -48,7 +49,8 @@
         "neg": 292094023,
         "invalid": 0
       },
-      "sparsity": 0.6372781544923782
+      "sparsity": 0.6372781544923782,
+      "effective_tau": 0.9
     },
     {
       "name": "block_000.slot_02.moe_expert.up",
@@ -65,7 +67,8 @@
         "neg": 286400759,
         "invalid": 0
       },
-      "sparsity": 0.6443704627454281
+      "sparsity": 0.6443704627454281,
+      "effective_tau": 0.9
     },
     {
       "name": "block_000.slot_03.attn_proj_i8.narrow",
@@ -81,7 +84,8 @@
         "neg": 2089113,
         "invalid": 0
       },
-      "sparsity": 0.33654117584228516
+      "sparsity": 0.33654117584228516,
+      "effective_tau": 0.4
     },
     {
       "name": "block_000.slot_04.attn_proj_i8.model_width",
@@ -97,7 +101,8 @@
         "neg": 12575360,
         "invalid": 0
       },
-      "sparsity": 0.3336911201477051
+      "sparsity": 0.3336911201477051,
+      "effective_tau": 0.4
     },
     {
       "name": "block_000.slot_05.attn_proj_i8.model_width",
@@ -113,7 +118,8 @@
         "neg": 12794328,
         "invalid": 0
       },
-      "sparsity": 0.3221785757276747
+      "sparsity": 0.3221785757276747,
+      "effective_tau": 0.4
     },
     {
       "name": "block_000.slot_06.attn_proj_i8.narrow",
@@ -129,7 +135,8 @@
         "neg": 2121861,
         "invalid": 0
       },
-      "sparsity": 0.3253668149312337
+      "sparsity": 0.3253668149312337,
+      "effective_tau": 0.4
     },
     {
       "name": "block_000.slot_07.block_norm",

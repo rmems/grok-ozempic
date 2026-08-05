@@ -357,6 +357,15 @@ def grouping(weight: ArraySpec, scales: ArraySpec) -> tuple[tuple[int, ...], int
     return lead, k, n, g
 
 
+def _chunk_rows(chunk_mib: int, bytes_per_row: int) -> int:
+    """Row count for a target chunk size; reject non-positive inputs."""
+    if chunk_mib <= 0:
+        raise ExportError(f"--chunk-mib must be a positive integer, got {chunk_mib}")
+    if bytes_per_row <= 0:
+        raise ExportError(f"invalid bytes_per_row {bytes_per_row}")
+    return max(1, (chunk_mib * 1024 * 1024) // bytes_per_row)
+
+
 def npy_header(shape: tuple[int, ...], descr: str = "<f4") -> bytes:
     """Build a v1.0 ``.npy`` header padded so the payload starts 64-byte aligned."""
     shape_txt = "(" + "".join(f"{d}," for d in shape) + ")"
@@ -439,7 +448,7 @@ def _dequant_chunks(shard: Path, weight: ArraySpec, scales: ArraySpec, chunk_mib
     wf = w.reshape(lead_n, k, n)
     sf = s.reshape(lead_n, g, n)
     group_rows = k // g
-    rows_per_chunk = max(1, (chunk_mib * 1024 * 1024) // (n * 4))
+    rows_per_chunk = _chunk_rows(chunk_mib, n * 4)
 
     for li in range(lead_n):
         for gi in range(g):
@@ -466,7 +475,7 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
                 for chunk in source:
                     fh.write(np.ascontiguousarray(chunk, dtype="<f4").tobytes())
             else:
-                rows = max(1, (chunk_mib * 1024 * 1024) // max(1, source[0].nbytes))
+                rows = _chunk_rows(chunk_mib, max(1, source[0].nbytes))
                 for r0 in range(0, len(source), rows):
                     fh.write(
                         np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
@@ -477,7 +486,18 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
 
 
 def structural_stem(name: str) -> str:
-    """``block_000.slot_04.attn_proj_i8.model_width`` -> filename stem."""
+    """``block_000.slot_04.attn_proj_i8.model_width`` -> filename stem.
+
+    Rejects path separators and parent-reference segments so a malformed
+    conversion manifest cannot write outside ``--output-dir``.
+    """
+    if any(sep in name for sep in "/\\"):
+        raise ExportError(f"structural name contains path separator: {name!r}")
+    parts = name.split(".")
+    if any(part in ("", "..") for part in parts):
+        raise ExportError(
+            f"structural name has empty or parent-reference segment: {name!r}"
+        )
     return name.replace(".", "__")
 
 
@@ -584,6 +604,8 @@ def main(argv: list[str]) -> int:
         parser.error("--output-dir is required")
     if args.block is None and not args.names:
         parser.error("need --block (with --mode) or at least one --structural-name")
+    if args.chunk_mib <= 0:
+        parser.error("--chunk-mib must be a positive integer")
 
     picked = select_tensors(
         load_manifest(args.conversion_manifest),

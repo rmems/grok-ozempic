@@ -145,19 +145,22 @@ quantization.
 Experts land in the 63–65 % band — inside #51's 50–75 % event-driven target.
 Invalid `0b11` trit codes: **0** in every tensor.
 
-> ⚠ **`oz.gif_threshold` metadata is wrong for per-tensor τ.** Both packs record
-> `oz.gif_threshold = "0.05"` (the CLI default) while the τ that actually applied
-> was 0.4 / 0.9. The metadata only records `defaults || config`, so it cannot see
-> per-tensor overrides — the exact blind spot #51 flagged. The sparsity above is
-> the trustworthy evidence (4 % zeros would indicate τ=0.05; 33 %/65 % confirms
-> 0.4/0.9). Tracked as a follow-up.
+> **Per-tensor τ is recorded in the histogram and route-preservation JSONs; the
+> pack header's `oz.gif_threshold` only stores the pipeline-level default.** The
+> pack writer records `defaults || config` in `oz.gif_threshold` (here the CLI
+> default 0.05), which cannot represent per-tensor overrides. The trustworthy
+> evidence is the per-tensor `effective_tau` field (0.4 for `attn_proj_i8.*`, 0.9
+> for `moe_expert.*`) and the measured sparsity — 4 % zeros would indicate τ=0.05,
+> while 33 %/65 % confirms 0.4/0.9.
 
 ### Route-preservation surface — `unknown` → observed
 
 Filling run3's `route-preservation-report.json` gates for block 0. Reference =
 the dequantized f32 npy; pilot = tensors **read back out of the pack** (trits for
 ternary, fp16 for preserve, so the preserve tier's own round-trip error is
-included). Worst case over the two evaluated `model_width` projections.
+included). Routing metrics are worst case over the two evaluated `model_width`
+projections; weight-reconstruction metrics are worst case over all quantized
+tensors in the `attention_plus_expert` pack.
 
 | Metric | Scope | Threshold | Observed | Status |
 |---|---|---|---|---|
@@ -261,8 +264,10 @@ Giving every output channel its own scale — the obvious next lever, and one GO
 v1 cannot express — moves cosine only to **0.8877 / 0.8962** at τ = 0.6. Still
 nowhere near 0.995.
 
-**Conclusion.** A ≥ 0.995 block-output cosine is **not reachable with 2-bit
-ternary at any τ, with or without per-channel scales**; the ceiling is ~0.90.
+**Conclusion.** For the two `model_width` attention projections evaluated here,
+a ≥ 0.995 block-output cosine is **not reachable with 2-bit ternary at any τ, with
+or without per-channel scales**; the ceiling is ~0.90. That scope is empirical —
+it is not a universal claim about all 2-bit ternary weight matrices.
 Meeting run3's route-preservation gates requires a different mechanism — a
 higher-precision tier for attention, residual/error-feedback quantization, or
 gate thresholds renegotiated for a spiking-sparse target. Ternary remains

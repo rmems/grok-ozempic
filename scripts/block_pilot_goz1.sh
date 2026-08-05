@@ -4,7 +4,8 @@
 # Consumes the xai-dissect run3 planning surface (conversion-manifest +
 # quant-plan + pilot-selection-plan), dequantizes the block's int8 attention /
 # MoE tensors to f32 npy, packs one GOZ1 under a **tier-aware** V2 structural
-# manifest, verifies it, and measures route-preservation metrics.
+# manifest, verifies it, validates the pack counters against the selected mode,
+# and measures route-preservation metrics.
 #
 # Policy enforced here (run3 quant-plan `keep_fp32` + #51 per-tier τ):
 #   preserve : router, block_norm, final_norm   — never ternary, no τ
@@ -53,13 +54,42 @@ fi
   echo "error: $BIN missing; run: cargo build --release --features cli --locked" >&2
   exit 1
 }
-for required in conversion-manifest.json quant-plan.json; do
+for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
   [ -f "$RUN3/$required" ] || {
     echo "error: run3 $required not found under $RUN3" >&2
     echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root" >&2
     exit 1
   }
 done
+
+echo "== [0/5] validate BLOCK/MODE against run3 pilot-selection-plan"
+python3 - "$RUN3/pilot-selection-plan.json" "$BLOCK" "$MODE" <<'PY'
+import json, sys
+path, block, mode = sys.argv[1:4]
+plan = json.load(open(path))
+allowed = []
+if isinstance(plan, list):
+    allowed = [(p.get("block"), p.get("mode")) for p in plan if isinstance(p, dict)]
+elif isinstance(plan, dict):
+    for key in ("pilots", "selected", "runs", "matrix"):
+        if key in plan and isinstance(plan[key], list):
+            allowed = [(p.get("block"), p.get("mode")) for p in plan[key] if isinstance(p, dict)]
+            break
+    if not allowed:
+        for k, v in plan.items():
+            if isinstance(v, dict) and "modes" in v:
+                for m in v["modes"]:
+                    allowed.append((int(k) if k.isdigit() else k, m))
+            elif isinstance(v, list):
+                for m in v:
+                    allowed.append((int(k) if k.isdigit() else k, m))
+try:
+    block_val = int(block)
+except ValueError:
+    block_val = block
+if (block_val, mode) not in allowed:
+    sys.exit(f"error: BLOCK={block} MODE={mode} not in pilot-selection-plan ({path}); allowed: {sorted(set(allowed))}")
+PY
 
 mkdir -p "$HOME/.models/xai-grok-1" "$ART/logs"
 WORK="$(mktemp -d "$HOME/.models/xai-grok-1/block-pilot-stage.XXXXXX")"
@@ -155,6 +185,52 @@ echo "== [4/5] exact trit histogram"
 python3 "$REPO/scripts/goz1_trit_histogram.py" "$PACK" \
   --json-out "$ART/$TAG-histogram.json" 2>&1 | tee "$ART/logs/$TAG-histogram.log"
 
+echo "== [4a/5] annotate histogram with per-tensor effective τ"
+python3 - "$ART/$TAG-histogram.json" "$TAU_ATTN" "$TAU_EXPERT" <<'PY'
+import json, sys
+hist_path, tau_attn, tau_expert = sys.argv[1:4]
+hist = json.load(open(hist_path))
+def kind_of(name):
+    return name.split(".", 2)[2] if name.count(".") >= 2 else name
+default = hist["metadata"].get("oz.gif_threshold", "?")
+hist["metadata"]["oz.gif_threshold"] = (
+    f"per-tensor ({tau_attn} attn_proj_i8.*, {tau_expert} moe_expert.*); "
+    f"pipeline default {default}"
+)
+for t in hist["tensors"]:
+    if t["type"] != "ternary":
+        continue
+    k = kind_of(t["name"])
+    if k.startswith("attn_proj_i8"):
+        t["effective_tau"] = float(tau_attn)
+    elif k.startswith("moe_expert"):
+        t["effective_tau"] = float(tau_expert)
+json.dump(hist, open(hist_path, "w"), indent=2)
+print(f"annotated {hist_path} with per-tensor effective_tau")
+PY
+
+echo "== [4b/5] validate pack counters against selected mode"
+HIST="$ART/$TAG-histogram.json"
+python3 - "$RUN3/conversion-manifest.json" "$HIST" "$BLOCK" "$MODE" "$REPO/scripts" <<'PY'
+import json, sys
+from pathlib import Path
+conv_path, hist_path, block, mode, scripts_dir = sys.argv[1:6]
+block = int(block)
+sys.path.insert(0, scripts_dir)
+from export_grok1_int8_npy import MODES
+PRESERVE = {"router", "block_norm", "final_norm"}
+conv = json.load(open(conv_path))
+hist = json.load(open(hist_path))
+ternary_kinds = set(MODES[mode]) - PRESERVE
+expected_ternary = sum(1 for t in conv["tensors"] if t.get("block") == block and t.get("kind") in ternary_kinds)
+expected_preserve = sum(1 for t in conv["tensors"] if t.get("block") == block and t.get("kind") in PRESERVE)
+actual_ternary = sum(1 for t in hist["tensors"] if t["type"] == "ternary")
+actual_preserve = sum(1 for t in hist["tensors"] if t["type"] == "f16")
+if (actual_ternary, actual_preserve) != (expected_ternary, expected_preserve):
+    sys.exit(f"error: pack counter mismatch for {mode} block {block}: expected {expected_ternary} ternary + {expected_preserve} preserve, got {actual_ternary} + {actual_preserve}")
+print(f"pack counters ok: {actual_ternary} ternary, {actual_preserve} preserve")
+PY
+
 echo "== [5/5] route-preservation metrics"
 # Exit 3 means a gate did not pass. That is a legitimate pilot outcome (the whole
 # point is to measure), so it is reported rather than aborting the run; any other
@@ -176,6 +252,34 @@ elif [ "$METRICS_RC" -ne 0 ]; then
   echo "error: route-preservation metrics failed (exit $METRICS_RC)" >&2
   exit "$METRICS_RC"
 fi
+
+echo "== [5b/5] annotate route-preservation JSON with per-tensor effective τ"
+python3 - "$ART/$TAG-route-preservation.json" "$TAU_ATTN" "$TAU_EXPERT" <<'PY'
+import json, sys
+path, tau_attn, tau_expert = sys.argv[1:4]
+rep = json.load(open(path))
+def kind_of(name):
+    return name.split(".", 2)[2] if name.count(".") >= 2 else name
+md = rep.setdefault("pilot", {}).setdefault("pack_metadata", {})
+default = md.get("oz.gif_threshold", "?")
+md["oz.gif_threshold"] = (
+    f"per-tensor ({tau_attn} attn_proj_i8.*, {tau_expert} moe_expert.*); "
+    f"pipeline default {default}"
+)
+rep["pilot"]["effective_tau_policy"] = {
+    "attn_proj_i8.*": float(tau_attn),
+    "moe_expert.*": float(tau_expert),
+}
+for section in ("weights", "routing"):
+    for name, entry in rep.get(section, {}).items():
+        k = kind_of(name)
+        if k.startswith("attn_proj_i8"):
+            entry["effective_tau"] = float(tau_attn)
+        elif k.startswith("moe_expert"):
+            entry["effective_tau"] = float(tau_expert)
+json.dump(rep, open(path, "w"), indent=2)
+print(f"annotated {path} with per-tensor effective_tau")
+PY
 
 echo
 echo "== pilot artifacts"

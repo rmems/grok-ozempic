@@ -269,6 +269,24 @@ class DequantTests(unittest.TestCase):
         self.assertFalse(out.exists())
         self.assertEqual(info["out_bytes"], 64)
 
+    def test_nonpositive_chunk_mib_rejected(self) -> None:
+        a = np.zeros((4, 4), dtype="<f4")
+        with tempfile.TemporaryDirectory() as td:
+            shard, out = Path(td) / "s", Path(td) / "o.npy"
+            _write_shard(shard, a)
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.export_tensor(shard, out, chunk_mib=0)
+            self.assertIn("chunk-mib", str(ctx.exception).lower())
+
+    def test_negative_chunk_mib_rejected(self) -> None:
+        a = np.zeros((4, 4), dtype="<f4")
+        with tempfile.TemporaryDirectory() as td:
+            shard, out = Path(td) / "s", Path(td) / "o.npy"
+            _write_shard(shard, a)
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.export_tensor(shard, out, chunk_mib=-1)
+            self.assertIn("chunk-mib", str(ctx.exception).lower())
+
 
 class NpyHeaderTests(unittest.TestCase):
     def test_payload_is_64_byte_aligned(self) -> None:
@@ -340,6 +358,18 @@ class StemTests(unittest.TestCase):
         self.assertEqual(stem, "block_000__slot_04__attn_proj_i8__model_width")
         # Mirrors npy_stem_to_tensor_name on the Rust side.
         self.assertEqual(stem.replace("__", "."), name)
+
+    def test_path_separator_rejected(self) -> None:
+        for bad in ("../foo.bar", "foo/bar", "foo\\bar"):
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.structural_stem(bad)
+            self.assertIn("separator", str(ctx.exception).lower())
+
+    def test_parent_reference_rejected(self) -> None:
+        for bad in ("foo...bar", "foo..bar", ".foo.bar", "foo.bar."):
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.structural_stem(bad)
+            self.assertIn("parent-reference", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":
