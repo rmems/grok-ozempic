@@ -1,0 +1,74 @@
+reports/grok-1-block-pilot/artifacts/block_000-attention_plus_expert-route-preservation.json
+  s_f430523a053518::t_f11e6370fc8a5e 15,22-25,402
+scripts/test_route_preservation_io.py
+  s_f430523a053518::t_3e297d69485cf6 1-199
+scripts/test_export_grok1_int8_npy.py
+  s_f430523a053518::t_6dce0559d0ee39 29-69
+scripts/testdata/export_int8/shard_factory.py
+  s_f430523a053518::t_352e2a4d1ced29 57-83
+  s_f430523a053518::t_3516dc3c54d172 31-43,49-53
+  s_f430523a053518::t_dd5907d620842f 9
+scripts/route_preservation_surface.py
+  s_f430523a053518::t_0e479f526a4067 13-14
+reports/grok-1-block-pilot/results.md
+  s_f430523a053518::t_1c52dd5af6d0d4 282-286
+  s_f430523a053518::t_7fbe143bfc8efd 90-93
+  s_f430523a053518::t_a71d9409e449d0 74
+  s_f430523a053518::t_917522a2b43894 239-249
+reports/grok-1-block-pilot/artifacts/block_000-attention_plus_expert-histogram.json
+  s_f430523a053518::t_f11e6370fc8a5e 16,184
+  s_f430523a053518::t_996f250f114ba2 182-183
+scripts/route_preservation_metrics.py
+  s_f430523a053518::t_083468dba9ae92 234-243
+scripts/block_pilot_goz1.sh
+  s_f430523a053518::t_052323faae9da5 255-258,261
+  s_f430523a053518::t_42c79acb7c16fe 357-369
+  s_f430523a053518::t_cd32e8839895f7 190-197,200
+  s_f430523a053518::t_b5b10feeb381a2 400
+  s_f430523a053518::t_bc2c84b0efe05c 334-337,340
+  s_f430523a053518::t_d6817593ecda8e 370-393
+  s_f430523a053518::t_f9771b3d6cbca9 89-98
+scripts/testdata/export_int8/README.md
+  s_f430523a053518::t_911e28aa90e4cc 1,3-38
+.github/workflows/python-scripts.yml
+  s_f430523a053518::t_4f00f076624d7c 38-40
+reports/grok-1-block-pilot/artifacts/block_000-attention_only-route-preservation.json
+  s_f430523a053518::t_f11e6370fc8a5e 15,22-25,336
+scripts/export_grok1_int8_scan.py
+  s_f430523a053518::t_767a39a4b1b9c2 174-203
+  s_f430523a053518::t_354a7a25a0c16a 61-67
+  s_f430523a053518::t_90825ccc146911 19-20,34
+  s_f430523a053518::t_bcc44e9b94eb9a 532-562,569-570
+  s_f430523a053518::t_db7dd34bdf0d2d 128-154
+  s_f430523a053518::t_655935759e66e0 400
+scripts/dev_generate_int8_export_fixtures.py
+  s_f430523a053518::t_5beece89b2893e 2,4-8,10-12,14,17-35,38
+reports/grok-1-block-pilot/artifacts/block_000-attention_only-histogram.json
+  s_f430523a053518::t_f11e6370fc8a5e 16,130
+  s_f430523a053518::t_996f250f114ba2 128-129
+scripts/route_preservation_io.py
+  s_f430523a053518::t_77ac2082684326 47-62,66-71,73,75-82,86
+scripts/route_preservation_measure.py
+  s_f430523a053518::t_fe17c46d03c134 72-77
+  s_f430523a053518::t_8e9866162d0918 377-384,386
+  s_f430523a053518::t_e47b403208e5c0 340-348
+scripts/export_grok1_int8_select.py
+  s_f430523a053518::t_9829c3edab9ead 69-86,90-97
+  s_f430523a053518::t_38a6c6dccd07c2 28-34,40-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ee244b1582137f9d31315b52853c24a6c510687b",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
