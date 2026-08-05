@@ -437,7 +437,7 @@ def _resolve_activations(
     A Grok-1 block carries four ``block_norm`` vectors and xai-dissect assigns
     no role to any of them, so there is no principled way to pick the one that
     actually feeds a given projection. The lowest-numbered slot is used for
-    every projection and recorded in each result's ``activation_source``.
+    every projection and recorded in each result's ``rmsnorm_gain``.
     """
     norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
     if norm_name is None:

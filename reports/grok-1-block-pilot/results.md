@@ -277,7 +277,7 @@ not from the preserved router itself.
 - **The RMSNorm gain is one arbitrary choice of four.** A block carries four
   `block_norm` vectors and upstream assigns none of them a role, so the
   lowest-numbered slot shapes the activations for *every* projection (recorded
-  per result as `activation_source`). That keeps the comparison internally
+  per result as `rmsnorm_gain`). That keeps the comparison internally
   consistent; it is not a claim about the block's true activation path.
 - **Summary rows are per-metric worst cases and may come from different
   tensors.** `block_output_cosine` (0.8492, `slot_04`) and `block_output_rmse`
