@@ -1,35 +1,34 @@
 name: Grok PR Review
 
+# Manual only. Auto pull_request runs red the PR "review" check whenever
+# GROK_AUTH_JSON is stale (SuperGrok OIDC ~hours), and GitHub still reports
+# that check as fail even with continue-on-error / fail_on: never.
+# Re-enable on: pull_request only if you keep the secret fresh or switch to
+# a durable credential.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
 
 permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: grok-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    # Advisory only: SuperGrok OIDC in GROK_AUTH_JSON expires (~hours) and must be
-    # re-uploaded from ~/.grok/auth.json; auth misses and review findings must not
-    # block merge. Real gates are rust/python/codacy workflows.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: 0xr3ngar/grok-build-review-action@v1
         with:
           grok_auth_json: ${{ secrets.GROK_AUTH_JSON }}
+          pr_number: ${{ inputs.pr_number }}
           roast_level: professional
-          # Post comments when auth works; never fail the check on findings.
           fail_on: never
           effort: high
           max_diff_kb: "300"
