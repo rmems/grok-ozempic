@@ -236,6 +236,38 @@ def make_activations(norm_gain: np.ndarray, tokens: int, seed: int) -> np.ndarra
     return _rmsnorm(x, norm_gain)
 
 
+def _find_embedding_array(shard: Path):
+    """Return the single 2-D f32 array in the shard, or fail closed."""
+    try:
+        specs = scan_shard(shard)
+    except (ExportError, OSError, ValueError) as exc:
+        raise MetricsError(f"{shard}: cannot read embedding shard: {exc}") from exc
+    f32 = [s for s in specs if s.descr == "f4" and len(s.shape) == 2]
+    if len(f32) != 1:
+        raise MetricsError(
+            f"{shard}: expected exactly one 2-D f32 array (the token embedding), "
+            f"found {[(s.descr, s.shape) for s in specs]}"
+        )
+    return f32[0]
+
+
+def _embedding_spec(shard: Path, norm_gain: np.ndarray, tokens: int):
+    """Locate the token embedding and check it matches this block and sample size."""
+    spec = _find_embedding_array(shard)
+    vocab, d_model = spec.shape
+    if tokens > vocab:
+        raise MetricsError(
+            f"--tokens {tokens} exceeds embedding vocabulary {vocab} in {shard}; "
+            "choose a smaller sample or omit --embedding-shard"
+        )
+    if d_model != norm_gain.size:
+        raise MetricsError(
+            f"{shard}: embedding width {d_model} != block_norm width {norm_gain.size}; "
+            "this shard is not the token embedding for this model"
+        )
+    return spec
+
+
 def make_activations_from_embedding(
     shard: Path, norm_gain: np.ndarray, tokens: int, seed: int
 ) -> tuple[np.ndarray, dict]:
@@ -253,29 +285,8 @@ def make_activations_from_embedding(
 
     Returns ``(activations, provenance)``.
     """
-    try:
-        specs = scan_shard(shard)
-    except (ExportError, OSError, ValueError) as exc:
-        raise MetricsError(f"{shard}: cannot read embedding shard: {exc}") from exc
-    f32 = [s for s in specs if s.descr == "f4" and len(s.shape) == 2]
-    if len(f32) != 1:
-        raise MetricsError(
-            f"{shard}: expected exactly one 2-D f32 array (the token embedding), "
-            f"found {[(s.descr, s.shape) for s in specs]}"
-        )
-    spec = f32[0]
-    vocab, d_model = spec.shape
-    if tokens > vocab:
-        raise MetricsError(
-            f"--tokens {tokens} exceeds embedding vocabulary {vocab} in {shard}; "
-            "choose a smaller sample or omit --embedding-shard"
-        )
-    if d_model != norm_gain.size:
-        raise MetricsError(
-            f"{shard}: embedding width {d_model} != block_norm width {norm_gain.size}; "
-            "this shard is not the token embedding for this model"
-        )
-
+    spec = _embedding_spec(shard, norm_gain, tokens)
+    vocab = spec.shape[0]
     emb = np.memmap(shard, dtype="<f4", mode="r", offset=spec.offset, shape=spec.shape)
     rng = np.random.default_rng(seed)
     # Sorted, distinct row ids: distinct so no token is double-counted, sorted so
