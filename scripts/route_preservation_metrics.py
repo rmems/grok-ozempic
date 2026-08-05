@@ -74,16 +74,21 @@ from goz1_trit_histogram import (  # noqa: E402  (path shim above is deliberate)
     read_header,
 )
 
-CHUNK_ELEMS = 1 << 26  # ~64 Mi values per streaming step (rounded down to whole rows)
+CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole rows)
 DEFAULT_TOKENS = 4096
 DEFAULT_SEED = 20260805
+GATE_FAILURE_EXIT = 3
 
 # Trit code -> value, matching quantizer.rs encode_trit (0b00=0, 0b01=+1, 0b10=-1).
+# 0b11 is not a valid code; it is tracked separately so a corrupt pack raises
+# instead of being silently counted as a zero (mirrors goz1_trit_histogram.py).
 _TRIT_LUT = np.zeros((256, 4), dtype=np.int8)
+_INVALID_LUT = np.zeros((256, 4), dtype=bool)
 for _b in range(256):
     for _s in range(4):
         _code = (_b >> (2 * _s)) & 0b11
         _TRIT_LUT[_b, _s] = 1 if _code == 0b01 else (-1 if _code == 0b10 else 0)
+        _INVALID_LUT[_b, _s] = _code == 0b11
 
 
 class MetricsError(RuntimeError):
@@ -112,15 +117,28 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
 
 
 def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
-    """Decode ``count`` trits starting at flat index ``start`` (start % 4 == 0)."""
-    if start % 4:
-        raise MetricsError("trit reads must start on a byte boundary (index % 4 == 0)")
-    byte0 = start // 4
-    nbytes = (count + 3) // 4
+    """Decode ``count`` trits starting at flat index ``start``.
+
+    Any flat start is accepted: the read is floored to the enclosing byte and the
+    leading remainder sliced off, so callers are free to chunk by whole rows
+    regardless of whether the row length is a multiple of 4.
+    """
+    byte0, skip = divmod(start, 4)
+    nbytes = (skip + count + 3) // 4
     with pack.open("rb") as f:
         f.seek(entry["abs_offset"] + byte0)
-        raw = np.frombuffer(f.read(nbytes), dtype=np.uint8)
-    return _TRIT_LUT[raw].reshape(-1)[:count]
+        raw = f.read(nbytes)
+    if len(raw) != nbytes:
+        raise MetricsError(
+            f"{entry['name']}: truncated pack -- wanted {nbytes} bytes at payload offset "
+            f"{byte0} (flat trit {start}), got {len(raw)}"
+        )
+    buf = np.frombuffer(raw, dtype=np.uint8)
+    if _INVALID_LUT[buf].any():
+        raise MetricsError(
+            f"{entry['name']}: invalid 0b11 trit code near flat index {start} -- corrupt pack"
+        )
+    return _TRIT_LUT[buf].reshape(-1)[skip : skip + count]
 
 
 def read_f16(pack: Path, entry: dict) -> np.ndarray:
@@ -138,12 +156,22 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
     ``alpha* = S1f / Nf``, ``mse_min = (S2 - S1f^2 / Nf) / n``.
     """
     ref = np.load(npy_path, mmap_mode="r")
-    flat = ref.reshape(-1)
-    n = flat.size
-    if n != entry["numel"]:
-        raise MetricsError(f"{entry['name']}: npy has {n} elements, pack has {entry['numel']}")
+    shape = tuple(int(d) for d in entry["shape"])
+    if tuple(ref.shape) != shape:
+        raise MetricsError(
+            f"{entry['name']}: npy shape {tuple(ref.shape)} != pack shape {shape}; "
+            "a transposed or reshaped source would yield wrong per-channel statistics"
+        )
+    n = ref.size
 
-    cols = ref.shape[-1]
+    # Channels are (leading index, last axis) pairs -- for a 3-D expert tensor
+    # (8, 6144, 32768) that is 8 x 32768 distinct channels, not 32768 pooled
+    # across experts. Chunks never cross a leading-axis boundary.
+    cols = shape[-1]
+    rows = shape[-2] if len(shape) >= 2 else 1
+    lead = n // (rows * cols)
+    view = ref.reshape(lead, rows, cols)
+
     s2 = 0.0            # sum w^2
     s1_fired = 0.0      # sum |w| over fired trits
     n_fired = 0         # count of fired trits
@@ -151,42 +179,35 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
     max_abs_unfired = 0.0
     max_abs_fired = 0.0
     min_abs_fired = math.inf
-    col_s2 = np.zeros(cols, dtype=np.float64)
-    col_s1f = np.zeros(cols, dtype=np.float64)
-    col_nf = np.zeros(cols, dtype=np.int64)
+    col_s2 = np.zeros((lead, cols), dtype=np.float64)
+    col_s1f = np.zeros((lead, cols), dtype=np.float64)
+    col_nf = np.zeros((lead, cols), dtype=np.int64)
 
-    # Chunks must cover whole rows (per-channel accumulators reshape by `cols`)
-    # and start on a trit byte boundary. `cols % 4 == 0` makes any whole-row
-    # count byte-aligned; otherwise fall back to a single full-tensor chunk.
-    if cols % 4 == 0:
-        step = max(1, CHUNK_ELEMS // cols) * cols
-    else:
-        step = n
+    rows_per_chunk = max(1, CHUNK_ELEMS // cols)
+    for li in range(lead):
+        for r0 in range(0, rows, rows_per_chunk):
+            r1 = min(r0 + rows_per_chunk, rows)
+            count = (r1 - r0) * cols
+            t = read_trits(pack, entry, (li * rows + r0) * cols, count).reshape(-1, cols)
+            w = np.asarray(view[li, r0:r1], dtype=np.float64)
+            fired = t != 0
+            aw = np.abs(w)
+            af = np.where(fired, aw, 0.0)
 
-    for start in range(0, n, step):
-        count = min(step, n - start)
-        w = np.asarray(flat[start : start + count], dtype=np.float32)
-        t = read_trits(pack, entry, start, count)
-        fired = t != 0
-        aw = np.abs(w, dtype=np.float32)
+            s2 += float(np.einsum("ij,ij->", w, w))
+            s1_fired += float(af.sum())
+            n_fired += int(np.count_nonzero(fired))
+            sign_mismatch += int(np.count_nonzero(fired & ((w > 0) != (t > 0))))
 
-        s2 += float(np.dot(w.astype(np.float64), w.astype(np.float64)))
-        s1_fired += float(aw[fired].astype(np.float64).sum())
-        n_fired += int(fired.sum())
-        sign_mismatch += int(np.count_nonzero(fired & (np.sign(w).astype(np.int8) != t)))
+            max_abs_fired = max(max_abs_fired, float(np.max(aw, where=fired, initial=0.0)))
+            min_abs_fired = min(min_abs_fired, float(np.min(aw, where=fired, initial=math.inf)))
+            max_abs_unfired = max(
+                max_abs_unfired, float(np.max(aw, where=~fired, initial=0.0))
+            )
 
-        if fired.any():
-            max_abs_fired = max(max_abs_fired, float(aw[fired].max()))
-            min_abs_fired = min(min_abs_fired, float(aw[fired].min()))
-        if (~fired).any():
-            max_abs_unfired = max(max_abs_unfired, float(aw[~fired].max()))
-
-        # Per-output-channel accumulators (last axis == column).
-        w2 = (w.astype(np.float64) ** 2).reshape(-1, cols)
-        col_s2 += w2.sum(axis=0)
-        af = np.where(fired, aw, 0.0).astype(np.float64).reshape(-1, cols)
-        col_s1f += af.sum(axis=0)
-        col_nf += fired.reshape(-1, cols).sum(axis=0)
+            col_s2[li] += np.einsum("ij,ij->j", w, w)
+            col_s1f[li] += af.sum(axis=0)
+            col_nf[li] += fired.sum(axis=0)
 
     if sign_mismatch:
         raise MetricsError(
@@ -204,13 +225,14 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
             max_abs_err, abs(max_abs_fired - alpha), abs(min_abs_fired - alpha)
         )
 
-    # Per-channel: optimal alpha_j and relative reconstruction error.
+    # Per-channel: optimal alpha_j and relative reconstruction error. Each channel
+    # holds `rows` elements (one column of one leading slice).
     with np.errstate(divide="ignore", invalid="ignore"):
         alpha_col = np.where(col_nf > 0, col_s1f / np.maximum(col_nf, 1), 0.0)
-        mse_col = (col_s2 - np.where(col_nf > 0, col_s1f**2 / np.maximum(col_nf, 1), 0.0)) / (
-            n / cols
-        )
-        rms_col = np.sqrt(col_s2 / (n / cols))
+        mse_col = (
+            col_s2 - np.where(col_nf > 0, col_s1f**2 / np.maximum(col_nf, 1), 0.0)
+        ) / rows
+        rms_col = np.sqrt(col_s2 / rows)
         rel_col = np.where(rms_col > 0, np.sqrt(np.maximum(mse_col, 0.0)) / rms_col, 0.0)
 
     return {
@@ -224,7 +246,10 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
         "weight_nrmse": math.sqrt(mse) / math.sqrt(s2 / n) if s2 else 0.0,
         "weight_max_absolute_error": max_abs_err,
         "per_channel_scale_error": {
-            "channels": int(cols),
+            "channels": int(alpha_col.size),
+            "channel_definition": (
+                f"(leading index, last axis) pairs: {lead} x {cols}, {rows} elements each"
+            ),
             "alpha_min": float(alpha_col.min()),
             "alpha_median": float(np.median(alpha_col)),
             "alpha_max": float(alpha_col.max()),
@@ -235,8 +260,8 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
     }
 
 
-def reconstruct_full(npy_path: Path, pack: Path, entry: dict, alpha: float) -> np.ndarray:
-    """Materialize ``alpha * trits`` in the reference tensor's shape."""
+def reconstruct_full(pack: Path, entry: dict, alpha: float) -> np.ndarray:
+    """Materialize ``alpha * trits`` in the tensor's shape, from the pack alone."""
     shape = tuple(int(d) for d in entry["shape"])
     t = read_trits(pack, entry, 0, entry["numel"])
     return (t.astype(np.float32) * np.float32(alpha)).reshape(shape)
@@ -351,7 +376,6 @@ def main(argv: list[str]) -> int:
     args = p.parse_args(argv)
 
     metadata, index = load_pack_index(args.pack)
-    label = f"block_{args.block:03d}"
 
     ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
     preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
@@ -375,6 +399,7 @@ def main(argv: list[str]) -> int:
     for name in sorted(preserve):
         npy = args.npy_dir / f"{stem_of(name)}.npy"
         if not npy.exists():
+            print(f"  warning: {name} has no source npy at {npy}; fp16 round-trip skipped")
             continue
         ref = np.load(npy).astype(np.float32)
         got = read_f16(args.pack, preserve[name])
@@ -390,48 +415,102 @@ def main(argv: list[str]) -> int:
             f"rel_rmse={preserve_err[name]['relative_rmse']:.3e}"
         )
 
-    # --- routing, per 6144x6144 projection (roles unassigned upstream) ---
-    router_name = f"{label}.slot_11.router"
+    # --- routing, per d_model x d_model projection (roles unassigned upstream) ---
+    # Located by suffix rather than a hardcoded slot, and every failure below is
+    # fatal: a gate script that silently emits an all-`unknown` report would look
+    # exactly like a passing pilot.
+    routers = [n for n in sorted(preserve) if n.endswith(".router")]
     routing: dict[str, dict] = {}
-    if router_name not in preserve:
-        print(f"warning: {router_name} not in pack preserve tier; routing metrics skipped")
-    else:
-        router_ref = np.load(args.npy_dir / f"{stem_of(router_name)}.npy").astype(np.float32)
-        router_pilot = read_f16(args.pack, preserve[router_name])
-        d_model = router_ref.shape[0]
-
-        norm_name = next(
-            (n for n in sorted(preserve) if n.endswith("block_norm")),
-            None,
+    if len(routers) != 1:
+        raise MetricsError(
+            f"expected exactly one preserve-tier router in the pack, found {routers or 'none'}"
         )
-        if norm_name is None:
-            raise MetricsError("no block_norm in pack; cannot build realistic activations")
-        gain = np.load(args.npy_dir / f"{stem_of(norm_name)}.npy").astype(np.float32)
-        x = make_activations(gain, args.tokens, args.seed)
+    router_name = routers[0]
+    router_ref = np.load(args.npy_dir / f"{stem_of(router_name)}.npy").astype(np.float32)
+    router_pilot = read_f16(args.pack, preserve[router_name])
+    if router_ref.ndim != 2 or router_ref.shape[0] <= router_ref.shape[1]:
+        raise MetricsError(
+            f"{router_name}: expected (d_model, experts) with d_model > experts, "
+            f"got {router_ref.shape}; a transposed router would silently mis-size d_model"
+        )
+    d_model = router_ref.shape[0]
 
-        square = [
-            n for n, e in ternary.items() if list(e["shape"]) == [d_model, d_model]
-        ]
-        if not square:
-            print("note: no d_model x d_model projection in this pack; routing metrics skipped")
-        for name in sorted(square):
-            w_ref = np.load(args.npy_dir / f"{stem_of(name)}.npy").astype(np.float32)
-            w_pilot = reconstruct_full(
-                args.npy_dir / f"{stem_of(name)}.npy",
-                args.pack,
-                ternary[name],
-                weights[name]["alpha_optimal"],
-            )
-            r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
-            r["activation_source"] = f"seeded N(0,1) tokens x RMSNorm gain {norm_name}"
-            routing[name] = r
-            print(
-                f"  routing via {name:<42} top1={r['router_top1_agreement'] * 100:6.2f}%  "
-                f"top2={r['router_top2_set_agreement'] * 100:6.2f}%  "
-                f"cos={r['block_output_cosine']:.6f}"
-            )
+    norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
+    if norm_name is None:
+        raise MetricsError("no block_norm in pack; cannot build realistic activations")
+    gain = np.load(args.npy_dir / f"{stem_of(norm_name)}.npy").astype(np.float32)
+    if gain.shape != (d_model,):
+        raise MetricsError(
+            f"{norm_name}: shape {gain.shape} does not match router d_model {d_model}"
+        )
+    x = make_activations(gain, args.tokens, args.seed)
 
-    # --- assemble the run3 route-preservation surface with observed values ---
+    square = [n for n, e in ternary.items() if list(e["shape"]) == [d_model, d_model]]
+    if not square:
+        raise MetricsError(
+            f"no {d_model}x{d_model} projection among the pack's ternary tensors, so no "
+            "routing gate can be evaluated; re-run with a mode that quantizes attention"
+        )
+    for name in sorted(square):
+        w_ref = np.load(args.npy_dir / f"{stem_of(name)}.npy").astype(np.float32)
+        w_pilot = reconstruct_full(
+            args.pack, ternary[name], weights[name]["alpha_optimal"]
+        )
+        r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
+        r["activation_source"] = f"seeded N(0,1) tokens x RMSNorm gain {norm_name}"
+        routing[name] = r
+        print(
+            f"  routing via {name:<42} top1={r['router_top1_agreement'] * 100:6.2f}%  "
+            f"top2={r['router_top2_set_agreement'] * 100:6.2f}%  "
+            f"cos={r['block_output_cosine']:.6f}"
+        )
+
+    summary = build_summary(weights, routing)
+
+    result = {
+        "model_family": "grok-1",
+        "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
+        "pilot": {
+            "block": args.block,
+            "mode": args.mode,
+            "pack": str(args.pack),
+            "npy_dir": str(args.npy_dir),
+            "tokens": args.tokens,
+            "seed": args.seed,
+            "ternary_tensors": len(ternary),
+            "preserve_tensors": len(preserve),
+            "pack_metadata": {k: v for k, v in metadata.items() if k.startswith("oz.")},
+            "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
+            "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",
+        },
+        "summary": summary,
+        "weights": weights,
+        "preserve_fp16_roundtrip": preserve_err,
+        "routing": routing,
+    }
+
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(result, indent=2) + "\n")
+        print(f"wrote {args.json_out}")
+
+    gated = [m for m in summary if m["threshold"]]
+    print("\nroute-preservation gates:")
+    for m in gated:
+        obs = "null" if m["observed"] is None else f"{m['observed']:.6f}"
+        print(f"  {m['name']:<28} {m['status']:>7}  observed={obs}  threshold={m['threshold']}")
+
+    # Fail-closed: a threshold that is not `pass` must not exit 0, or a caller
+    # cannot tell a passing pilot from a failing one.
+    if any(m["status"] != "pass" for m in gated):
+        print(f"\n{sum(m['status'] != 'pass' for m in gated)} of {len(gated)} gates not passing")
+        return GATE_FAILURE_EXIT
+    return 0
+
+
+def build_summary(weights: dict[str, dict], routing: dict[str, dict]) -> list[dict]:
+    """Assemble run3's route-preservation surface with observed values filled in."""
+
     def worst(key: str, default=None):
         vals = [r[key] for r in routing.values()]
         return min(vals) if vals else default
@@ -439,7 +518,7 @@ def main(argv: list[str]) -> int:
     top1 = worst("router_top1_agreement")
     top2 = worst("router_top2_set_agreement")
     bcos = worst("block_output_cosine")
-    summary = [
+    return [
         {
             "name": "router_top1_agreement",
             "scope": "router_behavior",
@@ -564,40 +643,6 @@ def main(argv: list[str]) -> int:
             "detail": "Requires whole-model inference; not run.",
         },
     ]
-
-    result = {
-        "model_family": "grok-1",
-        "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
-        "pilot": {
-            "block": args.block,
-            "mode": args.mode,
-            "pack": str(args.pack),
-            "npy_dir": str(args.npy_dir),
-            "tokens": args.tokens,
-            "seed": args.seed,
-            "ternary_tensors": len(ternary),
-            "preserve_tensors": len(preserve),
-            "pack_metadata": {k: v for k, v in metadata.items() if k.startswith("oz.")},
-            "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
-            "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",
-        },
-        "summary": summary,
-        "weights": weights,
-        "preserve_fp16_roundtrip": preserve_err,
-        "routing": routing,
-    }
-
-    if args.json_out:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(json.dumps(result, indent=2) + "\n")
-        print(f"wrote {args.json_out}")
-
-    print("\nroute-preservation gates:")
-    for m in summary:
-        if m["threshold"]:
-            obs = "null" if m["observed"] is None else f"{m['observed']:.6f}"
-            print(f"  {m['name']:<28} {m['status']:>7}  observed={obs}  threshold={m['threshold']}")
-    return 0
 
 
 if __name__ == "__main__":

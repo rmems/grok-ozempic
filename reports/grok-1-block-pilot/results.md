@@ -71,9 +71,18 @@ tensor00013_000: plain float32(6144, 8)                 -> bit-exact=True
 tensor00009_000: plain float32(6144,)                   -> bit-exact=True
 ```
 
-23 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
+28 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
 `.github/workflows/python-scripts.yml`) cover the opcode scanner, the grouping
-rule and its rejections, chunk-invariance, header alignment, and mode selection.
+rule and its rejections, chunk-invariance, header alignment, mode selection, and
+the fail-loud paths: truncated shards, Fortran-ordered arrays, manifest/shard
+shape disagreement, and the guarantee that no payload is bulk-read.
+
+The exporter refuses rather than guesses. A shard is rejected if its scale groups
+do not divide the contracting axis, if leading dims or the output dim disagree,
+if an array is Fortran-ordered (the writer emits C-order and will not silently
+transpose), if a payload runs past end-of-file, or if the manifest shape does not
+match the shard — the last checked **before** any bytes are written, so a
+disagreement cannot leave a wrong multi-GiB file for a later pack to consume.
 
 > **Dependency note.** Unlike `export_grok1_embedding_npy.py` (stdlib-only,
 > byte-copy), dequantization is real arithmetic over up to 1.6e9 elements, so
@@ -104,12 +113,17 @@ is stripped and per-tensor τ set instead, because defaults silently outrank CLI
 
 Both pilots on **block 0** (pilot-selection-plan rationale: *early baseline*).
 
-| Mode | Source npy | Pack `file_size` | ternary | fp16/preserve | export wall | pack wall | pack max RSS |
-|---|---|---|---|---|---|---|---|
-| `attention_only` | 0.328 GiB | 22,168,640 | 4 | 5 | 0.25 s | 0.58 s | 299 MiB |
-| `attention_plus_expert` | 18.328 GiB | 1,230,128,448 | 7 | 5 | 14.76 s | 33.49 s | 12.37 GiB |
+| Mode | Source npy | Pack `file_size` | ternary | fp16/preserve | export wall / RSS | pack wall / RSS |
+|---|---|---|---|---|---|---|
+| `attention_only` | 0.328 GiB | 22,168,640 | 4 | 5 | 0.28 s / 355 MiB | 0.61 s / 300 MiB |
+| `attention_plus_expert` | 18.328 GiB | 1,230,128,448 | 7 | 5 | 16.11 s / 2.03 GiB | 31.69 s / 12.37 GiB |
 
 Both verified: `GOZ1 verify ok: version=1, N tensor header(s), file_size=…`.
+
+The exporter never materializes a payload: it records offsets from a bounded
+opcode window and jumps past the data, so the 1.6 GB int8 expert arrays are read
+only through `numpy.memmap` in `--chunk-mib` slices. Peak RSS is dominated by
+mmap page residency over the source shard rather than by chunk size.
 
 **Preserve/ternary counters match intent exactly.** In both modes the 5
 preserve-tier tensors are the 4 `block_norm` vectors plus the router; **no
@@ -158,7 +172,7 @@ included). Worst case over the two evaluated `model_width` projections.
 | `weight_reconstruction_mse` | weight_reconstruction | — | 1.426e-4 | measured |
 | `weight_cosine_similarity` | weight_reconstruction | — | 0.8597 | measured |
 | `weight_max_absolute_error` | weight_reconstruction | — | 0.7098 | measured |
-| `per_channel_scale_error_summary` | weight_reconstruction | — | 0.6915 | measured |
+| `per_channel_scale_error_summary` | weight_reconstruction | — | 0.7655 | measured |
 | `logit_kl` | model_behavior | — | null | **unknown** |
 | `perplexity_delta` | model_behavior | — | null | **unknown** |
 | `generation_sanity_summary` | model_behavior | — | null | **unknown** |
@@ -212,6 +226,10 @@ not from the preserved router itself.
   `α = Σ|w| over fired / count(fired)`. GOZ1 v1 stores no per-tensor scale, so
   these are **best-case** numbers for this container. `cos(w, α·t)` is
   independent of `α`, so the cosine figures hold for any positive scale.
+- **A "channel" is a (leading index, last axis) pair**, so a 3-D expert tensor
+  `(8, 6144, 32768)` has 8 × 32768 channels rather than 32768 pooled across
+  experts. Pooling would understate the worst case — it read 0.6915 before this
+  was corrected, against 0.7655 measured per-expert.
 
 ## Why the gate is unreachable (not a tuning miss)
 

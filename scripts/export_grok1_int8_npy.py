@@ -48,13 +48,23 @@ to recover each ndarray's shape, dtype and payload byte offset; no
 ``STACK_GLOBAL`` target is ever imported or called. Payloads are then read
 through ``numpy.memmap`` at those offsets.
 
+Scanning is memory-bounded. ``genops`` would otherwise materialize each
+``BINBYTES`` argument -- 1.6 GB for one expert tensor -- so the scanner hands it
+a stream that refuses reads at or above ``_PAYLOAD_READ_LIMIT`` and reports the
+offset/length instead. Scanning then resumes in a fresh window just past the
+payload. No opcode in these shards legitimately reads that much (the largest is
+``SHORT_BINUNICODE`` at 255 bytes), so the interception is unambiguous.
+
 Dependencies
 ------------
 Unlike ``export_grok1_embedding_npy.py`` (stdlib-only, byte-copy), dequantization
 is real arithmetic over up to 1.6e9 elements, so this script **requires numpy**
-(already a CI dependency of ``.github/workflows/python-scripts.yml``). Output is
-written in bounded chunks; peak RSS stays near ``--chunk-mib`` regardless of
-tensor size.
+(already a CI dependency of ``.github/workflows/python-scripts.yml``).
+
+Output is written in bounded chunks and no tensor is ever fully materialized.
+Peak RSS is dominated by ``mmap`` page residency over the source shard rather
+than by ``--chunk-mib``: exporting all of block 0 (18.3 GiB of f32 out, largest
+source payload 1.6 GB) measured **2.03 GiB** peak.
 
 Filename stems use ``__`` for ``.`` so ``npy_stem_to_tensor_name`` recovers the
 V2 structural logical name, e.g.
@@ -82,14 +92,26 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import mmap as mmap_mod
-import pickletools
+
+# pickletools only *decodes* opcodes; nothing here unpickles, imports a
+# STACK_GLOBAL target, or executes checkpoint-controlled data. See "Safety".
+import pickletools  # nosec B403
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_CHUNK_MIB = 256
+
+# Window big enough for any numpy `_reconstruct` header; payloads are skipped.
+_SCAN_WINDOW = 1 << 16
+# Reads at or above this are payloads, not opcode arguments (max legitimate
+# opcode read in these shards is SHORT_BINUNICODE at 255 bytes).
+_PAYLOAD_READ_LIMIT = 4096
+# Below this a "payload" is ndarray reconstruct scaffolding (b"b"), not data.
+_MIN_PAYLOAD_BYTES = 16
 
 # numpy dtype descriptors we accept from the pickle stream.
 _INT_DESCR = {"i1"}
@@ -122,6 +144,7 @@ class ArraySpec:
     descr: str
     offset: int
     nbytes: int
+    fortran_order: bool = False
 
     @property
     def numel(self) -> int:
@@ -143,48 +166,118 @@ class ArraySpec:
             )
 
 
+class _PayloadBoundary(Exception):
+    """Raised when the opcode stream reaches an array payload."""
+
+    def __init__(self, offset: int, nbytes: int) -> None:
+        super().__init__(offset, nbytes)
+        self.offset = offset
+        self.nbytes = nbytes
+
+
+class _StopAtPayload(io.BytesIO):
+    """Byte stream that reports large reads instead of materializing them."""
+
+    def read(self, size: int | None = -1) -> bytes:  # type: ignore[override]
+        if size is not None and size >= _PAYLOAD_READ_LIMIT:
+            raise _PayloadBoundary(self.tell(), size)
+        return super().read(size)
+
+
+def _scan_window(window: bytes, base: int, name: str) -> ArraySpec | None:
+    """Return the first ndarray payload in ``window``, or ``None`` if there is none.
+
+    ``base`` is the window's absolute offset in the file; returned offsets are
+    absolute. A truncated window (the payload lies past its end) still yields a
+    complete spec, because the payload is intercepted by size before it is read.
+    """
+    ints: list[int] = []
+    shape: tuple[int, ...] | None = None
+    descr: str | None = None
+    fortran: bool | None = None
+    stream = _StopAtPayload(window)
+
+    def finish(offset: int, nbytes: int, header: int) -> ArraySpec:
+        if shape is None or descr is None:
+            raise ExportError(
+                f"{name}: payload at byte {base + offset} has no preceding "
+                "shape/dtype -- unrecognized pickle layout"
+            )
+        spec = ArraySpec(shape, descr, base + offset + header, nbytes, bool(fortran))
+        spec.validate()
+        return spec
+
+    try:
+        for op, arg, pos in pickletools.genops(stream):
+            opname = op.name
+            if opname in ("BININT", "BININT1", "BININT2"):
+                ints.append(int(arg))
+            elif opname in ("TUPLE1", "TUPLE2", "TUPLE3"):
+                k = int(opname[-1])
+                if len(ints) >= k:
+                    shape = tuple(ints[-k:])
+                ints = []
+            elif opname == "SHORT_BINUNICODE" and arg in _KNOWN_DESCR:
+                descr = str(arg)
+            elif opname in ("NEWFALSE", "NEWTRUE"):
+                # numpy's `_reconstruct` state writes is_fortran right before data.
+                fortran = opname == "NEWTRUE"
+            elif opname in ("BINBYTES", "BINBYTES8", "SHORT_BINBYTES"):
+                nbytes = len(arg) if isinstance(arg, bytes) else int(arg)
+                if nbytes < _MIN_PAYLOAD_BYTES:
+                    continue
+                header = {"BINBYTES": 5, "BINBYTES8": 9, "SHORT_BINBYTES": 2}[opname]
+                return finish(pos, nbytes, header)
+            elif opname == "STOP":
+                return None
+    except _PayloadBoundary as boundary:
+        # tell() sits just past the length field, i.e. at the payload itself.
+        return finish(boundary.offset, boundary.nbytes, 0)
+    except ExportError:
+        raise
+    except Exception:
+        # Window ended mid-opcode with no payload in it: nothing more to find.
+        return None
+    return None
+
+
 def scan_shard(path: Path) -> list[ArraySpec]:
     """Recover every ndarray in a pickle shard without unpickling it.
 
-    Walks the opcode stream and pairs the most recent shape tuple + dtype
-    descriptor with each large ``BINBYTES*`` payload. Raises on unknown dtypes so
-    an unrecognized layout fails loudly instead of exporting garbage.
+    Scans a bounded window, records the payload's offset and length, then jumps
+    the window past the payload -- so a 1.6 GB expert tensor is never read into
+    memory here. Raises on unknown dtypes or Fortran order so an unrecognized
+    layout fails loudly instead of exporting garbage.
     """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise ExportError(f"{path}: cannot stat shard: {exc}") from exc
+    if size == 0:
+        raise ExportError(f"{path.name}: empty file, no ndarray payload found")
+
     specs: list[ArraySpec] = []
     with open(path, "rb") as fh:
         mm = mmap_mod.mmap(fh.fileno(), 0, access=mmap_mod.ACCESS_READ)
         try:
-            ints: list[int] = []
-            shape: tuple[int, ...] | None = None
-            descr: str | None = None
-            for op, arg, pos in pickletools.genops(mm):
-                name = op.name
-                if name in ("BININT", "BININT1", "BININT2"):
-                    ints.append(int(arg))
-                elif name in ("TUPLE1", "TUPLE2", "TUPLE3"):
-                    k = int(name[-1])
-                    if len(ints) >= k:
-                        shape = tuple(ints[-k:])
-                    ints = []
-                elif name == "SHORT_BINUNICODE" and arg in _KNOWN_DESCR:
-                    descr = str(arg)
-                elif name in ("BINBYTES", "BINBYTES8", "SHORT_BINBYTES"):
-                    nbytes = len(arg) if isinstance(arg, bytes) else int(arg)
-                    # Small BINBYTES carry ndarray reconstruct scaffolding (b"b"),
-                    # not payloads; a real payload is always >= 16 bytes here.
-                    if nbytes < 16:
-                        continue
-                    if shape is None or descr is None:
-                        raise ExportError(
-                            f"{path.name}: payload at byte {pos} has no preceding "
-                            "shape/dtype -- unrecognized pickle layout"
-                        )
-                    header = {"BINBYTES": 5, "BINBYTES8": 9, "SHORT_BINBYTES": 2}[name]
-                    spec = ArraySpec(shape, descr, pos + header, nbytes)
-                    spec.validate()
-                    specs.append(spec)
-                elif name == "STOP":
+            base = 0
+            while base < size:
+                window = mm[base : min(size, base + _SCAN_WINDOW)]
+                spec = _scan_window(window, base, path.name)
+                if spec is None:
                     break
+                if spec.offset + spec.nbytes > size:
+                    raise ExportError(
+                        f"{path.name}: {spec.descr} payload of {spec.nbytes} bytes at "
+                        f"{spec.offset} runs past end of file ({size}) -- truncated shard"
+                    )
+                if spec.fortran_order:
+                    raise ExportError(
+                        f"{path.name}: array {spec.shape} is Fortran-ordered; this "
+                        "exporter writes C-order .npy and will not silently transpose"
+                    )
+                specs.append(spec)
+                base = spec.offset + spec.nbytes
         finally:
             mm.close()
     if not specs:
@@ -253,15 +346,23 @@ def export_tensor(
     *,
     chunk_mib: int = DEFAULT_CHUNK_MIB,
     dry_run: bool = False,
+    expect_shape: tuple[int, ...] | list[int] | None = None,
 ) -> dict:
     """Dequantize (or pass through) one shard into an f32 ``.npy``.
 
-    Returns a summary dict; with ``dry_run`` nothing is written.
+    Returns a summary dict; with ``dry_run`` nothing is written. ``expect_shape``
+    is checked **before** any bytes are written, so a manifest/shard disagreement
+    never leaves a multi-GiB wrong file behind for a later pack to consume.
     """
     import numpy as np
 
     specs = scan_shard(shard)
     weight, scales = split_quantized(specs)
+    if expect_shape is not None and tuple(expect_shape) != weight.shape:
+        raise ExportError(
+            f"{shard.name}: manifest shape {tuple(expect_shape)} != shard shape "
+            f"{weight.shape}; refusing to write {out_path.name}"
+        )
     info: dict = {
         "shard": str(shard),
         "output": str(out_path),
@@ -419,12 +520,14 @@ def main(argv: list[str]) -> int:
         if not shard.exists():
             raise ExportError(f"{name}: shard missing: {shard}")
         out = Path(args.output_dir) / f"{structural_stem(name)}.npy"
-        info = export_tensor(shard, out, chunk_mib=args.chunk_mib, dry_run=args.dry_run)
-        # Cross-check the manifest against what we actually parsed out of the shard.
-        if list(t["shape"]) != info["shape"]:
-            raise ExportError(
-                f"{name}: manifest shape {t['shape']} != shard shape {info['shape']}"
-            )
+        # expect_shape cross-checks the manifest against the shard before writing.
+        info = export_tensor(
+            shard,
+            out,
+            chunk_mib=args.chunk_mib,
+            dry_run=args.dry_run,
+            expect_shape=t["shape"],
+        )
         total += info["out_bytes"]
         groups = info["scale_groups"]
         detail = f"groups={groups}" if groups is not None else "passthrough"

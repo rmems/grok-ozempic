@@ -8,10 +8,12 @@ frames -- the same shape the official Grok-1 ckpt-0 shards have.
 
 from __future__ import annotations
 
-import pickle
+# Fixtures are *written* with pickle.dumps; nothing here loads untrusted pickles.
+import pickle  # nosec B403
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,7 +58,10 @@ def _write_quantized(path: Path, weight: np.ndarray, scales_f32: np.ndarray) -> 
     )
     # Only the scales array is u2 in these fixtures, so a single rename is exact.
     old, new = b"\x8c\x02u2\x94", b"\x8c\x08bfloat16\x94"
-    assert raw.count(old) == 1, "fixture should contain exactly one u2 dtype"
+    if raw.count(old) != 1:
+        raise ValueError(
+            f"fixture should contain exactly one u2 dtype, found {raw.count(old)}"
+        )
     path.write_bytes(raw.replace(old, new))
 
 
@@ -86,8 +91,52 @@ class ScanShardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "s"
             p.write_bytes(b"")
-            with self.assertRaises(Exception):
+            with self.assertRaises(exp.ExportError):
                 exp.scan_shard(p)
+
+    def test_truncated_payload_rejected(self) -> None:
+        """A shard cut short mid-payload must fail loudly, not export garbage."""
+        a = np.arange(4096, dtype="<f4")
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            raw = pickle.dumps(a, protocol=4)
+            p.write_bytes(raw[: len(raw) // 2])
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.scan_shard(p)
+            self.assertIn("truncated", str(ctx.exception))
+
+    def test_fortran_order_rejected(self) -> None:
+        """C-order is assumed by the writer, so Fortran order must not silently pass."""
+        a = np.asfortranarray(np.arange(4096, dtype="<f4").reshape(64, 64))
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            _write_shard(p, a)
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.scan_shard(p)
+            self.assertIn("Fortran", str(ctx.exception))
+
+    def test_large_payload_is_not_materialized(self) -> None:
+        """The scanner reports payload offsets without reading the payload."""
+        a = np.zeros(1 << 20, dtype="<f4")  # 4 MiB, far above _PAYLOAD_READ_LIMIT
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            _write_shard(p, a)
+            materialized: list[int] = []
+            real_read = exp._StopAtPayload.read
+
+            def spy(self, size=-1):
+                # Large reads raise _PayloadBoundary, so nothing is appended for them.
+                data = real_read(self, size)
+                materialized.append(len(data))
+                return data
+
+            with unittest.mock.patch.object(exp._StopAtPayload, "read", spy):
+                specs = exp.scan_shard(p)
+        self.assertEqual(specs[0].nbytes, a.nbytes)
+        self.assertTrue(
+            all(r < exp._PAYLOAD_READ_LIMIT for r in materialized),
+            f"scanner materialized a bulk read: max={max(materialized)}",
+        )
 
 
 class GroupingTests(unittest.TestCase):
@@ -191,6 +240,25 @@ class DequantTests(unittest.TestCase):
             got = np.load(out)
         np.testing.assert_array_equal(a, got)
         self.assertIsNone(info["scale_groups"])
+
+    def test_shape_mismatch_is_caught_before_writing(self) -> None:
+        """A manifest/shard disagreement must not leave a wrong file behind."""
+        a = np.zeros((4, 4), dtype="<f4")
+        with tempfile.TemporaryDirectory() as td:
+            shard, out = Path(td) / "s", Path(td) / "o.npy"
+            _write_shard(shard, a)
+            with self.assertRaises(exp.ExportError) as ctx:
+                exp.export_tensor(shard, out, expect_shape=(4, 5))
+            self.assertIn("refusing to write", str(ctx.exception))
+        self.assertFalse(out.exists())
+
+    def test_matching_expect_shape_writes(self) -> None:
+        a = np.arange(16, dtype="<f4").reshape(4, 4)
+        with tempfile.TemporaryDirectory() as td:
+            shard, out = Path(td) / "s", Path(td) / "o.npy"
+            _write_shard(shard, a)
+            exp.export_tensor(shard, out, expect_shape=(4, 4))
+            np.testing.assert_array_equal(np.load(out), a)
 
     def test_dry_run_writes_nothing(self) -> None:
         a = np.zeros((4, 4), dtype="<f4")

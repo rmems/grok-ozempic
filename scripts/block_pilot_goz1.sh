@@ -51,11 +51,13 @@ fi
   echo "error: $BIN missing; run: cargo build --release --features cli --locked" >&2
   exit 1
 }
-[ -f "$RUN3/conversion-manifest.json" ] || {
-  echo "error: run3 conversion-manifest not found under $RUN3" >&2
-  echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root" >&2
-  exit 1
-}
+for required in conversion-manifest.json quant-plan.json; do
+  [ -f "$RUN3/$required" ] || {
+    echo "error: run3 $required not found under $RUN3" >&2
+    echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root" >&2
+    exit 1
+  }
+done
 
 mkdir -p "$HOME/.models/xai-grok-1" "$ART/logs"
 WORK="$(mktemp -d "$HOME/.models/xai-grok-1/block-pilot-stage.XXXXXX")"
@@ -86,10 +88,17 @@ src, dst, tau_attn, tau_expert, quant_plan_path = sys.argv[1:6]
 m = json.load(open(src))
 plan = json.load(open(quant_plan_path))
 
+def require(doc, key, where):
+    if key not in doc:
+        sys.exit(f"error: {where} has no {key!r} key (schema drift?); present: {sorted(doc)}")
+    return doc[key]
+
 # run3 quant-plan is the authority for which families may be touched.
-keep = set(plan["keep_fp32"])
-pilot = set(plan["pilot_quantize"])
-deferred = set(plan["defer"])
+keep = set(require(plan, "keep_fp32", quant_plan_path))
+pilot = set(require(plan, "pilot_quantize", quant_plan_path))
+deferred = set(require(plan, "defer", quant_plan_path))
+for key in ("preserve", "ternary_candidates", "defaults", "produced_by"):
+    require(m, key, src)
 
 def kind_of(pattern):
     # "block_*.slot_04.attn_proj_i8.model_width" -> "attn_proj_i8.model_width"
@@ -140,6 +149,11 @@ python3 "$REPO/scripts/goz1_trit_histogram.py" "$PACK" \
   --json-out "$ART/$TAG-histogram.json" 2>&1 | tee "$ART/logs/$TAG-histogram.log"
 
 echo "== [5/5] route-preservation metrics"
+# Exit 3 means a gate did not pass. That is a legitimate pilot outcome (the whole
+# point is to measure), so it is reported rather than aborting the run; any other
+# non-zero code is a real failure and still stops the script.
+# `|| true` would reset PIPESTATUS, so disable errexit around the pipeline instead.
+set +e
 python3 "$REPO/scripts/route_preservation_metrics.py" \
   --npy-dir "$STAGE" \
   --pack "$PACK" \
@@ -147,6 +161,14 @@ python3 "$REPO/scripts/route_preservation_metrics.py" \
   --mode "$MODE" \
   --json-out "$ART/$TAG-route-preservation.json" 2>&1 |
   tee "$ART/logs/$TAG-metrics.log"
+METRICS_RC="${PIPESTATUS[0]}"
+set -e
+if [ "$METRICS_RC" -eq 3 ]; then
+  echo "note: route-preservation gates did not all pass (exit 3) — recorded, not fatal"
+elif [ "$METRICS_RC" -ne 0 ]; then
+  echo "error: route-preservation metrics failed (exit $METRICS_RC)" >&2
+  exit "$METRICS_RC"
+fi
 
 echo
 echo "== pilot artifacts"

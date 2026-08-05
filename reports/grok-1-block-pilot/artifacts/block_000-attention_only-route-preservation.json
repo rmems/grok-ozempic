@@ -5,7 +5,7 @@
     "block": 0,
     "mode": "attention_only",
     "pack": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_only.goz1",
-    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.Jm5wsq/npy",
+    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.TMl9Xl/npy",
     "tokens": 4096,
     "seed": 20260805,
     "ternary_tensors": 4,
@@ -153,6 +153,7 @@
       "weight_max_absolute_error": 0.14666546794369847,
       "per_channel_scale_error": {
         "channels": 1024,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 1024, 6144 elements each",
         "alpha_min": 0.006836130454696068,
         "alpha_median": 0.010566048929377264,
         "alpha_max": 0.017267009752871754,
@@ -173,6 +174,7 @@
       "weight_max_absolute_error": 0.16381083792034784,
       "per_channel_scale_error": {
         "channels": 6144,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 6144, 6144 elements each",
         "alpha_min": 0.006207052114847544,
         "alpha_median": 0.007478435324833169,
         "alpha_max": 0.03994824617600841,
@@ -193,6 +195,7 @@
       "weight_max_absolute_error": 0.1272715733585087,
       "per_channel_scale_error": {
         "channels": 6144,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 6144, 6144 elements each",
         "alpha_min": 0.0069844022693250005,
         "alpha_median": 0.011054195166908821,
         "alpha_max": 0.021125657010477607,
@@ -213,6 +216,7 @@
       "weight_max_absolute_error": 0.11128625313612751,
       "per_channel_scale_error": {
         "channels": 1024,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 1024, 6144 elements each",
         "alpha_min": 0.008036103038273021,
         "alpha_median": 0.010932057911501905,
         "alpha_max": 0.01778287054721133,
