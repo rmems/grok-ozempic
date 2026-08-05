@@ -1,0 +1,20 @@
+.beads/issues.jsonl
+  s_f430523a053518::t_bd168b2d306454 40
+  s_f430523a053518::t_c95a91e8affde2 36-37,39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cf2728a9abf4e405bd2778ad1c1632d044d68710",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
