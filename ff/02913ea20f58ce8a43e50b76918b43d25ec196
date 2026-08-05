@@ -1,0 +1,21 @@
+scripts/route_preservation_measure.py
+  s_f430523a053518::t_8285487060c601 239-240,251-256
+  s_f430523a053518::t_1a45452129291b 288-289
+  s_f430523a053518::t_48a1a8e1ce7efb 268,270
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ff02913ea20f58ce8a43e50b76918b43d25ec196",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
