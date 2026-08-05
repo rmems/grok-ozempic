@@ -73,6 +73,7 @@ from goz1_trit_histogram import (  # noqa: E402  (path shim above is deliberate)
     _payload_nbytes,
     read_header,
 )
+from route_preservation_surface import build_summary  # noqa: E402
 
 CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole rows)
 DEFAULT_TOKENS = 4096
@@ -148,13 +149,115 @@ def read_f16(pack: Path, entry: dict) -> np.ndarray:
     return np.frombuffer(raw, dtype="<f2").astype(np.float32).reshape(entry["shape"])
 
 
-def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
-    """Streaming exact reconstruction stats for one ternary tensor.
+class _TernaryAccumulator:
+    """Single-pass sufficient statistics for one ternary tensor.
 
-    Uses closed forms so a single pass suffices:
-    ``cos = S1f / (||w|| * sqrt(Nf))`` (scale-free),
-    ``alpha* = S1f / Nf``, ``mse_min = (S2 - S1f^2 / Nf) / n``.
+    Everything needed is additive, so one streaming pass suffices. Channels are
+    ``(leading index, last axis)`` pairs -- for a 3-D expert tensor
+    ``(8, 6144, 32768)`` that is 8 x 32768 distinct channels, not 32768 pooled
+    across experts.
     """
+
+    def __init__(self, lead: int, rows: int, cols: int) -> None:
+        self.lead, self.rows, self.cols = lead, rows, cols
+        self.s2 = 0.0           # sum w^2
+        self.s1_fired = 0.0     # sum |w| over fired trits
+        self.n_fired = 0        # count of fired trits
+        self.sign_mismatch = 0
+        self.max_abs_unfired = 0.0
+        self.max_abs_fired = 0.0
+        self.min_abs_fired = math.inf
+        self.col_s2 = np.zeros((lead, cols), dtype=np.float64)
+        self.col_s1f = np.zeros((lead, cols), dtype=np.float64)
+        self.col_nf = np.zeros((lead, cols), dtype=np.int64)
+
+    def update(self, li: int, w: np.ndarray, t: np.ndarray) -> None:
+        """Fold one chunk of reference weights and their trits into the totals."""
+        fired = t != 0
+        aw = np.abs(w)
+        af = np.where(fired, aw, 0.0)
+
+        self.s2 += float(np.einsum("ij,ij->", w, w))
+        self.s1_fired += float(af.sum())
+        self.n_fired += int(np.count_nonzero(fired))
+        self.sign_mismatch += int(np.count_nonzero(fired & ((w > 0) != (t > 0))))
+
+        self.max_abs_fired = max(
+            self.max_abs_fired, float(np.max(aw, where=fired, initial=0.0))
+        )
+        self.min_abs_fired = min(
+            self.min_abs_fired, float(np.min(aw, where=fired, initial=math.inf))
+        )
+        self.max_abs_unfired = max(
+            self.max_abs_unfired, float(np.max(aw, where=~fired, initial=0.0))
+        )
+
+        self.col_s2[li] += np.einsum("ij,ij->j", w, w)
+        self.col_s1f[li] += af.sum(axis=0)
+        self.col_nf[li] += fired.sum(axis=0)
+
+    def _per_channel(self) -> dict:
+        """Optimal per-channel alpha and relative error; each holds ``rows`` values."""
+        with np.errstate(divide="ignore", invalid="ignore"):
+            nf = np.maximum(self.col_nf, 1)
+            alpha_col = np.where(self.col_nf > 0, self.col_s1f / nf, 0.0)
+            mse_col = (
+                self.col_s2 - np.where(self.col_nf > 0, self.col_s1f**2 / nf, 0.0)
+            ) / self.rows
+            rms_col = np.sqrt(self.col_s2 / self.rows)
+            rel_col = np.where(
+                rms_col > 0, np.sqrt(np.maximum(mse_col, 0.0)) / rms_col, 0.0
+            )
+        return {
+            "channels": int(alpha_col.size),
+            "channel_definition": (
+                f"(leading index, last axis) pairs: {self.lead} x {self.cols}, "
+                f"{self.rows} elements each"
+            ),
+            "alpha_min": float(alpha_col.min()),
+            "alpha_median": float(np.median(alpha_col)),
+            "alpha_max": float(alpha_col.max()),
+            "relative_error_min": float(rel_col.min()),
+            "relative_error_median": float(np.median(rel_col)),
+            "relative_error_max": float(rel_col.max()),
+        }
+
+    def finalize(self, n: int) -> dict:
+        """Closed forms: ``cos = S1f / (||w||*sqrt(Nf))`` (scale-free),
+        ``alpha* = S1f / Nf``, ``mse_min = (S2 - S1f^2/Nf) / n``.
+
+        ``max |w - alpha*t|`` is exact from the extremes alone: error is ``|w|``
+        where the trit is silent and ``||w| - alpha|`` where it fired, and the
+        latter is monotone in ``|w|`` from both ends.
+        """
+        s2, s1f, nf = self.s2, self.s1_fired, self.n_fired
+        alpha = s1f / nf if nf else 0.0
+        cos = s1f / (math.sqrt(s2) * math.sqrt(nf)) if nf and s2 else 0.0
+        mse = (s2 - (s1f**2 / nf if nf else 0.0)) / n
+        rms = math.sqrt(s2 / n)
+        max_abs_err = self.max_abs_unfired
+        if nf:
+            max_abs_err = max(
+                max_abs_err,
+                abs(self.max_abs_fired - alpha),
+                abs(self.min_abs_fired - alpha),
+            )
+        return {
+            "elements": n,
+            "zeros": n - nf,
+            "sparsity": (n - nf) / n,
+            "rms": rms,
+            "alpha_optimal": alpha,
+            "weight_cosine_similarity": cos,
+            "weight_reconstruction_mse": mse,
+            "weight_nrmse": math.sqrt(mse) / rms if s2 else 0.0,
+            "weight_max_absolute_error": max_abs_err,
+            "per_channel_scale_error": self._per_channel(),
+        }
+
+
+def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
+    """Streaming exact reconstruction stats for one ternary tensor."""
     ref = np.load(npy_path, mmap_mode="r")
     shape = tuple(int(d) for d in entry["shape"])
     if tuple(ref.shape) != shape:
@@ -163,101 +266,26 @@ def ternary_stats(npy_path: Path, pack: Path, entry: dict) -> dict:
             "a transposed or reshaped source would yield wrong per-channel statistics"
         )
     n = ref.size
-
-    # Channels are (leading index, last axis) pairs -- for a 3-D expert tensor
-    # (8, 6144, 32768) that is 8 x 32768 distinct channels, not 32768 pooled
-    # across experts. Chunks never cross a leading-axis boundary.
     cols = shape[-1]
     rows = shape[-2] if len(shape) >= 2 else 1
     lead = n // (rows * cols)
     view = ref.reshape(lead, rows, cols)
 
-    s2 = 0.0            # sum w^2
-    s1_fired = 0.0      # sum |w| over fired trits
-    n_fired = 0         # count of fired trits
-    sign_mismatch = 0
-    max_abs_unfired = 0.0
-    max_abs_fired = 0.0
-    min_abs_fired = math.inf
-    col_s2 = np.zeros((lead, cols), dtype=np.float64)
-    col_s1f = np.zeros((lead, cols), dtype=np.float64)
-    col_nf = np.zeros((lead, cols), dtype=np.int64)
-
+    acc = _TernaryAccumulator(lead, rows, cols)
     rows_per_chunk = max(1, CHUNK_ELEMS // cols)
     for li in range(lead):
         for r0 in range(0, rows, rows_per_chunk):
             r1 = min(r0 + rows_per_chunk, rows)
             count = (r1 - r0) * cols
             t = read_trits(pack, entry, (li * rows + r0) * cols, count).reshape(-1, cols)
-            w = np.asarray(view[li, r0:r1], dtype=np.float64)
-            fired = t != 0
-            aw = np.abs(w)
-            af = np.where(fired, aw, 0.0)
+            acc.update(li, np.asarray(view[li, r0:r1], dtype=np.float64), t)
 
-            s2 += float(np.einsum("ij,ij->", w, w))
-            s1_fired += float(af.sum())
-            n_fired += int(np.count_nonzero(fired))
-            sign_mismatch += int(np.count_nonzero(fired & ((w > 0) != (t > 0))))
-
-            max_abs_fired = max(max_abs_fired, float(np.max(aw, where=fired, initial=0.0)))
-            min_abs_fired = min(min_abs_fired, float(np.min(aw, where=fired, initial=math.inf)))
-            max_abs_unfired = max(
-                max_abs_unfired, float(np.max(aw, where=~fired, initial=0.0))
-            )
-
-            col_s2[li] += np.einsum("ij,ij->j", w, w)
-            col_s1f[li] += af.sum(axis=0)
-            col_nf[li] += fired.sum(axis=0)
-
-    if sign_mismatch:
+    if acc.sign_mismatch:
         raise MetricsError(
-            f"{entry['name']}: {sign_mismatch} fired trits disagree in sign with the source "
-            "weight -- pack does not correspond to this npy"
+            f"{entry['name']}: {acc.sign_mismatch} fired trits disagree in sign with the "
+            "source weight -- pack does not correspond to this npy"
         )
-
-    norm_w = math.sqrt(s2)
-    alpha = s1_fired / n_fired if n_fired else 0.0
-    cos = s1_fired / (norm_w * math.sqrt(n_fired)) if n_fired and norm_w else 0.0
-    mse = (s2 - (s1_fired**2 / n_fired if n_fired else 0.0)) / n
-    max_abs_err = max_abs_unfired
-    if n_fired:
-        max_abs_err = max(
-            max_abs_err, abs(max_abs_fired - alpha), abs(min_abs_fired - alpha)
-        )
-
-    # Per-channel: optimal alpha_j and relative reconstruction error. Each channel
-    # holds `rows` elements (one column of one leading slice).
-    with np.errstate(divide="ignore", invalid="ignore"):
-        alpha_col = np.where(col_nf > 0, col_s1f / np.maximum(col_nf, 1), 0.0)
-        mse_col = (
-            col_s2 - np.where(col_nf > 0, col_s1f**2 / np.maximum(col_nf, 1), 0.0)
-        ) / rows
-        rms_col = np.sqrt(col_s2 / rows)
-        rel_col = np.where(rms_col > 0, np.sqrt(np.maximum(mse_col, 0.0)) / rms_col, 0.0)
-
-    return {
-        "elements": n,
-        "zeros": n - n_fired,
-        "sparsity": (n - n_fired) / n,
-        "rms": math.sqrt(s2 / n),
-        "alpha_optimal": alpha,
-        "weight_cosine_similarity": cos,
-        "weight_reconstruction_mse": mse,
-        "weight_nrmse": math.sqrt(mse) / math.sqrt(s2 / n) if s2 else 0.0,
-        "weight_max_absolute_error": max_abs_err,
-        "per_channel_scale_error": {
-            "channels": int(alpha_col.size),
-            "channel_definition": (
-                f"(leading index, last axis) pairs: {lead} x {cols}, {rows} elements each"
-            ),
-            "alpha_min": float(alpha_col.min()),
-            "alpha_median": float(np.median(alpha_col)),
-            "alpha_max": float(alpha_col.max()),
-            "relative_error_min": float(rel_col.min()),
-            "relative_error_median": float(np.median(rel_col)),
-            "relative_error_max": float(rel_col.max()),
-        },
-    }
+    return acc.finalize(n)
 
 
 def reconstruct_full(pack: Path, entry: dict, alpha: float) -> np.ndarray:
@@ -357,93 +385,96 @@ def stem_of(name: str) -> str:
     return name.replace(".", "__")
 
 
-def gate(observed: float, threshold: float, higher_is_better: bool = True) -> str:
-    if observed is None:
-        return "unknown"
-    ok = observed >= threshold if higher_is_better else observed <= threshold
-    return "pass" if ok else "fail"
-
-
-def main(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(description="Route-preservation metrics for a GOZ1 block pilot")
-    p.add_argument("--npy-dir", type=Path, required=True, help="f32 npy the pack was built from")
-    p.add_argument("--pack", type=Path, required=True, help="GOZ1 pack to read back")
-    p.add_argument("--block", type=int, required=True)
-    p.add_argument("--mode", required=True)
-    p.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
-    p.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    p.add_argument("--json-out", type=Path)
-    args = p.parse_args(argv)
-
-    metadata, index = load_pack_index(args.pack)
-
-    ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
-    preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
-    print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
-
-    # --- weight reconstruction, streamed over every quantized tensor ---
+def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict[str, dict]:
+    """Streamed reconstruction stats for every quantized tensor in the pack."""
     weights: dict[str, dict] = {}
     for name in sorted(ternary):
-        npy = args.npy_dir / f"{stem_of(name)}.npy"
+        npy = npy_dir / f"{stem_of(name)}.npy"
         if not npy.exists():
             raise MetricsError(f"{name}: source npy missing at {npy}")
-        st = ternary_stats(npy, args.pack, ternary[name])
+        st = ternary_stats(npy, pack, ternary[name])
         weights[name] = st
         print(
             f"  ternary {name:<46} zeros={st['sparsity'] * 100:6.2f}%  "
             f"cos={st['weight_cosine_similarity']:.6f}  nrmse={st['weight_nrmse']:.6f}"
         )
+    return weights
 
-    # --- preserve tier fp16 round-trip (routers/norms are fp16-at-rest in GOZ1 v1) ---
-    preserve_err: dict[str, dict] = {}
+
+def measure_preserve(npy_dir: Path, pack: Path, preserve: dict[str, dict]) -> dict[str, dict]:
+    """fp16 round-trip error for the preserve tier (fp16-at-rest in GOZ1 v1)."""
+    errors: dict[str, dict] = {}
     for name in sorted(preserve):
-        npy = args.npy_dir / f"{stem_of(name)}.npy"
+        npy = npy_dir / f"{stem_of(name)}.npy"
         if not npy.exists():
             print(f"  warning: {name} has no source npy at {npy}; fp16 round-trip skipped")
             continue
         ref = np.load(npy).astype(np.float32)
-        got = read_f16(args.pack, preserve[name])
-        d = np.abs(ref - got)
+        got = read_f16(pack, preserve[name])
+        d = np.abs(ref - got).astype(np.float64)
         rms = float(np.sqrt((ref.astype(np.float64) ** 2).mean()))
-        preserve_err[name] = {
+        errors[name] = {
             "max_absolute_error": float(d.max()),
-            "relative_rmse": float(np.sqrt((d.astype(np.float64) ** 2).mean()) / rms) if rms else 0.0,
+            "relative_rmse": float(np.sqrt((d**2).mean()) / rms) if rms else 0.0,
             "bit_exact": bool(np.array_equal(ref, got)),
         }
         print(
-            f"  preserve {name:<45} fp16 max|err|={preserve_err[name]['max_absolute_error']:.3e}  "
-            f"rel_rmse={preserve_err[name]['relative_rmse']:.3e}"
+            f"  preserve {name:<45} fp16 max|err|={errors[name]['max_absolute_error']:.3e}  "
+            f"rel_rmse={errors[name]['relative_rmse']:.3e}"
         )
+    return errors
 
-    # --- routing, per d_model x d_model projection (roles unassigned upstream) ---
-    # Located by suffix rather than a hardcoded slot, and every failure below is
-    # fatal: a gate script that silently emits an all-`unknown` report would look
-    # exactly like a passing pilot.
+
+def _resolve_router(npy_dir: Path, preserve: dict[str, dict]) -> tuple[str, np.ndarray]:
+    """Find the preserve-tier router by suffix and check its orientation.
+
+    Located by suffix rather than a hardcoded slot, and a miss is fatal: a gate
+    script that silently emitted an all-`unknown` report would look exactly like
+    a passing pilot.
+    """
     routers = [n for n in sorted(preserve) if n.endswith(".router")]
-    routing: dict[str, dict] = {}
     if len(routers) != 1:
         raise MetricsError(
             f"expected exactly one preserve-tier router in the pack, found {routers or 'none'}"
         )
-    router_name = routers[0]
-    router_ref = np.load(args.npy_dir / f"{stem_of(router_name)}.npy").astype(np.float32)
-    router_pilot = read_f16(args.pack, preserve[router_name])
-    if router_ref.ndim != 2 or router_ref.shape[0] <= router_ref.shape[1]:
+    ref = np.load(npy_dir / f"{stem_of(routers[0])}.npy").astype(np.float32)
+    if ref.ndim != 2 or ref.shape[0] <= ref.shape[1]:
         raise MetricsError(
-            f"{router_name}: expected (d_model, experts) with d_model > experts, "
-            f"got {router_ref.shape}; a transposed router would silently mis-size d_model"
+            f"{routers[0]}: expected (d_model, experts) with d_model > experts, "
+            f"got {ref.shape}; a transposed router would silently mis-size d_model"
         )
-    d_model = router_ref.shape[0]
+    return routers[0], ref
 
+
+def _resolve_activations(
+    npy_dir: Path, preserve: dict[str, dict], d_model: int, tokens: int, seed: int
+) -> tuple[str, np.ndarray]:
+    """Seeded tokens shaped by the block's real RMSNorm gain."""
     norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
     if norm_name is None:
         raise MetricsError("no block_norm in pack; cannot build realistic activations")
-    gain = np.load(args.npy_dir / f"{stem_of(norm_name)}.npy").astype(np.float32)
+    gain = np.load(npy_dir / f"{stem_of(norm_name)}.npy").astype(np.float32)
     if gain.shape != (d_model,):
         raise MetricsError(
             f"{norm_name}: shape {gain.shape} does not match router d_model {d_model}"
         )
-    x = make_activations(gain, args.tokens, args.seed)
+    return norm_name, make_activations(gain, tokens, seed)
+
+
+def measure_routing(
+    npy_dir: Path,
+    pack: Path,
+    ternary: dict[str, dict],
+    preserve: dict[str, dict],
+    weights: dict[str, dict],
+    tokens: int,
+    seed: int,
+) -> dict[str, dict]:
+    """Route preservation for each d_model x d_model projection (roles unassigned)."""
+    router_name, router_ref = _resolve_router(npy_dir, preserve)
+    router_pilot = read_f16(pack, preserve[router_name])
+    d_model = router_ref.shape[0]
+    norm_name, x = _resolve_activations(npy_dir, preserve, d_model, tokens, seed)
 
     square = [n for n, e in ternary.items() if list(e["shape"]) == [d_model, d_model]]
     if not square:
@@ -451,11 +482,11 @@ def main(argv: list[str]) -> int:
             f"no {d_model}x{d_model} projection among the pack's ternary tensors, so no "
             "routing gate can be evaluated; re-run with a mode that quantizes attention"
         )
+
+    routing: dict[str, dict] = {}
     for name in sorted(square):
-        w_ref = np.load(args.npy_dir / f"{stem_of(name)}.npy").astype(np.float32)
-        w_pilot = reconstruct_full(
-            args.pack, ternary[name], weights[name]["alpha_optimal"]
-        )
+        w_ref = np.load(npy_dir / f"{stem_of(name)}.npy").astype(np.float32)
+        w_pilot = reconstruct_full(pack, ternary[name], weights[name]["alpha_optimal"])
         r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
         r["activation_source"] = f"seeded N(0,1) tokens x RMSNorm gain {norm_name}"
         routing[name] = r
@@ -464,186 +495,96 @@ def main(argv: list[str]) -> int:
             f"top2={r['router_top2_set_agreement'] * 100:6.2f}%  "
             f"cos={r['block_output_cosine']:.6f}"
         )
+    return routing
 
-    summary = build_summary(weights, routing)
 
-    result = {
-        "model_family": "grok-1",
-        "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
-        "pilot": {
-            "block": args.block,
-            "mode": args.mode,
-            "pack": str(args.pack),
-            "npy_dir": str(args.npy_dir),
-            "tokens": args.tokens,
-            "seed": args.seed,
-            "ternary_tensors": len(ternary),
-            "preserve_tensors": len(preserve),
-            "pack_metadata": {k: v for k, v in metadata.items() if k.startswith("oz.")},
-            "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
-            "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",
-        },
-        "summary": summary,
-        "weights": weights,
-        "preserve_fp16_roundtrip": preserve_err,
-        "routing": routing,
-    }
+def report_gates(summary: list[dict]) -> int:
+    """Print the gate table; return the process exit code.
 
-    if args.json_out:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(json.dumps(result, indent=2) + "\n")
-        print(f"wrote {args.json_out}")
-
+    Fail-closed: a threshold that is not ``pass`` must not exit 0, or a caller
+    cannot tell a passing pilot from a failing one.
+    """
     gated = [m for m in summary if m["threshold"]]
     print("\nroute-preservation gates:")
     for m in gated:
         obs = "null" if m["observed"] is None else f"{m['observed']:.6f}"
         print(f"  {m['name']:<28} {m['status']:>7}  observed={obs}  threshold={m['threshold']}")
-
-    # Fail-closed: a threshold that is not `pass` must not exit 0, or a caller
-    # cannot tell a passing pilot from a failing one.
-    if any(m["status"] != "pass" for m in gated):
-        print(f"\n{sum(m['status'] != 'pass' for m in gated)} of {len(gated)} gates not passing")
+    failing = sum(m["status"] != "pass" for m in gated)
+    if failing:
+        print(f"\n{failing} of {len(gated)} gates not passing")
         return GATE_FAILURE_EXIT
     return 0
 
 
-def build_summary(weights: dict[str, dict], routing: dict[str, dict]) -> list[dict]:
-    """Assemble run3's route-preservation surface with observed values filled in."""
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Route-preservation metrics for a GOZ1 block pilot")
+    p.add_argument("--npy-dir", type=Path, required=True, help="f32 npy the pack was built from")
+    p.add_argument("--pack", type=Path, required=True, help="GOZ1 pack to read back")
+    p.add_argument("--block", type=int, required=True)
+    p.add_argument("--mode", required=True)
+    p.add_argument("--tokens", type=int, default=DEFAULT_TOKENS)
+    p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p.add_argument("--json-out", type=Path)
+    return p.parse_args(argv)
 
-    def worst(key: str, default=None):
-        vals = [r[key] for r in routing.values()]
-        return min(vals) if vals else default
 
-    top1 = worst("router_top1_agreement")
-    top2 = worst("router_top2_set_agreement")
-    bcos = worst("block_output_cosine")
-    return [
-        {
-            "name": "router_top1_agreement",
-            "scope": "router_behavior",
-            "status": gate(top1, 0.99),
-            "threshold": ">= 99.0%",
-            "observed": top1,
-            "detail": "Worst case over evaluated d_model x d_model projections; router read from the pack (fp16 preserve tier).",
-        },
-        {
-            "name": "router_top2_set_agreement",
-            "scope": "router_behavior",
-            "status": gate(top2, 0.995),
-            "threshold": ">= 99.5%",
-            "observed": top2,
-            "detail": "Fraction of tokens whose unordered top-2 expert set is unchanged.",
-        },
-        {
-            "name": "expert_load_distribution_delta",
-            "scope": "router_behavior",
-            "status": "measured" if routing else "unknown",
-            "threshold": None,
-            "observed": max([r["expert_load_distribution_delta"] for r in routing.values()], default=None),
-            "detail": "Max per-expert share change in the top-1 load histogram.",
-        },
-        {
-            "name": "expert_load_js_divergence",
-            "scope": "router_behavior",
-            "status": "measured" if routing else "unknown",
-            "threshold": None,
-            "observed": max([r["expert_load_js_divergence"] for r in routing.values()], default=None),
-            "detail": "Jensen-Shannon divergence (bits) between reference and pilot expert-load distributions.",
-        },
-        {
-            "name": "router_logit_rank_correlation",
-            "scope": "router_behavior",
-            "status": "measured" if routing else "unknown",
-            "threshold": None,
-            "observed": worst("router_logit_rank_correlation"),
-            "detail": "Mean per-token Spearman correlation over the 8 router logits.",
-        },
-        {
-            "name": "block_output_cosine",
-            "scope": "block_behavior",
-            "status": gate(bcos, 0.995),
-            "threshold": ">= 0.995",
-            "observed": bcos,
-            "detail": "Scoped to the quantized projection output, not a full block forward (attention roles are unassigned upstream; MoE not executed).",
-        },
-        {
-            "name": "block_output_rmse",
-            "scope": "block_behavior",
-            "status": "measured" if routing else "unknown",
-            "threshold": None,
-            "observed": max([r["block_output_rmse"] for r in routing.values()], default=None),
-            "detail": "RMSE of the projection output against the f32 reference path.",
-        },
-        {
-            "name": "residual_stream_drift",
-            "scope": "block_behavior",
-            "status": "measured" if routing else "unknown",
-            "threshold": None,
-            "observed": max([r["residual_stream_drift"] for r in routing.values()], default=None),
-            "detail": "Projection-output RMSE normalized by reference output RMS.",
-        },
-        {
-            "name": "weight_reconstruction_mse",
-            "scope": "weight_reconstruction",
-            "status": "measured" if weights else "unknown",
-            "threshold": None,
-            "observed": max([w["weight_reconstruction_mse"] for w in weights.values()], default=None),
-            "detail": "Worst quantized tensor, at the least-squares optimal ternary scale.",
-        },
-        {
-            "name": "weight_cosine_similarity",
-            "scope": "weight_reconstruction",
-            "status": "measured" if weights else "unknown",
-            "threshold": None,
-            "observed": min([w["weight_cosine_similarity"] for w in weights.values()], default=None),
-            "detail": "Worst quantized tensor; independent of the chosen ternary scale.",
-        },
-        {
-            "name": "weight_max_absolute_error",
-            "scope": "weight_reconstruction",
-            "status": "measured" if weights else "unknown",
-            "threshold": None,
-            "observed": max([w["weight_max_absolute_error"] for w in weights.values()], default=None),
-            "detail": "Exact max |w - alpha*t| over all quantized tensors.",
-        },
-        {
-            "name": "per_channel_scale_error_summary",
-            "scope": "weight_reconstruction",
-            "status": "measured" if weights else "unknown",
-            "threshold": None,
-            "observed": max(
-                [w["per_channel_scale_error"]["relative_error_max"] for w in weights.values()],
-                default=None,
-            ),
-            "detail": "Worst per-output-channel relative reconstruction error; full per-tensor spread under `weights`.",
-        },
-        {
-            "name": "logit_kl",
-            "scope": "model_behavior",
-            "status": "unknown",
-            "threshold": None,
-            "observed": None,
-            "detail": "Requires whole-model inference; out of scope for a bounded single-block pilot (#53 non-goal).",
-        },
-        {
-            "name": "perplexity_delta",
-            "scope": "model_behavior",
-            "status": "unknown",
-            "threshold": None,
-            "observed": None,
-            "detail": "Requires a calibration corpus and whole-model inference; not run.",
-        },
-        {
-            "name": "generation_sanity_summary",
-            "scope": "model_behavior",
-            "status": "unknown",
-            "threshold": None,
-            "observed": None,
-            "detail": "Requires whole-model inference; not run.",
-        },
-    ]
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    metadata, index = load_pack_index(args.pack)
+    ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
+    preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
+    print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
 
+    weights = measure_weights(args.npy_dir, args.pack, ternary)
+    preserve_err = measure_preserve(args.npy_dir, args.pack, preserve)
+    routing = measure_routing(
+        args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
+    )
+    summary = build_summary(weights, routing)
+    result = {
+        "model_family": "grok-1",
+        "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
+        "pilot": _pilot_provenance(args, metadata, len(ternary), len(preserve)),
+        "summary": summary,
+        "weights": weights,
+        "preserve_fp16_roundtrip": preserve_err,
+        "routing": routing,
+    }
+    _write_json(result, args.json_out)
+    return report_gates(summary)
+
+
+def _pilot_provenance(
+    args: argparse.Namespace, metadata: dict, n_ternary: int, n_preserve: int
+) -> dict:
+    """Everything a reader needs to know how these numbers were produced."""
+    return {
+        "block": args.block,
+        "mode": args.mode,
+        "pack": str(args.pack),
+        "npy_dir": str(args.npy_dir),
+        "tokens": args.tokens,
+        "seed": args.seed,
+        "ternary_tensors": n_ternary,
+        "preserve_tensors": n_preserve,
+        "pack_metadata": {k: v for k, v in metadata.items() if k.startswith("oz.")},
+        "ternary_scale": (
+            "least-squares optimal alpha = sum(|w| fired)/count(fired); "
+            "GOZ1 v1 stores no scale"
+        ),
+        "activations": (
+            "seeded standard-normal tokens shaped by the block's real RMSNorm gain; "
+            "no calibration corpus"
+        ),
+    }
+
+
+def _write_json(result: dict, json_out: Path | None) -> None:
+    if json_out is None:
+        return
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(result, indent=2) + "\n")
+    print(f"wrote {json_out}")
 
 if __name__ == "__main__":
     try:

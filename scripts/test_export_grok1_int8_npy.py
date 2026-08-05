@@ -42,7 +42,7 @@ def _bf16(x: np.ndarray) -> np.ndarray:
 
 
 def _write_shard(path: Path, obj) -> None:
-    path.write_bytes(pickle.dumps(obj, protocol=4))
+    path.write_bytes(pickle.dumps(obj, protocol=4))  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
 
 
 def _write_quantized(path: Path, weight: np.ndarray, scales_f32: np.ndarray) -> None:
@@ -53,7 +53,7 @@ def _write_quantized(path: Path, weight: np.ndarray, scales_f32: np.ndarray) -> 
     descriptor string is rewritten to ``bfloat16`` (same 2-byte itemsize, same
     payload), reproducing what JAX/ml_dtypes writes.
     """
-    raw = pickle.dumps(
+    raw = pickle.dumps(  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
         QuantizedWeight8bit(weight=weight, scales=_bf16(scales_f32)), protocol=4
     )
     # Only the scales array is u2 in these fixtures, so a single rename is exact.
@@ -99,7 +99,7 @@ class ScanShardTests(unittest.TestCase):
         a = np.arange(4096, dtype="<f4")
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "s"
-            raw = pickle.dumps(a, protocol=4)
+            raw = pickle.dumps(a, protocol=4)  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
             p.write_bytes(raw[: len(raw) // 2])
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.scan_shard(p)

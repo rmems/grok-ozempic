@@ -5,7 +5,7 @@
     "block": 0,
     "mode": "attention_only",
     "pack": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_only.goz1",
-    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.TMl9Xl/npy",
+    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.DI91xL/npy",
     "tokens": 4096,
     "seed": 20260805,
     "ternary_tensors": 4,
@@ -57,7 +57,7 @@
       "status": "measured",
       "threshold": null,
       "observed": 0.7434779575892858,
-      "detail": "Mean per-token Spearman correlation over the 8 router logits."
+      "detail": "Mean per-token Spearman correlation over the router logits."
     },
     {
       "name": "block_output_cosine",

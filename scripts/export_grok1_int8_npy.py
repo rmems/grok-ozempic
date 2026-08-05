@@ -99,6 +99,7 @@ import mmap as mmap_mod
 # pickletools only *decodes* opcodes; nothing here unpickles, imports a
 # STACK_GLOBAL target, or executes checkpoint-controlled data. See "Safety".
 import pickletools  # nosec B403
+import struct
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,6 +113,8 @@ _SCAN_WINDOW = 1 << 16
 _PAYLOAD_READ_LIMIT = 4096
 # Below this a "payload" is ndarray reconstruct scaffolding (b"b"), not data.
 _MIN_PAYLOAD_BYTES = 16
+# Payload-carrying opcodes -> bytes of opcode+length header before the data.
+_PAYLOAD_OPS = {"BINBYTES": 5, "BINBYTES8": 9, "SHORT_BINBYTES": 2}
 
 # numpy dtype descriptors we accept from the pickle stream.
 _INT_DESCR = {"i1"}
@@ -184,6 +187,57 @@ class _StopAtPayload(io.BytesIO):
         return super().read(size)
 
 
+class _HeaderState:
+    """ndarray header facts accumulated as opcodes stream past."""
+
+    def __init__(self) -> None:
+        self.ints: list[int] = []
+        self.shape: tuple[int, ...] | None = None
+        self.descr: str | None = None
+        self.fortran: bool | None = None
+
+    def feed(self, opname: str, arg) -> None:
+        if opname in ("BININT", "BININT1", "BININT2"):
+            self.ints.append(int(arg))
+        elif opname in ("TUPLE1", "TUPLE2", "TUPLE3"):
+            k = int(opname[-1])
+            if len(self.ints) >= k:
+                self.shape = tuple(self.ints[-k:])
+            self.ints = []
+        elif opname == "SHORT_BINUNICODE" and arg in _KNOWN_DESCR:
+            self.descr = str(arg)
+        elif opname in ("NEWFALSE", "NEWTRUE"):
+            # numpy's `_reconstruct` state writes is_fortran right before data.
+            self.fortran = opname == "NEWTRUE"
+
+    def spec(self, name: str, offset: int, nbytes: int) -> ArraySpec:
+        if self.shape is None or self.descr is None:
+            raise ExportError(
+                f"{name}: payload at byte {offset} has no preceding "
+                "shape/dtype -- unrecognized pickle layout"
+            )
+        spec = ArraySpec(self.shape, self.descr, offset, nbytes, bool(self.fortran))
+        spec.validate()
+        return spec
+
+
+def _payload_at(
+    state: _HeaderState, opname: str, arg, pos: int, base: int, name: str
+) -> ArraySpec | None:
+    """Return a spec if this opcode carries array data; otherwise record its facts.
+
+    Small ``BINBYTES`` are ndarray reconstruct scaffolding (``b"b"``), not data.
+    """
+    header = _PAYLOAD_OPS.get(opname)
+    if header is None:
+        state.feed(opname, arg)
+        return None
+    nbytes = len(arg) if isinstance(arg, bytes) else int(arg)
+    if nbytes < _MIN_PAYLOAD_BYTES:
+        return None
+    return state.spec(name, base + pos + header, nbytes)
+
+
 def _scan_window(window: bytes, base: int, name: str) -> ArraySpec | None:
     """Return the first ndarray payload in ``window``, or ``None`` if there is none.
 
@@ -191,52 +245,21 @@ def _scan_window(window: bytes, base: int, name: str) -> ArraySpec | None:
     absolute. A truncated window (the payload lies past its end) still yields a
     complete spec, because the payload is intercepted by size before it is read.
     """
-    ints: list[int] = []
-    shape: tuple[int, ...] | None = None
-    descr: str | None = None
-    fortran: bool | None = None
+    state = _HeaderState()
     stream = _StopAtPayload(window)
-
-    def finish(offset: int, nbytes: int, header: int) -> ArraySpec:
-        if shape is None or descr is None:
-            raise ExportError(
-                f"{name}: payload at byte {base + offset} has no preceding "
-                "shape/dtype -- unrecognized pickle layout"
-            )
-        spec = ArraySpec(shape, descr, base + offset + header, nbytes, bool(fortran))
-        spec.validate()
-        return spec
-
     try:
         for op, arg, pos in pickletools.genops(stream):
-            opname = op.name
-            if opname in ("BININT", "BININT1", "BININT2"):
-                ints.append(int(arg))
-            elif opname in ("TUPLE1", "TUPLE2", "TUPLE3"):
-                k = int(opname[-1])
-                if len(ints) >= k:
-                    shape = tuple(ints[-k:])
-                ints = []
-            elif opname == "SHORT_BINUNICODE" and arg in _KNOWN_DESCR:
-                descr = str(arg)
-            elif opname in ("NEWFALSE", "NEWTRUE"):
-                # numpy's `_reconstruct` state writes is_fortran right before data.
-                fortran = opname == "NEWTRUE"
-            elif opname in ("BINBYTES", "BINBYTES8", "SHORT_BINBYTES"):
-                nbytes = len(arg) if isinstance(arg, bytes) else int(arg)
-                if nbytes < _MIN_PAYLOAD_BYTES:
-                    continue
-                header = {"BINBYTES": 5, "BINBYTES8": 9, "SHORT_BINBYTES": 2}[opname]
-                return finish(pos, nbytes, header)
-            elif opname == "STOP":
+            found = _payload_at(state, op.name, arg, pos, base, name)
+            if found is not None:
+                return found
+            if op.name == "STOP":
                 return None
     except _PayloadBoundary as boundary:
         # tell() sits just past the length field, i.e. at the payload itself.
-        return finish(boundary.offset, boundary.nbytes, 0)
-    except ExportError:
-        raise
-    except Exception:
+        return state.spec(name, base + boundary.offset, boundary.nbytes)
+    except (ValueError, IndexError, AssertionError, struct.error, EOFError):
         # Window ended mid-opcode with no payload in it: nothing more to find.
+        # Narrow on purpose so an ExportError from state.spec still propagates.
         return None
     return None
 
@@ -262,20 +285,10 @@ def scan_shard(path: Path) -> list[ArraySpec]:
         try:
             base = 0
             while base < size:
-                window = mm[base : min(size, base + _SCAN_WINDOW)]
-                spec = _scan_window(window, base, path.name)
+                spec = _scan_window(mm[base : min(size, base + _SCAN_WINDOW)], base, path.name)
                 if spec is None:
                     break
-                if spec.offset + spec.nbytes > size:
-                    raise ExportError(
-                        f"{path.name}: {spec.descr} payload of {spec.nbytes} bytes at "
-                        f"{spec.offset} runs past end of file ({size}) -- truncated shard"
-                    )
-                if spec.fortran_order:
-                    raise ExportError(
-                        f"{path.name}: array {spec.shape} is Fortran-ordered; this "
-                        "exporter writes C-order .npy and will not silently transpose"
-                    )
+                _reject_unsupported(spec, size, path.name)
                 specs.append(spec)
                 base = spec.offset + spec.nbytes
         finally:
@@ -283,6 +296,20 @@ def scan_shard(path: Path) -> list[ArraySpec]:
     if not specs:
         raise ExportError(f"{path.name}: no ndarray payload found")
     return specs
+
+
+def _reject_unsupported(spec: ArraySpec, size: int, name: str) -> None:
+    """Fail on layouts this exporter cannot represent faithfully."""
+    if spec.offset + spec.nbytes > size:
+        raise ExportError(
+            f"{name}: {spec.descr} payload of {spec.nbytes} bytes at {spec.offset} "
+            f"runs past end of file ({size}) -- truncated shard"
+        )
+    if spec.fortran_order:
+        raise ExportError(
+            f"{name}: array {spec.shape} is Fortran-ordered; this exporter writes "
+            "C-order .npy and will not silently transpose"
+        )
 
 
 def split_quantized(specs: list[ArraySpec]) -> tuple[ArraySpec, ArraySpec | None]:
@@ -356,8 +383,7 @@ def export_tensor(
     """
     import numpy as np
 
-    specs = scan_shard(shard)
-    weight, scales = split_quantized(specs)
+    weight, scales = split_quantized(scan_shard(shard))
     if expect_shape is not None and tuple(expect_shape) != weight.shape:
         raise ExportError(
             f"{shard.name}: manifest shape {tuple(expect_shape)} != shard shape "
@@ -369,28 +395,41 @@ def export_tensor(
         "shape": list(weight.shape),
         "source_dtype": "f32" if scales is None else "int8 x bf16",
         "out_bytes": weight.numel * 4,
+        "scale_groups": None,
     }
+    if scales is not None:
+        _lead, k, _n, g = grouping(weight, scales)
+        info["scale_groups"] = g
+        info["group_rows"] = k // g
+    if dry_run:
+        return info
 
     if scales is None:
-        info["scale_groups"] = None
-        if dry_run:
-            return info
         src = np.memmap(
             shard, dtype="<f4", mode="r", offset=weight.offset, shape=weight.shape
         )
         _write_npy(out_path, weight.shape, src, chunk_mib=chunk_mib)
-        return info
+    else:
+        _write_npy(
+            out_path,
+            weight.shape,
+            _dequant_chunks(shard, weight, scales, chunk_mib),
+            chunk_mib=chunk_mib,
+            streaming=True,
+        )
+    return info
+
+
+def _dequant_chunks(shard: Path, weight: ArraySpec, scales: ArraySpec, chunk_mib: int):
+    """Yield f32 row-blocks of ``weight * scales``, never holding the whole tensor.
+
+    Each block stays inside one scale group, so a single broadcast row applies.
+    """
+    import numpy as np
 
     lead, k, n, g = grouping(weight, scales)
-    info["scale_groups"] = g
-    info["group_rows"] = k // g
-    if dry_run:
-        return info
-
     w = np.memmap(shard, dtype=np.int8, mode="r", offset=weight.offset, shape=weight.shape)
-    s_raw = np.memmap(
-        shard, dtype="<u2", mode="r", offset=scales.offset, shape=scales.shape
-    )
+    s_raw = np.memmap(shard, dtype="<u2", mode="r", offset=scales.offset, shape=scales.shape)
     # bfloat16 -> f32 is an exact 16-bit left shift of the bit pattern.
     s = (s_raw.astype(np.uint32) << 16).view(np.float32)
 
@@ -400,22 +439,17 @@ def export_tensor(
     wf = w.reshape(lead_n, k, n)
     sf = s.reshape(lead_n, g, n)
     group_rows = k // g
-
     rows_per_chunk = max(1, (chunk_mib * 1024 * 1024) // (n * 4))
 
-    def blocks():
-        for li in range(lead_n):
-            for gi in range(g):
-                base = gi * group_rows
-                scale_row = sf[li, gi]
-                for r0 in range(0, group_rows, rows_per_chunk):
-                    r1 = min(r0 + rows_per_chunk, group_rows)
-                    chunk = wf[li, base + r0 : base + r1].astype(np.float32)
-                    chunk *= scale_row
-                    yield chunk
-
-    _write_npy(out_path, weight.shape, blocks(), chunk_mib=chunk_mib, streaming=True)
-    return info
+    for li in range(lead_n):
+        for gi in range(g):
+            base = gi * group_rows
+            scale_row = sf[li, gi]
+            for r0 in range(0, group_rows, rows_per_chunk):
+                r1 = min(r0 + rows_per_chunk, group_rows)
+                chunk = wf[li, base + r0 : base + r1].astype(np.float32)
+                chunk *= scale_row
+                yield chunk
 
 
 def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = False) -> None:
@@ -463,26 +497,35 @@ def select_tensors(
     mode: str,
     names: list[str],
 ) -> list[dict]:
+    """Pick explicit structural names, or every tensor of one block in ``mode``."""
     if names:
-        by_name = {t["structural_name"]: t for t in tensors}
-        missing = [n for n in names if n not in by_name]
-        if missing:
-            raise ExportError(f"structural names not in manifest: {', '.join(missing)}")
-        return [by_name[n] for n in names]
+        return _select_by_names(tensors, names)
+    return _select_by_block(tensors, block, mode)
+
+
+def _select_by_names(tensors: list[dict], names: list[str]) -> list[dict]:
+    by_name = {t["structural_name"]: t for t in tensors}
+    missing = [n for n in names if n not in by_name]
+    if missing:
+        raise ExportError(f"structural names not in manifest: {', '.join(missing)}")
+    return [by_name[n] for n in names]
+
+
+def _select_by_block(tensors: list[dict], block: int | None, mode: str) -> list[dict]:
     kinds = MODES[mode]
-    picked = [
-        t for t in tensors if t.get("block") == block and t.get("kind") in kinds
-    ]
+    picked = [t for t in tensors if t.get("block") == block and t.get("kind") in kinds]
     if not picked:
         raise ExportError(f"no tensors for block {block} in mode {mode}")
     return picked
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Dequantize Grok-1 int8 ckpt-0 shards to f32 .npy (GH #53 / RM-222)"
     )
-    p.add_argument("--conversion-manifest", type=Path, help="xai-dissect run3 conversion-manifest.json")
+    p.add_argument(
+        "--conversion-manifest", type=Path, help="xai-dissect run3 conversion-manifest.json"
+    )
     p.add_argument("--block", type=int, help="pilot block index (with --mode)")
     p.add_argument("--mode", choices=sorted(MODES), default="attention_only")
     p.add_argument(
@@ -496,46 +539,59 @@ def main(argv: list[str]) -> int:
     p.add_argument("--chunk-mib", type=int, default=DEFAULT_CHUNK_MIB, help="write chunk size")
     p.add_argument("--dry-run", action="store_true", help="report plan and sizes, write nothing")
     p.add_argument("--inspect", type=Path, help="print raw array layout of one shard and exit")
-    args = p.parse_args(argv)
+    return p
 
-    if args.inspect:
-        for spec in scan_shard(args.inspect):
-            print(f"{spec.descr:>9} {str(spec.shape):>24}  offset={spec.offset}  bytes={spec.nbytes}")
-        return 0
 
-    if not args.conversion_manifest:
-        p.error("--conversion-manifest is required (or use --inspect)")
-    if not args.output_dir:
-        p.error("--output-dir is required")
-    if args.block is None and not args.names:
-        p.error("need --block (with --mode) or at least one --structural-name")
-
-    tensors = load_manifest(args.conversion_manifest)
-    picked = select_tensors(tensors, block=args.block, mode=args.mode, names=args.names)
-
+def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: bool) -> int:
+    """Export each selected tensor; return total f32 bytes planned or written."""
     total = 0
     for t in sorted(picked, key=lambda x: x["structural_name"]):
         name = t["structural_name"]
         shard = Path(t["source_shard_path"])
         if not shard.exists():
             raise ExportError(f"{name}: shard missing: {shard}")
-        out = Path(args.output_dir) / f"{structural_stem(name)}.npy"
+        out = output_dir / f"{structural_stem(name)}.npy"
         # expect_shape cross-checks the manifest against the shard before writing.
         info = export_tensor(
-            shard,
-            out,
-            chunk_mib=args.chunk_mib,
-            dry_run=args.dry_run,
-            expect_shape=t["shape"],
+            shard, out, chunk_mib=chunk_mib, dry_run=dry_run, expect_shape=t["shape"]
         )
         total += info["out_bytes"]
         groups = info["scale_groups"]
         detail = f"groups={groups}" if groups is not None else "passthrough"
-        verb = "plan" if args.dry_run else "wrote"
         print(
-            f"{verb} {name}  {info['source_dtype']:>13}  {tuple(info['shape'])}  "
-            f"{detail}  {info['out_bytes'] / 1024**3:.3f} GiB  -> {out.name}"
+            f"{'plan' if dry_run else 'wrote'} {name}  {info['source_dtype']:>13}  "
+            f"{tuple(info['shape'])}  {detail}  {info['out_bytes'] / 1024**3:.3f} GiB "
+            f"-> {out.name}"
         )
+    return total
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.inspect:
+        for spec in scan_shard(args.inspect):
+            print(
+                f"{spec.descr:>9} {str(spec.shape):>24}  "
+                f"offset={spec.offset}  bytes={spec.nbytes}"
+            )
+        return 0
+
+    if not args.conversion_manifest:
+        parser.error("--conversion-manifest is required (or use --inspect)")
+    if not args.output_dir:
+        parser.error("--output-dir is required")
+    if args.block is None and not args.names:
+        parser.error("need --block (with --mode) or at least one --structural-name")
+
+    picked = select_tensors(
+        load_manifest(args.conversion_manifest),
+        block=args.block,
+        mode=args.mode,
+        names=args.names,
+    )
+    total = run_exports(picked, Path(args.output_dir), args.chunk_mib, args.dry_run)
     print(f"{len(picked)} tensor(s), {total / 1024**3:.3f} GiB f32 total -> {args.output_dir}")
     return 0
 
