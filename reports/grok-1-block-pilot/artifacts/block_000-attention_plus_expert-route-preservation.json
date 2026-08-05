@@ -15,7 +15,7 @@
       "oz.gif_threshold_note": "per-tensor effective_tau: 0.4 for attn_proj_i8.*, 0.9 for moe_expert.*; pipeline default 0.05"
     },
     "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
-    "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",
+    "activations": "real token-embedding rows through the block's RMSNorm gain",
     "effective_tau_policy": {
       "attn_proj_i8.*": 0.4,
       "moe_expert.*": 0.9
@@ -30,7 +30,7 @@
       "scope": "router_behavior",
       "status": "fail",
       "threshold": ">= 99.0%",
-      "observed": 0.677734375,
+      "observed": 0.6396484375,
       "detail": "Worst case over evaluated d_model x d_model projections; router read from the pack (fp16 preserve tier)."
     },
     {
@@ -38,7 +38,7 @@
       "scope": "router_behavior",
       "status": "fail",
       "threshold": ">= 99.5%",
-      "observed": 0.475830078125,
+      "observed": 0.421142578125,
       "detail": "Fraction of tokens whose unordered top-2 expert set is unchanged."
     },
     {
@@ -46,7 +46,7 @@
       "scope": "router_behavior",
       "status": "measured",
       "threshold": null,
-      "observed": 0.029296875,
+      "observed": 0.24853515625,
       "detail": "Max per-expert share change in the top-1 load histogram."
     },
     {
@@ -54,7 +54,7 @@
       "scope": "router_behavior",
       "status": "measured",
       "threshold": null,
-      "observed": 0.008284835625974757,
+      "observed": 0.11021330045422195,
       "detail": "Jensen-Shannon divergence (bits) between reference and pilot expert-load distributions."
     },
     {
@@ -62,7 +62,7 @@
       "scope": "router_behavior",
       "status": "measured",
       "threshold": null,
-      "observed": 0.7434779575892858,
+      "observed": 0.7528366815476191,
       "detail": "Mean per-token Spearman correlation over the router logits."
     },
     {
@@ -70,7 +70,7 @@
       "scope": "block_behavior",
       "status": "fail",
       "threshold": ">= 0.995",
-      "observed": 0.8603326972461066,
+      "observed": 0.8492034016757434,
       "detail": "Scoped to the quantized projection output, not a full block forward (attention roles are unassigned upstream; MoE not executed)."
     },
     {
@@ -78,7 +78,7 @@
       "scope": "block_behavior",
       "status": "measured",
       "threshold": null,
-      "observed": 0.31328528521042653,
+      "observed": 0.7658854546679026,
       "detail": "RMSE of the projection output against the f32 reference path."
     },
     {
@@ -86,7 +86,7 @@
       "scope": "block_behavior",
       "status": "measured",
       "threshold": null,
-      "observed": 0.5110284146751712,
+      "observed": 0.5341102824225851,
       "detail": "Projection-output RMSE normalized by reference output RMS."
     },
     {
@@ -332,70 +332,86 @@
   "routing": {
     "block_000.slot_04.attn_proj_i8.model_width": {
       "tokens": 4096,
-      "router_top1_agreement": 0.78076171875,
-      "router_top2_set_agreement": 0.572509765625,
-      "router_logit_rank_correlation": 0.8092506045386905,
-      "expert_load_distribution_delta": 0.029296875,
-      "expert_load_js_divergence": 0.008284835625974757,
+      "router_top1_agreement": 0.686279296875,
+      "router_top2_set_agreement": 0.4423828125,
+      "router_logit_rank_correlation": 0.7739606584821428,
+      "expert_load_distribution_delta": 0.140869140625,
+      "expert_load_js_divergence": 0.06889692300140215,
       "expert_load_reference": [
-        0.325439453125,
-        0.035888671875,
-        0.09033203125,
-        0.33447265625,
-        0.041748046875,
-        0.092041015625,
-        0.053466796875,
-        0.026611328125
+        0.03076171875,
+        0.15673828125,
+        0.03076171875,
+        0.450927734375,
+        0.012451171875,
+        0.2197265625,
+        0.08935546875,
+        0.00927734375
       ],
       "expert_load_pilot": [
-        0.322509765625,
-        0.020263671875,
-        0.06787109375,
-        0.3408203125,
-        0.071044921875,
-        0.069091796875,
-        0.07080078125,
-        0.03759765625
+        0.061279296875,
+        0.085205078125,
+        0.0517578125,
+        0.44189453125,
+        0.041015625,
+        0.078857421875,
+        0.1884765625,
+        0.051513671875
       ],
-      "block_output_cosine": 0.8603326972461066,
-      "block_output_cosine_min": 0.7312909484623686,
-      "block_output_rmse": 0.21364068531991967,
-      "residual_stream_drift": 0.5110284146751712,
-      "activation_source": "seeded N(0,1) tokens x RMSNorm gain block_000.slot_07.block_norm",
+      "block_output_cosine": 0.8492034016757434,
+      "block_output_cosine_min": 0.7120308525669509,
+      "block_output_rmse": 0.26373385065945526,
+      "residual_stream_drift": 0.5341102824225851,
+      "activations": {
+        "source": "token_embedding_rows",
+        "vocab_size": 131072,
+        "rows_sampled": 4096,
+        "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
+        "detail": "block 0's attention input is rmsnorm(embedding lookup), so these are real activations for this block rather than a synthetic distribution",
+        "rmsnorm_gain": "block_000.slot_07.block_norm",
+        "shard_basename": "tensor00000_000"
+      },
       "effective_tau": 0.4
     },
     "block_000.slot_05.attn_proj_i8.model_width": {
       "tokens": 4096,
-      "router_top1_agreement": 0.677734375,
-      "router_top2_set_agreement": 0.475830078125,
-      "router_logit_rank_correlation": 0.7434779575892858,
-      "expert_load_distribution_delta": 0.0068359375,
-      "expert_load_js_divergence": 0.0003211878172770235,
+      "router_top1_agreement": 0.6396484375,
+      "router_top2_set_agreement": 0.421142578125,
+      "router_logit_rank_correlation": 0.7528366815476191,
+      "expert_load_distribution_delta": 0.24853515625,
+      "expert_load_js_divergence": 0.11021330045422195,
       "expert_load_reference": [
-        0.342529296875,
-        0.021484375,
-        0.059326171875,
-        0.34619140625,
-        0.05859375,
-        0.0576171875,
-        0.06201171875,
-        0.05224609375
+        0.46337890625,
+        0.0,
+        0.0,
+        0.44873046875,
+        0.04736328125,
+        0.038330078125,
+        0.002197265625,
+        0.0
       ],
       "expert_load_pilot": [
-        0.343994140625,
-        0.025146484375,
-        0.052490234375,
-        0.34130859375,
-        0.05908203125,
-        0.061279296875,
-        0.062744140625,
-        0.053955078125
+        0.42724609375,
+        0.000244140625,
+        0.000244140625,
+        0.2001953125,
+        0.127685546875,
+        0.24365234375,
+        0.000732421875,
+        0.0
       ],
-      "block_output_cosine": 0.8672657790184625,
-      "block_output_cosine_min": 0.8213046107654381,
-      "block_output_rmse": 0.31328528521042653,
-      "residual_stream_drift": 0.4970945891360385,
-      "activation_source": "seeded N(0,1) tokens x RMSNorm gain block_000.slot_07.block_norm",
+      "block_output_cosine": 0.9630472132115836,
+      "block_output_cosine_min": 0.938282154715757,
+      "block_output_rmse": 0.7658854546679026,
+      "residual_stream_drift": 0.3356917020354853,
+      "activations": {
+        "source": "token_embedding_rows",
+        "vocab_size": 131072,
+        "rows_sampled": 4096,
+        "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
+        "detail": "block 0's attention input is rmsnorm(embedding lookup), so these are real activations for this block rather than a synthetic distribution",
+        "rmsnorm_gain": "block_000.slot_07.block_norm",
+        "shard_basename": "tensor00000_000"
+      },
       "effective_tau": 0.4
     }
   }

@@ -21,6 +21,13 @@ policy honored exactly, and every route-preservation threshold **fails** by a
 wide margin. The failure is not a tuning miss — it is the information-theoretic
 ceiling of single-scale ternary (§ "Why the gate is unreachable").
 
+Routing is measured against **real block-0 activations** — rows of the actual
+token embedding through this block's own RMSNorm gain, which is exactly what
+block 0 sees at inference (§ "Measurement scope"). An earlier revision of this
+report used synthetic Gaussian activations; that understated routing damage and
+inverted one conclusion about expert load. Every routing number below is from the
+real checkpoint.
+
 ## Blocker cleared first: int8 → f32 dequant export (`goz-dus0`)
 
 Official `ckpt-0` ships every attention projection and MoE expert as
@@ -172,14 +179,14 @@ tensors in the `attention_plus_expert` pack.
 
 | Metric | Scope | Threshold | Observed | Status |
 |---|---|---|---|---|
-| `router_top1_agreement` | router_behavior | ≥ 99.0 % | **67.77 %** | ❌ fail |
-| `router_top2_set_agreement` | router_behavior | ≥ 99.5 % | **47.58 %** | ❌ fail |
-| `block_output_cosine` | block_behavior | ≥ 0.995 | **0.8603** | ❌ fail |
-| `expert_load_distribution_delta` | router_behavior | — | 0.0293 | measured |
-| `expert_load_js_divergence` | router_behavior | — | 0.00828 bits | measured |
-| `router_logit_rank_correlation` | router_behavior | — | 0.7435 | measured |
-| `block_output_rmse` | block_behavior | — | 0.3133 | measured |
-| `residual_stream_drift` | block_behavior | — | 0.5110 | measured |
+| `router_top1_agreement` | router_behavior | ≥ 99.0 % | **63.96 %** | ❌ fail |
+| `router_top2_set_agreement` | router_behavior | ≥ 99.5 % | **42.11 %** | ❌ fail |
+| `block_output_cosine` | block_behavior | ≥ 0.995 | **0.8492** | ❌ fail |
+| `expert_load_distribution_delta` | router_behavior | — | 0.2485 | measured |
+| `expert_load_js_divergence` | router_behavior | — | 0.1102 bits | measured |
+| `router_logit_rank_correlation` | router_behavior | — | 0.7528 | measured |
+| `block_output_rmse` | block_behavior | — | 0.7659 | measured |
+| `residual_stream_drift` | block_behavior | — | 0.5341 | measured |
 | `weight_reconstruction_mse` | weight_reconstruction | — | 1.426e-4 | measured |
 | `weight_cosine_similarity` | weight_reconstruction | — | 0.8597 | measured |
 | `weight_max_absolute_error` | weight_reconstruction | — | 0.7098 | measured |
@@ -191,23 +198,39 @@ tensors in the `attention_plus_expert` pack.
 12 of 15 metrics now carry observed values. The three `model_behavior` metrics
 stay `unknown`: they need whole-model inference, an explicit #53 non-goal.
 
-Per-projection routing detail (4096 tokens, seed 20260805):
+Per-projection routing detail (4096 real token-embedding rows, seed 20260805):
 
 | Projection | top-1 | top-2 set | rank corr | out cosine (mean / min) | load JS |
 |---|---|---|---|---|---|
-| `slot_04.attn_proj_i8.model_width` | 78.08 % | 57.25 % | 0.8093 | 0.8603 / 0.7313 | 0.00828 |
-| `slot_05.attn_proj_i8.model_width` | 67.77 % | 47.58 % | 0.7435 | 0.8673 / 0.8213 | 0.00032 |
+| `slot_04.attn_proj_i8.model_width` | 68.63 % | 44.24 % | 0.7740 | 0.8492 / 0.7120 | 0.0689 |
+| `slot_05.attn_proj_i8.model_width` | 63.96 % | 42.11 % | 0.7528 | **0.9630** / 0.9383 | 0.1102 |
 
-Top-1 expert load, `slot_04` (reference → pilot):
+Top-1 expert load (reference → pilot):
 
 ```text
-ref   [0.3254, 0.0359, 0.0903, 0.3345, 0.0417, 0.0920, 0.0535, 0.0266]
-pilot [0.3225, 0.0203, 0.0679, 0.3408, 0.0710, 0.0691, 0.0708, 0.0376]
+slot_04  ref   [0.0308, 0.1567, 0.0308, 0.4509, 0.0125, 0.2197, 0.0894, 0.0093]
+         pilot [0.0613, 0.0852, 0.0518, 0.4419, 0.0410, 0.0789, 0.1885, 0.0515]
+slot_05  ref   [0.4634, 0.0000, 0.0000, 0.4487, 0.0474, 0.0383, 0.0022, 0.0000]
+         pilot [0.4272, 0.0002, 0.0002, 0.2002, 0.1277, 0.2437, 0.0007, 0.0000]
 ```
 
-The aggregate load distribution barely moves (JS ≈ 0.008 bits) while **per-token
-routing flips ~22–32 % of the time**. A load-balance check alone would have
-called this healthy — the per-token agreement gates are what catch it.
+**Cosine and routing agreement decouple — this is the load-bearing observation.**
+`slot_05` reaches 0.9630 projection-output cosine, far the best of any tensor
+measured, and still routes **36 % of tokens to a different expert**. Its expert-3
+share collapses 44.9 % → 20.0 % while expert-5 rises 3.8 % → 24.4 %. A pipeline
+that gated on output cosine alone would wave this through.
+
+> ⚠ **Correction from the synthetic-activation draft.** An earlier revision of
+> this report measured routing against seeded Gaussian activations and concluded
+> that aggregate expert load "barely moves (JS ≈ 0.008 bits)" while per-token
+> routing flipped — i.e. that a load-balance check would miss the damage. Real
+> activations **reverse that**: load JS is 0.1102 bits (13× higher) and the worst
+> per-expert share moves 0.2485 (8.5× higher), so a load-balance check *would*
+> flag this pack. The Gaussian result was an artifact of isotropic activations
+> spreading routing decisions evenly across all 8 experts; real embeddings
+> concentrate on 2 dominant experts and leave 3 essentially unused, which makes
+> the distribution far easier to disturb. Every routing number in this report is
+> now from real activations.
 
 Preserve-tier fp16 round-trip (GOZ1 v1 stores the preserve tier as fp16-at-rest,
 so run3's `keep_fp32` is honored *as a tier*, not as f32 bits):
@@ -223,10 +246,20 @@ not from the preserved router itself.
 
 #### Measurement scope (read before quoting these numbers)
 
-- **Activations are synthetic**: seeded standard-normal tokens passed through the
-  block's *real* RMSNorm gain vector. No calibration corpus exists offline, so
-  these are **weight-perturbation** route-preservation numbers, not corpus
-  perplexity.
+- **Activations are real, for the block that was piloted.** A decoder block
+  computes `h = h + attn(rmsnorm(h))`, and for **block 0** `h` *is* the token
+  embedding lookup. So 4096 rows sampled from the real `(131072, 6144)` f32
+  embedding, pushed through this block's own `block_norm` gain, are the actual
+  distribution block 0 sees at inference. No calibration corpus is needed for
+  that, and the measurement is invariant to Grok-1's embedding scale multiplier
+  because `rmsnorm(c·x) = rmsnorm(x)`. Rows are read via `numpy.memmap` at the
+  offset the opcode scanner reports, so only sampled rows are touched.
+  Two residual caveats: rows are sampled **uniformly over the vocabulary**, not
+  by corpus token frequency; and this equivalence holds *only* for block 0 —
+  blocks 8/28/60/63 see the residual stream after every preceding block, which
+  needs a forward pass this bounded pilot does not run, so `--embedding-shard`
+  hard-errors for `--block != 0` rather than quietly mislabeling synthetic rows
+  as real (#59).
 - **`block_output_cosine` is scoped to a single projection's output**, not a full
   block forward. xai-dissect labels the attention projections
   `attn_proj_i8.narrow` / `.model_width` with policy `wrap_existing_int8_unknown`
@@ -247,26 +280,42 @@ not from the preserved router itself.
   per result as `activation_source`). That keeps the comparison internally
   consistent; it is not a claim about the block's true activation path.
 - **Summary rows are per-metric worst cases and may come from different
-  tensors.** `block_output_cosine` (0.8603, `slot_04`) and `block_output_rmse`
-  (0.3133, `slot_05`) are each the worst over the evaluated projections, so
+  tensors.** `block_output_cosine` (0.8492, `slot_04`) and `block_output_rmse`
+  (0.7659, `slot_05`) are each the worst over the evaluated projections, so
   quoting two summary numbers together describes no single tensor. Per-projection
   values are preserved under `routing` in the JSON — use those when a coherent
   picture of one projection is needed.
 
 ## Why the gate is unreachable (not a tuning miss)
 
-Sweeping τ over the attention projections — weight cosine, projection-output
-cosine, and router agreement (numpy pass over the exported npy, 4096 tokens):
+Sweeping τ over the attention projections — weight cosine, and router agreement
+against **real** block-0 activations (numpy pass over the exported npy, 4096
+embedding rows):
 
 | τ | zeros % | w_cos `slot_04` | top-1 `slot_04` | w_cos `slot_05` | top-1 `slot_05` |
 |---|---|---|---|---|---|
-| 0.0 | 0.00 | 0.7674 | 74.19 % | 0.7865 | 57.62 % |
-| 0.2 | ~16.8 | 0.8241 | 76.00 % | 0.8428 | 63.53 % |
-| 0.4 | ~32.8 | 0.8597 | 78.08 % | 0.8785 | 67.77 % |
-| **0.6** | ~47.3 | **0.8722** | 79.22 % | **0.8917** | 69.58 % |
-| 0.7 | ~53.9 | 0.8699 | 79.03 % | 0.8899 | 68.85 % |
-| 0.8 | ~60.0 | 0.8621 | 79.32 % | 0.8826 | 67.97 % |
-| 1.0 | ~70.5 | 0.8320 | 79.17 % | 0.8530 | 65.89 % |
+| 0.0 | 0.00 | 0.7674 | 61.23 % | 0.7865 | 52.22 % |
+| 0.2 | ~16.5 | 0.8241 | 65.36 % | 0.8428 | 52.69 % |
+| 0.4 | ~32.2 | 0.8597 | 68.63 % | 0.8785 | 63.96 % |
+| **0.6** | ~46.6 | **0.8722** | 71.46 % | **0.8917** | 68.53 % |
+| 0.8 | ~59.1 | 0.8621 | 72.09 % | 0.8826 | 76.07 % |
+| 1.0 | ~69.6 | 0.8320 | 74.76 % | 0.8530 | 75.56 % |
+| 1.2 | ~77.9 | — | 71.48 % | — | **79.81 %** ← best |
+| 2.0 | ~95.2 | — | 62.79 % | — | 57.54 % |
+| 3.0 | ~99.5 | — | 32.86 % | — | 50.51 % |
+
+**Routing-optimal τ is not weight-optimal τ.** Weight cosine peaks at τ ≈ 0.6,
+but router agreement keeps climbing to τ ≈ 0.8–1.2 — a *sparser* pack routes
+better on real activations than the one with the best weight reconstruction.
+Plausibly because a higher τ raises the surviving ternary scale α to match the
+large-magnitude structure that anisotropic real activations actually excite,
+while the small weights it zeroes contribute mostly noise in those directions.
+Either way, picking τ by weight reconstruction optimizes the wrong objective if
+routing is what you care about — and this is invisible under Gaussian
+activations, where top-1 was flat at ~79 % across τ ∈ [0.4, 1.0].
+
+The best top-1 anywhere in the extended sweep is **79.81 % at τ = 1.2**, after
+which it declines to 32–50 % by τ = 3.0. The gate needs **99.0 %**.
 
 Weight cosine peaks at **τ ≈ 0.6** and tops out near **0.89**. For reference, the
 analytic ceiling for single-scale ternary on a Gaussian matrix is
@@ -289,12 +338,26 @@ any τ, with or without per-channel scales**; the ceiling is ~0.90. The gate is
 named `block_output_cosine` upstream, but what was measured is one projection's
 output, not a full block forward — see "Measurement scope" above. That scope is
 empirical — it is not a universal claim about all 2-bit ternary weight matrices.
+Router agreement is bounded even harder: the best top-1 anywhere in the extended
+τ sweep is **79.81 %** against a 99.0 % gate, and it *falls* on either side of
+τ ≈ 1.2.
+
 Meeting run3's route-preservation gates requires a different mechanism — a
 higher-precision tier for attention, residual/error-feedback quantization, or
 gate thresholds renegotiated for a spiking-sparse target. Ternary remains
 appropriate where the consumer is an event-driven kernel and the gate is
 compute reduction rather than bit-fidelity: the expert tier hits 63–65 % zeros
 at 16× compression, which is exactly what #48 wants from the MoE FLOPs.
+
+Two things real activations changed that the synthetic draft got wrong, both
+worth carrying into #48's acceptance design:
+
+1. **Expert-load drift is large, not negligible** (JS 0.1102 bits vs 0.008), so
+   load balance *is* a usable signal here — the opposite of what the Gaussian
+   run implied.
+2. **Output cosine does not track routing.** `slot_05` posts 0.9630 cosine and
+   still misroutes 36 % of tokens, so a cosine-only gate is not a safe proxy for
+   the router-behavior gates.
 
 ## Reproduce
 
@@ -316,10 +379,13 @@ python3 scripts/export_grok1_int8_npy.py \
   --output-dir ~/.models/xai-grok-1/export-npy/block000
 python3 scripts/export_grok1_int8_npy.py --inspect ~/.models/xai-grok-1/ckpt-0/tensor00006_000
 
-# metrics against an existing pack
+# metrics against an existing pack, with REAL block-0 activations
+# (--embedding-shard is block-0 only; omit it and routing falls back to
+#  synthetic Gaussian rows, labelled as such in the JSON)
 python3 scripts/route_preservation_metrics.py \
   --npy-dir ~/.models/xai-grok-1/export-npy/block000 \
   --pack ~/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_only.goz1 \
+  --embedding-shard ~/.models/xai-grok-1/ckpt-0/tensor00000_000 \
   --block 0 --mode attention_only --json-out /tmp/route-preservation.json
 
 python3 -m unittest scripts.test_export_grok1_int8_npy -v

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import math
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from export_grok1_int8_scan import scan_shard  # noqa: E402
 from route_preservation_io import (  # noqa: E402
     MetricsError,
     read_f16,
@@ -19,6 +21,19 @@ CHUNK_ELEMS = 1 << 24  # ~16 Mi values per streaming step (rounded down to whole
 DEFAULT_TOKENS = 4096
 DEFAULT_SEED = 20260805
 GATE_FAILURE_EXIT = 3
+
+
+@dataclass(frozen=True)
+class ActivationSpec:
+    """How to build the activations the routing comparison runs on.
+
+    ``embedding_shard`` set means real block-0 activations (embedding rows);
+    ``None`` means the synthetic Gaussian fallback.
+    """
+
+    tokens: int = DEFAULT_TOKENS
+    seed: int = DEFAULT_SEED
+    embedding_shard: Path | None = None
 
 
 class _TernaryAccumulator:
@@ -198,12 +213,79 @@ def spearman(a: np.ndarray, b: np.ndarray) -> float:
     return float(rho.mean())
 
 
+def _rmsnorm(x: np.ndarray, norm_gain: np.ndarray) -> np.ndarray:
+    """Apply RMSNorm with the block's real gain vector.
+
+    Note this makes the result invariant to any global embedding scale: Grok-1
+    multiplies the embedding lookup by a constant, but ``rmsnorm(c*x) ==
+    rmsnorm(x)`` for ``c > 0``, so the measurement does not depend on knowing it.
+    """
+    rms = np.sqrt((x.astype(np.float64) ** 2).mean(axis=1, keepdims=True))
+    return (x / rms.astype(np.float32)) * norm_gain.astype(np.float32)
+
+
 def make_activations(norm_gain: np.ndarray, tokens: int, seed: int) -> np.ndarray:
-    """Seeded standard-normal tokens shaped by the block's real RMSNorm gain."""
+    """Seeded standard-normal tokens shaped by the block's real RMSNorm gain.
+
+    Fallback only. Gaussian coordinates are independent and isotropic, which real
+    LLM activations are not, so prefer :func:`make_activations_from_embedding`
+    whenever the checkpoint is reachable.
+    """
     rng = np.random.default_rng(seed)
     x = rng.standard_normal((tokens, norm_gain.size), dtype=np.float32)
-    x /= np.sqrt((x.astype(np.float64) ** 2).mean(axis=1, keepdims=True)).astype(np.float32)
-    return x * norm_gain.astype(np.float32)
+    return _rmsnorm(x, norm_gain)
+
+
+def make_activations_from_embedding(
+    shard: Path, norm_gain: np.ndarray, tokens: int, seed: int
+) -> tuple[np.ndarray, dict]:
+    """Real block-0 attention input: token-embedding rows through RMSNorm.
+
+    A decoder block computes ``h = h + attn(rmsnorm(h))``, and for **block 0**
+    ``h`` is the embedding lookup itself. So sampled rows of the token embedding,
+    pushed through the block's own ``block_norm`` gain, are the actual
+    distribution that block sees at inference time -- no calibration corpus
+    required, and no synthetic assumption about correlation or isotropy.
+
+    Rows are read from the pickle shard through ``numpy.memmap`` at the offset
+    the opcode scanner reports, so only the sampled rows are touched rather than
+    the full 3 GiB matrix.
+
+    Returns ``(activations, provenance)``.
+    """
+    specs = scan_shard(shard)
+    f32 = [s for s in specs if s.descr == "f4" and len(s.shape) == 2]
+    if len(f32) != 1:
+        raise MetricsError(
+            f"{shard}: expected exactly one 2-D f32 array (the token embedding), "
+            f"found {[(s.descr, s.shape) for s in specs]}"
+        )
+    spec = f32[0]
+    vocab, d_model = spec.shape
+    if d_model != norm_gain.size:
+        raise MetricsError(
+            f"{shard}: embedding width {d_model} != block_norm width {norm_gain.size}; "
+            "this shard is not the token embedding for this model"
+        )
+
+    emb = np.memmap(shard, dtype="<f4", mode="r", offset=spec.offset, shape=spec.shape)
+    rng = np.random.default_rng(seed)
+    count = min(tokens, vocab)
+    # Sorted, distinct row ids: distinct so no token is double-counted, sorted so
+    # the memmap reads walk forward through the file.
+    idx = np.sort(rng.choice(vocab, size=count, replace=False))
+    x = _rmsnorm(np.asarray(emb[idx], dtype=np.float32), norm_gain)
+    return x, {
+        "source": "token_embedding_rows",
+        "shard": str(shard),
+        "vocab_size": int(vocab),
+        "rows_sampled": int(count),
+        "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
+        "detail": (
+            "block 0's attention input is rmsnorm(embedding lookup), so these are "
+            "real activations for this block rather than a synthetic distribution"
+        ),
+    }
 
 
 def routing_metrics(
@@ -341,16 +423,21 @@ def _resolve_router(npy_dir: Path, preserve: dict[str, dict]) -> tuple[str, np.n
 
 
 def _resolve_activations(
-    npy_dir: Path, preserve: dict[str, dict], d_model: int, tokens: int, seed: int
-) -> tuple[str, np.ndarray]:
-    """Seeded tokens shaped by the block's real RMSNorm gain.
+    npy_dir: Path,
+    preserve: dict[str, dict],
+    d_model: int,
+    spec: ActivationSpec,
+) -> tuple[str, np.ndarray, dict]:
+    """Activations for the routing measurement, real when the checkpoint is given.
+
+    With ``embedding_shard``, rows of the real token embedding are used -- for
+    block 0 that *is* the attention input, so no synthetic distribution is
+    involved. Without it, falls back to seeded Gaussian tokens.
 
     A Grok-1 block carries four ``block_norm`` vectors and xai-dissect assigns
     no role to any of them, so there is no principled way to pick the one that
     actually feeds a given projection. The lowest-numbered slot is used for
-    every projection and recorded in each result's ``activation_source``; the
-    resulting numbers are therefore a consistent weight-perturbation
-    comparison, not a claim about the block's true activation path.
+    every projection and recorded in each result's ``activation_source``.
     """
     norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
     if norm_name is None:
@@ -360,7 +447,22 @@ def _resolve_activations(
         raise MetricsError(
             f"{norm_name}: shape {gain.shape} does not match router d_model {d_model}"
         )
-    return norm_name, make_activations(gain, tokens, seed)
+    if spec.embedding_shard is not None:
+        x, provenance = make_activations_from_embedding(
+            spec.embedding_shard, gain, spec.tokens, spec.seed
+        )
+    else:
+        x = make_activations(gain, spec.tokens, spec.seed)
+        provenance = {
+            "source": "synthetic_gaussian",
+            "sampling": "seeded standard-normal rows",
+            "detail": (
+                "FALLBACK: independent isotropic coordinates, which real activations "
+                "are not; pass --embedding-shard for real block-0 activations"
+            ),
+        }
+    provenance["rmsnorm_gain"] = norm_name
+    return norm_name, x, provenance
 
 
 def measure_routing(
@@ -369,14 +471,14 @@ def measure_routing(
     ternary: dict[str, dict],
     preserve: dict[str, dict],
     weights: dict[str, dict],
-    tokens: int,
-    seed: int,
+    spec: ActivationSpec,
 ) -> dict[str, dict]:
     """Route preservation for each d_model x d_model projection (roles unassigned)."""
     router_name, router_ref = _resolve_router(npy_dir, preserve)
     router_pilot = read_f16(pack, preserve[router_name])
     d_model = router_ref.shape[0]
-    norm_name, x = _resolve_activations(npy_dir, preserve, d_model, tokens, seed)
+    _norm_name, x, activations = _resolve_activations(npy_dir, preserve, d_model, spec)
+    print(f"  activations: {activations['source']} ({activations['sampling']})")
 
     square = [
         n
@@ -400,7 +502,7 @@ def measure_routing(
         w_ref = _require_npy(npy_dir, name)
         w_pilot = reconstruct_full(pack, ternary[name], weights[name]["alpha_optimal"])
         r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
-        r["activation_source"] = f"seeded N(0,1) tokens x RMSNorm gain {norm_name}"
+        r["activations"] = activations
         routing[name] = r
         print(
             f"  routing via {name:<42} top1={r['router_top1_agreement'] * 100:6.2f}%  "

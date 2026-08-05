@@ -25,6 +25,7 @@ from route_preservation_measure import (  # noqa: E402
     DEFAULT_SEED,
     DEFAULT_TOKENS,
     GATE_FAILURE_EXIT,
+    ActivationSpec,
     kind_of,
     measure_preserve,
     measure_routing,
@@ -62,6 +63,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
     p.add_argument("--json-out", type=Path)
     p.add_argument("--conversion-manifest", type=Path, help="xai-dissect run3 conversion-manifest.json")
+    p.add_argument(
+        "--embedding-shard",
+        type=Path,
+        help=(
+            "token-embedding pickle shard (e.g. $CKPT/tensor00000_000). For block 0 the "
+            "attention input IS rmsnorm(embedding lookup), so this gives real "
+            "activations instead of the synthetic Gaussian fallback"
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -220,7 +230,16 @@ def _measure_routing(
         )
         return {}
     return measure_routing(
-        args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
+        args.npy_dir,
+        args.pack,
+        ternary,
+        preserve,
+        weights,
+        ActivationSpec(
+            tokens=args.tokens,
+            seed=args.seed,
+            embedding_shard=args.embedding_shard,
+        ),
     )
 
 
@@ -257,6 +276,16 @@ def main(argv: list[str]) -> int:
         args.json_out = args.json_out.expanduser()
     if getattr(args, "conversion_manifest", None) is not None:
         args.conversion_manifest = args.conversion_manifest.expanduser()
+    if args.embedding_shard is not None:
+        args.embedding_shard = args.embedding_shard.expanduser()
+        if args.block != 0:
+            # Only block 0's attention input is the embedding lookup; for a later
+            # block the real input is the residual stream after every preceding
+            # block, which needs a full forward pass this pilot does not run.
+            raise MetricsError(
+                f"--embedding-shard is only valid for block 0 (got block {args.block}); "
+                "later blocks see the residual stream, not the embedding lookup"
+            )
     pack_path = args.pack.resolve()
     if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
         raise MetricsError(
@@ -296,8 +325,9 @@ def _pilot_provenance(
             "GOZ1 v1 stores no scale"
         ),
         "activations": (
-            "seeded standard-normal tokens shaped by the block's real RMSNorm gain; "
-            "no calibration corpus"
+            "real token-embedding rows through the block's RMSNorm gain"
+            if args.embedding_shard is not None
+            else "SYNTHETIC seeded standard-normal rows (no --embedding-shard given)"
         ),
     }
 

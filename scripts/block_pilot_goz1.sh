@@ -35,6 +35,9 @@ BLOCK="${BLOCK:-0}"
 MODE="${MODE:-attention_only}"
 TAU_ATTN="${TAU_ATTN:-0.4}"
 TAU_EXPERT="${TAU_EXPERT:-0.9}"
+CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
+# Token embedding shard: block 0's real attention input (see EMBED_ARGS below).
+EMBED_SHARD="${EMBED_SHARD:-tensor00000_000}"
 DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN:-$HOME/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN}"
 RUN3="$DISSECT_RUN/manifests/xai-grok-1-ckpt-0"
 ART="${ART:-$HOME/.models/xai-grok-1/artifacts}/block-pilot"
@@ -302,6 +305,21 @@ PY
 echo "== [5/5] route-preservation metrics"
 # Exit 3 means a gate did not pass. That is a legitimate pilot outcome (the whole
 # point is to measure), so it is reported rather than aborting the run; any other
+# Block 0's attention input is rmsnorm(embedding lookup), so pass the real
+# embedding shard and measure against real activations. Later blocks see the
+# residual stream after every preceding block, which needs a forward pass this
+# bounded pilot does not run — there the metrics script falls back to synthetic
+# rows and labels them as such.
+EMBED_ARGS=()
+if [ "$BLOCK" -eq 0 ]; then
+  if [ -f "$CKPT/$EMBED_SHARD" ]; then
+    EMBED_ARGS=(--embedding-shard "$CKPT/$EMBED_SHARD")
+  else
+    echo "warning: $CKPT/$EMBED_SHARD not found; routing metrics fall back to" >&2
+    echo "         synthetic activations (set CKPT/EMBED_SHARD for real ones)" >&2
+  fi
+fi
+
 # non-zero code is a real failure and still stops the script.
 # `|| true` would reset PIPESTATUS, so disable errexit around the pipeline instead.
 set +e
@@ -311,6 +329,7 @@ python3 "$REPO/scripts/route_preservation_metrics.py" \
   --conversion-manifest "$RUN3/conversion-manifest.json" \
   --block "$BLOCK" \
   --mode "$MODE" \
+  "${EMBED_ARGS[@]}" \
   --json-out "$ART/$TAG-route-preservation.json" 2>&1 |
   tee "$ART/logs/$TAG-metrics.log"
 PIPESTATUS_COPY=("${PIPESTATUS[@]}")
@@ -389,6 +408,11 @@ pilot = rep.get("pilot", {})
 for key in ("pack", "npy_dir"):
     if key in pilot:
         pilot[f"{key}_basename"] = os.path.basename(str(pilot.pop(key)).rstrip("/"))
+# Same for the activation provenance recorded per projection.
+for entry in rep.get("routing", {}).values():
+    acts = entry.get("activations")
+    if isinstance(acts, dict) and "shard" in acts:
+        acts["shard_basename"] = os.path.basename(str(acts.pop("shard")).rstrip("/"))
 pilot["paths_note"] = (
     "Host-local absolute paths removed for publication; regenerate with "
     "BLOCK=<n> MODE=<mode> scripts/block_pilot_goz1.sh (the npy stage is a "
