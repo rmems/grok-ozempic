@@ -62,9 +62,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from goz1_trit_histogram import (  # noqa: E402  (path shim above is deliberate)
+from export_grok1_int8_npy import (
+    MODES as EXPORT_MODES,
+)
+from export_grok1_int8_npy import (
+    PRESERVE_KINDS as EXPORT_PRESERVE_KINDS,
+)
+from goz1_trit_histogram import (
     DATA_ALIGNMENT,
     TENSOR_F16,
     TENSOR_TERNARY,
@@ -73,11 +77,7 @@ from goz1_trit_histogram import (  # noqa: E402  (path shim above is deliberate)
     _payload_nbytes,
     read_header,
 )
-from route_preservation_surface import build_summary  # noqa: E402
-from export_grok1_int8_npy import (  # noqa: E402
-    MODES as EXPORT_MODES,
-    PRESERVE_KINDS as EXPORT_PRESERVE_KINDS,
-)
+from route_preservation_surface import build_summary
 
 # Routing metrics need a d_model x d_model attention projection to drive the router.
 ROUTING_MODES = {"attention_only", "attention_plus_expert"}
@@ -567,85 +567,145 @@ def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:
         return False
 
 
+def _validate_tokens(args: argparse.Namespace) -> None:
+    if args.tokens <= 0:
+        raise MetricsError(f"--tokens must be positive, got {args.tokens}")
+
+
+def _expected_ternary_kinds(mode: str) -> set[str]:
+    return set(EXPORT_MODES[mode]) - set(EXPORT_PRESERVE_KINDS)
+
+
+def _validate_block_prefix(args: argparse.Namespace, index: dict[str, dict]) -> None:
+    prefix = f"block_{args.block:03d}."
+    for name in index:
+        if not name.startswith(prefix):
+            raise MetricsError(
+                f"pack tensor {name!r} does not belong to --block {args.block}"
+            )
+
+
+def _split_tiers(index: dict[str, dict]) -> tuple[dict[str, dict], dict[str, dict]]:
+    ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
+    preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
+    return ternary, preserve
+
+
+def _manifest_tensor_names(
+    manifest_tensors: list[dict], block: int, kinds: set[str]
+) -> list[str]:
+    return sorted(
+        t["structural_name"]
+        for t in manifest_tensors
+        if t.get("block") == block and t.get("kind") in kinds
+    )
+
+
+def _validate_ternary_inventory(
+    args: argparse.Namespace,
+    actual_ternary: dict[str, dict],
+    manifest_tensors: list[dict],
+) -> None:
+    expected_names = _manifest_tensor_names(
+        manifest_tensors, args.block, _expected_ternary_kinds(args.mode)
+    )
+    actual_names = sorted(actual_ternary)
+    if expected_names != actual_names:
+        expected_set = set(expected_names)
+        missing = [n for n in expected_names if n not in actual_ternary]
+        extra = [n for n in actual_names if n not in expected_set]
+        raise MetricsError(
+            f"pack ternary inventory for block {args.block} mode {args.mode} "
+            f"does not match conversion-manifest: missing={missing}, extra={extra}"
+        )
+
+
+def _validate_preserve_inventory(
+    args: argparse.Namespace,
+    index: dict[str, dict],
+    manifest_tensors: list[dict],
+) -> None:
+    expected_names = _manifest_tensor_names(
+        manifest_tensors, args.block, set(EXPORT_PRESERVE_KINDS)
+    )
+    _, preserve = _split_tiers(index)
+    actual_names = sorted(preserve)
+    if expected_names != actual_names:
+        expected_set = set(expected_names)
+        missing = [n for n in expected_names if n not in preserve]
+        extra = [n for n in actual_names if n not in expected_set]
+        raise MetricsError(
+            f"pack preserve inventory for block {args.block} mode {args.mode} "
+            f"does not match conversion-manifest: missing={missing}, extra={extra}"
+        )
+
+
+def _validate_ternary_kinds_fallback(
+    args: argparse.Namespace,
+    actual_ternary: dict[str, dict],
+) -> None:
+    expected_kinds = _expected_ternary_kinds(args.mode)
+    actual_kinds = {kind_of(n) for n in actual_ternary}
+    if actual_kinds != expected_kinds:
+        raise MetricsError(
+            f"pack ternary kinds {sorted(actual_kinds)} do not match --mode "
+            f"{args.mode} expected {sorted(expected_kinds)}"
+        )
+
+
 def _validate_pilot_args(
     args: argparse.Namespace,
     index: dict[str, dict],
     manifest_tensors: list[dict] | None = None,
 ) -> None:
     """Make sure --block and --mode match the pack contents."""
-    if args.tokens <= 0:
-        raise MetricsError(f"--tokens must be positive, got {args.tokens}")
-
-    block_prefix = f"block_{args.block:03d}."
-    for name in index:
-        if not name.startswith(block_prefix):
-            raise MetricsError(
-                f"pack tensor {name!r} does not belong to --block {args.block}"
-            )
-
-    expected_ternary_kinds = set(EXPORT_MODES[args.mode]) - set(EXPORT_PRESERVE_KINDS)
-    actual_ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
-
+    _validate_block_prefix(args, index)
+    actual_ternary, _ = _split_tiers(index)
     if manifest_tensors is not None:
-        # Exact inventory: a missing duplicate projection has the same kind
-        # but a different structural_name, so a set comparison is insufficient.
-        expected_names = sorted(
-            t["structural_name"]
-            for t in manifest_tensors
-            if t.get("block") == args.block
-            and t.get("kind") in expected_ternary_kinds
-        )
-        actual_names = sorted(actual_ternary)
-        if actual_names != expected_names:
-            missing = [n for n in expected_names if n not in actual_ternary]
-            extra = [n for n in actual_names if n not in expected_names]
-            raise MetricsError(
-                f"pack ternary inventory for block {args.block} mode {args.mode} "
-                f"does not match conversion-manifest: missing={missing}, extra={extra}"
-            )
+        _validate_ternary_inventory(args, actual_ternary, manifest_tensors)
+        _validate_preserve_inventory(args, index, manifest_tensors)
     else:
-        actual_ternary_kinds = {kind_of(n) for n in actual_ternary}
-        if actual_ternary_kinds != expected_ternary_kinds:
-            raise MetricsError(
-                f"pack ternary kinds {sorted(actual_ternary_kinds)} do not match --mode "
-                f"{args.mode} expected {sorted(expected_ternary_kinds)}"
-            )
+        _validate_ternary_kinds_fallback(args, actual_ternary)
 
 
-def main(argv: list[str]) -> int:
-    args = parse_args(argv)
-    if args.tokens <= 0:
-        raise MetricsError(f"--tokens must be a positive integer, got {args.tokens}")
-    pack_path = args.pack.expanduser().resolve()
-    if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
-        raise MetricsError(
-            f"--json-out {args.json_out} resolves to the input pack; "
-            "refusing to overwrite the GOZ1 artifact"
+def _load_manifest_tensors(path: Path | None) -> list[dict] | None:
+    if path is None:
+        return None
+    with path.open("rb") as f:
+        doc = json.load(f)
+    tensors = doc.get("tensors")
+    if not isinstance(tensors, list):
+        raise MetricsError(f"{path}: no `tensors` array")
+    return tensors
+
+
+def _measure_routing(
+    args: argparse.Namespace,
+    ternary: dict[str, dict],
+    preserve: dict[str, dict],
+    weights: dict[str, dict],
+) -> dict[str, dict]:
+    if args.mode not in ROUTING_MODES:
+        print(
+            f"  mode {args.mode}: no d_model x d_model attention projection, skipping routing"
         )
-    manifest_tensors: list[dict] | None = None
-    if args.conversion_manifest is not None:
-        with args.conversion_manifest.open("rb") as f:
-            doc = json.load(f)
-        manifest_tensors = doc.get("tensors")
-        if not isinstance(manifest_tensors, list):
-            raise MetricsError(f"{args.conversion_manifest}: no `tensors` array")
-    metadata, index = load_pack_index(args.pack)
-    _validate_pilot_args(args, index, manifest_tensors)
-    ternary = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_TERNARY}
-    preserve = {n: e for n, e in index.items() if e["tensor_type"] == TENSOR_F16}
-    print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
+        return {}
+    return measure_routing(
+        args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
+    )
 
-    weights = measure_weights(args.npy_dir, args.pack, ternary)
-    preserve_err = measure_preserve(args.npy_dir, args.pack, preserve)
-    if args.mode in ROUTING_MODES:
-        routing = measure_routing(
-            args.npy_dir, args.pack, ternary, preserve, weights, args.tokens, args.seed
-        )
-    else:
-        print(f"  mode {args.mode}: no d_model x d_model attention projection, skipping routing")
-        routing = {}
+
+def _build_result(
+    args: argparse.Namespace,
+    metadata: dict,
+    ternary: dict[str, dict],
+    preserve: dict[str, dict],
+    weights: dict[str, dict],
+    preserve_err: dict[str, dict],
+    routing: dict[str, dict],
+) -> dict:
     summary = build_summary(weights, routing)
-    result = {
+    return {
         "model_family": "grok-1",
         "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
         "pilot": _pilot_provenance(args, metadata, len(ternary), len(preserve)),
@@ -654,8 +714,29 @@ def main(argv: list[str]) -> int:
         "preserve_fp16_roundtrip": preserve_err,
         "routing": routing,
     }
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    _validate_tokens(args)
+    pack_path = args.pack.expanduser().resolve()
+    if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
+        raise MetricsError(
+            f"--json-out {args.json_out} resolves to the input pack; "
+            "refusing to overwrite the GOZ1 artifact"
+        )
+    manifest_tensors = _load_manifest_tensors(args.conversion_manifest)
+    metadata, index = load_pack_index(args.pack)
+    _validate_pilot_args(args, index, manifest_tensors)
+    ternary, preserve = _split_tiers(index)
+    print(f"pack {args.pack.name}: {len(ternary)} ternary, {len(preserve)} preserve/fp16")
+
+    weights = measure_weights(args.npy_dir, args.pack, ternary)
+    preserve_err = measure_preserve(args.npy_dir, args.pack, preserve)
+    routing = _measure_routing(args, ternary, preserve, weights)
+    result = _build_result(args, metadata, ternary, preserve, weights, preserve_err, routing)
     _write_json(result, args.json_out)
-    return report_gates(summary)
+    return report_gates(result["summary"])
 
 
 def _pilot_provenance(

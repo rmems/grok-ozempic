@@ -280,137 +280,235 @@ class _HeaderState:
         if self.stack:
             self.memo[idx] = self.stack[-1]
 
-    def feed(self, opname: str, arg) -> None:
-        if opname == "FRAME" or opname == "PROTO":
-            return
-        if opname in ("SHORT_BINUNICODE", "BINUNICODE", "UNICODE"):
-            s = str(arg)
-            self._push(s)
-            self._set_descr(s)
-        elif opname in ("SHORT_BINSTRING", "BINSTRING", "SHORT_BINBYTES", "BINBYTES", "BINBYTES8"):
-            self._push(arg)
-        elif opname in ("BININT", "BININT1", "BININT2", "LONG_BININT", "INT", "LONG"):
-            i = int(arg)
-            self._push(i)
-            self.ints.append(i)
-        elif opname in ("FLOAT", "BINFLOAT"):
-            self._push(float(arg))
-        elif opname == "NONE":
-            self._push(None)
-        elif opname == "NEWTRUE":
-            self._push(True)
-            self.fortran = True
-        elif opname == "NEWFALSE":
-            self._push(False)
-            self.fortran = False
-        elif opname == "EMPTY_TUPLE":
-            self._push(())
-        elif opname == "EMPTY_LIST":
-            self._push([])
-        elif opname == "EMPTY_DICT":
-            self._push({})
-        elif opname == "EMPTY_SET":
-            self._push(set())
-        elif opname == "MARK":
-            self._push(self._MARK)
-        elif opname in ("TUPLE1", "TUPLE2", "TUPLE3"):
-            k = int(opname[-1])
-            items = [self._pop() for _ in range(k)]
-            items.reverse()
-            t = tuple(items)
-            self._push(t)
-            self._maybe_set_shape(items)
-            if items and all(isinstance(x, int) for x in items):
-                self.ints = []
-        elif opname == "TUPLE":
-            items = self._pop_to_mark()
-            t = tuple(items)
-            self._push(t)
-            self._maybe_set_shape(items)
-        elif opname == "LIST":
-            self._push(self._pop_to_mark())
-        elif opname == "DICT":
-            items = self._pop_to_mark()
-            d: dict[object, object] = {}
-            for i in range(0, len(items), 2):
-                d[items[i]] = items[i + 1]
-            self._push(d)
-        elif opname == "SETITEM":
-            v = self._pop()
-            k = self._pop()
-            d = self._pop()
-            if isinstance(d, dict):
-                d[k] = v
-            self._push(d)
-        elif opname == "APPEND":
-            v = self._pop()
-            lst = self._pop()
-            if isinstance(lst, list):
-                lst.append(v)
-            self._push(lst)
-        elif opname == "SETITEMS":
-            pairs = self._pop_to_mark()
-            d = self._pop()
-            if isinstance(d, dict):
-                for i in range(0, len(pairs), 2):
-                    d[pairs[i]] = pairs[i + 1]
-            self._push(d)
-        elif opname == "APPENDS":
-            vals = self._pop_to_mark()
-            lst = self._pop()
-            if isinstance(lst, list):
-                lst.extend(vals)
-            self._push(lst)
-        elif opname == "ADDITEMS":
-            vals = self._pop_to_mark()
-            s = self._pop()
-            if isinstance(s, set):
-                s.update(vals)
-            self._push(s)
-        elif opname == "STACK_GLOBAL":
-            name = self._pop()
-            module = self._pop()
-            if module in ("numpy", "numpy.core.multiarray", "numpy._core.multiarray") and name == "dtype":
-                self._push(_DtypeBuilder())
+    # --- per-opcode handlers (dispatch keeps `feed` shallow for maintainers) ---
+
+    def _op_FRAME(self, arg) -> None:
+        return
+
+    def _op_PROTO(self, arg) -> None:
+        return
+
+    def _push_str(self, arg) -> None:
+        s = str(arg)
+        self._push(s)
+        self._set_descr(s)
+
+    _op_SHORT_BINUNICODE = _push_str
+    _op_BINUNICODE = _push_str
+    _op_UNICODE = _push_str
+
+    def _push_bytes(self, arg) -> None:
+        self._push(arg)
+
+    _op_SHORT_BINSTRING = _push_bytes
+    _op_BINSTRING = _push_bytes
+    _op_SHORT_BINBYTES = _push_bytes
+    _op_BINBYTES = _push_bytes
+    _op_BINBYTES8 = _push_bytes
+
+    def _push_int(self, arg) -> None:
+        i = int(arg)
+        self._push(i)
+        self.ints.append(i)
+
+    _op_BININT = _push_int
+    _op_BININT1 = _push_int
+    _op_BININT2 = _push_int
+    _op_LONG_BININT = _push_int
+    _op_INT = _push_int
+    _op_LONG = _push_int
+
+    def _push_float(self, arg) -> None:
+        self._push(float(arg))
+
+    _op_FLOAT = _push_float
+    _op_BINFLOAT = _push_float
+
+    def _op_NONE(self, arg) -> None:
+        self._push(None)
+
+    def _op_NEWTRUE(self, arg) -> None:
+        self._push(True)
+        self.fortran = True
+
+    def _op_NEWFALSE(self, arg) -> None:
+        self._push(False)
+        self.fortran = False
+
+    def _op_EMPTY_TUPLE(self, arg) -> None:
+        self._push(())
+
+    def _op_EMPTY_LIST(self, arg) -> None:
+        self._push([])
+
+    def _op_EMPTY_DICT(self, arg) -> None:
+        self._push({})
+
+    def _op_EMPTY_SET(self, arg) -> None:
+        self._push(set())
+
+    def _op_MARK(self, arg) -> None:
+        self._push(self._MARK)
+
+    def _make_tuple(self, k: int) -> None:
+        items = [self._pop() for _ in range(k)]
+        items.reverse()
+        self._push(tuple(items))
+        self._maybe_set_shape(items)
+        if items and all(isinstance(x, int) for x in items):
+            self.ints = []
+
+    def _op_TUPLE1(self, arg) -> None:
+        self._make_tuple(1)
+
+    def _op_TUPLE2(self, arg) -> None:
+        self._make_tuple(2)
+
+    def _op_TUPLE3(self, arg) -> None:
+        self._make_tuple(3)
+
+    def _op_TUPLE(self, arg) -> None:
+        items = self._pop_to_mark()
+        self._push(tuple(items))
+        self._maybe_set_shape(items)
+
+    def _op_LIST(self, arg) -> None:
+        self._push(self._pop_to_mark())
+
+    def _op_DICT(self, arg) -> None:
+        items = self._pop_to_mark()
+        d: dict[object, object] = {}
+        for i in range(0, len(items), 2):
+            d[items[i]] = items[i + 1]
+        self._push(d)
+
+    def _op_SETITEM(self, arg) -> None:
+        v = self._pop()
+        k = self._pop()
+        d = self._pop()
+        if isinstance(d, dict):
+            d[k] = v
+        self._push(d)
+
+    def _op_APPEND(self, arg) -> None:
+        v = self._pop()
+        lst = self._pop()
+        if isinstance(lst, list):
+            lst.append(v)
+        self._push(lst)
+
+    def _op_SETITEMS(self, arg) -> None:
+        pairs = self._pop_to_mark()
+        d = self._pop()
+        if isinstance(d, dict):
+            for i in range(0, len(pairs), 2):
+                d[pairs[i]] = pairs[i + 1]
+        self._push(d)
+
+    def _op_APPENDS(self, arg) -> None:
+        vals = self._pop_to_mark()
+        lst = self._pop()
+        if isinstance(lst, list):
+            lst.extend(vals)
+        self._push(lst)
+
+    def _op_ADDITEMS(self, arg) -> None:
+        vals = self._pop_to_mark()
+        s = self._pop()
+        if isinstance(s, set):
+            s.update(vals)
+        self._push(s)
+
+    def _op_STACK_GLOBAL(self, arg) -> None:
+        name = self._pop()
+        module = self._pop()
+        if (
+            module in ("numpy", "numpy.core.multiarray", "numpy._core.multiarray")
+            and name == "dtype"
+        ):
+            self._push(_DtypeBuilder())
+        else:
+            self._push(_Global(str(module), str(name)))
+
+    def _op_REDUCE(self, _) -> None:
+        args = self._pop()
+        func = self._pop()
+        if isinstance(func, _DtypeBuilder) and isinstance(args, tuple) and args:
+            raw = args[0]
+            if isinstance(raw, bytes):
+                try:
+                    text = raw.decode("ascii")
+                except UnicodeDecodeError:
+                    text = None
             else:
-                self._push(_Global(str(module), str(name)))
-        elif opname == "REDUCE":
-            args = self._pop()
-            func = self._pop()
-            if isinstance(func, _DtypeBuilder) and isinstance(args, tuple) and len(args) == 1:
-                text = str(args[0])
+                text = str(raw)
+            if text is not None:
                 d = _Descr(text)
                 self._push(d)
                 self._set_descr(d)
-            else:
-                self._push(_Unknown("reduce"))
-        elif opname == "BUILD":
-            state = self._pop()
-            inst = self._pop()
-            self._push(_Unknown("object"))
-        elif opname in ("NEWOBJ", "NEWOBJ_EX"):
-            args = self._pop()
-            cls = self._pop()
-            self._push(_Unknown("newobj"))
-        elif opname in ("GET", "BINGET", "LONG_BINGET"):
-            idx = int(arg)
-            v = self.memo.get(idx, _Unknown("missing"))
-            self._push(v)
-            self._set_descr(v)
-        elif opname in ("PUT", "BINPUT", "LONG_BINPUT"):
-            idx = int(arg)
-            self._memoize_top(idx)
-            self.memo_next = max(self.memo_next, idx + 1)
-        elif opname == "MEMOIZE":
-            self._memoize_top(self.memo_next)
-            self.memo_next += 1
-        elif opname in ("POP", "POP_MARK"):
-            self._pop_to_mark()
-        elif opname == "DUP":
-            if self.stack:
-                self._push(self.stack[-1])
-        elif opname in ("PERSID", "BINPERSID"):
-            self._push(_Unknown("persid"))
+                return
+        self._push(_Unknown("reduce"))
+
+    def _op_BUILD(self, arg) -> None:
+        self._pop()  # state
+        self._pop()  # instance
+        self._push(_Unknown("object"))
+
+    def _op_NEWOBJ(self, arg) -> None:
+        self._pop()  # args
+        self._pop()  # cls
+        self._push(_Unknown("newobj"))
+
+    def _op_NEWOBJ_EX(self, arg) -> None:
+        self._pop()  # kwargs
+        self._pop()  # args
+        self._pop()  # cls
+        self._push(_Unknown("newobj"))
+
+    def _binget(self, arg) -> None:
+        idx = int(arg)
+        v = self.memo.get(idx, _Unknown("missing"))
+        self._push(v)
+        self._set_descr(v)
+
+    _op_GET = _binget
+    _op_BINGET = _binget
+    _op_LONG_BINGET = _binget
+
+    def _memoize_arg(self, arg) -> None:
+        idx = int(arg)
+        self._memoize_top(idx)
+        self.memo_next = max(self.memo_next, idx + 1)
+
+    _op_PUT = _memoize_arg
+    _op_BINPUT = _memoize_arg
+    _op_LONG_BINPUT = _memoize_arg
+
+    def _op_MEMOIZE(self, arg) -> None:
+        self._memoize_top(self.memo_next)
+        self.memo_next += 1
+
+    def _op_POP(self, _) -> None:
+        if self.stack:
+            self._pop()
+
+    def _op_POP_MARK(self, _) -> None:
+        self._pop_to_mark()
+
+    def _op_DUP(self, arg) -> None:
+        if self.stack:
+            self._push(self.stack[-1])
+
+    def _push_unknown_persid(self, arg) -> None:
+        self._push(_Unknown("persid"))
+
+    _op_PERSID = _push_unknown_persid
+    _op_BINPERSID = _push_unknown_persid
+
+    def feed(self, opname: str, arg) -> None:
+        handler = getattr(self, f"_op_{opname}", None)
+        if handler is not None:
+            handler(arg)
 
     def spec(self, name: str, offset: int, nbytes: int) -> ArraySpec:
         if self.shape is None or self.descr is None:
@@ -682,14 +780,15 @@ def _write_npy(out_path, shape, source, *, chunk_mib: int, streaming: bool = Fal
         with open(tmp, "wb") as fh:
             fh.write(npy_header(tuple(shape)))
             if streaming:
-                for chunk in source:
-                    fh.write(np.ascontiguousarray(chunk, dtype="<f4").tobytes())
+                fh.writelines(
+                    np.ascontiguousarray(chunk, dtype="<f4").tobytes() for chunk in source
+                )
             else:
                 rows = _chunk_rows(chunk_mib, max(1, source[0].nbytes))
-                for r0 in range(0, len(source), rows):
-                    fh.write(
-                        np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
-                    )
+                fh.writelines(
+                    np.ascontiguousarray(source[r0 : r0 + rows], dtype="<f4").tobytes()
+                    for r0 in range(0, len(source), rows)
+                )
         tmp.replace(out_path)
     finally:
         tmp.unlink(missing_ok=True)
@@ -821,7 +920,7 @@ def main(argv: list[str]) -> int:
     if args.inspect:
         for spec in scan_shard(args.inspect):
             print(
-                f"{spec.descr:>9} {str(spec.shape):>24}  "
+                f"{spec.descr:>9} {spec.shape!s:>24}  "
                 f"offset={spec.offset}  bytes={spec.nbytes}"
             )
         return 0

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Unit tests for export_grok1_int8_npy.py (synthetic pickles, no checkpoint needed).
 
 Fixtures are built with ``pickle.dumps`` over real numpy arrays so the opcode
@@ -10,17 +9,19 @@ from __future__ import annotations
 
 # Fixtures are *written* with pickle.dumps; nothing here loads untrusted pickles.
 import pickle  # nosec B403
+import pickletools
 import sys
 import tempfile
 import unittest
 import unittest.mock
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import export_grok1_int8_npy as exp  # noqa: E402
+import export_grok1_int8_npy as exp
 
 
 @dataclass
@@ -149,6 +150,28 @@ class ScanShardTests(unittest.TestCase):
             all(r < exp._PAYLOAD_READ_LIMIT for r in materialized),
             f"scanner materialized a bulk read: max={max(materialized)}",
         )
+
+    def test_pop_between_arrays_does_not_corrupt_dtype(self) -> None:
+        """POP removes a single stack value, not every value to the nearest MARK."""
+        a = np.arange(6, dtype="<f4").reshape(2, 3)
+        b = np.arange(12, dtype="<f4").reshape(3, 4)
+        raw = bytearray(pickle.dumps((a, b), protocol=4))
+        for op, _, pos in pickletools.genops(raw):
+            if op.name == "BUILD":
+                insert = pos + 1
+                break
+        else:
+            raise AssertionError("no BUILD opcode in fixture")
+        # Push and immediately pop a None so the stack is unchanged for TUPLE2.
+        raw[insert:insert] = b"N0"  # NONE, POP
+        raw[3:11] = (len(raw) - 11).to_bytes(8, "little")
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            p.write_bytes(raw)
+            specs = exp.scan_shard(p)
+        self.assertEqual(len(specs), 2)
+        self.assertEqual([s.shape for s in specs], [(2, 3), (3, 4)])
+        self.assertEqual([s.descr for s in specs], ["f4", "f4"])
 
 
 class GroupingTests(unittest.TestCase):
@@ -318,7 +341,7 @@ class NpyHeaderTests(unittest.TestCase):
 
 
 class SelectionTests(unittest.TestCase):
-    TENSORS = [
+    TENSORS: ClassVar[list[dict]] = [
         {"structural_name": "block_000.slot_00.moe_expert.gate", "block": 0, "kind": "moe_expert.gate"},
         {"structural_name": "block_000.slot_04.attn_proj_i8.model_width", "block": 0, "kind": "attn_proj_i8.model_width"},
         {"structural_name": "block_000.slot_07.block_norm", "block": 0, "kind": "block_norm"},
@@ -390,6 +413,43 @@ class StemTests(unittest.TestCase):
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.structural_stem(bad)
             self.assertIn("colon", str(ctx.exception).lower())
+
+
+class HeaderStateTests(unittest.TestCase):
+    def test_pop_removes_only_top_value(self) -> None:
+        state = exp._HeaderState()
+        state.feed("BININT1", 1)
+        state.feed("BININT1", 2)
+        state.feed("POP", None)
+        self.assertEqual(state.stack, [1])
+
+    def test_reduce_dtype_tuple_with_flags(self) -> None:
+        """A numpy dtype REDUCE may carry optional flag fields after the descriptor."""
+        state = exp._HeaderState()
+        for op, arg in (
+            ("SHORT_BINUNICODE", "numpy"),
+            ("SHORT_BINUNICODE", "dtype"),
+            ("STACK_GLOBAL", None),
+            ("SHORT_BINUNICODE", "f4"),
+            ("NEWFALSE", None),
+            ("NEWTRUE", None),
+            ("TUPLE3", None),
+            ("REDUCE", None),
+        ):
+            state.feed(op, arg)
+        self.assertEqual(state.descr, "f4")
+
+    def test_newobj_ex_pops_kwargs_args_cls(self) -> None:
+        state = exp._HeaderState()
+        for op, arg in (
+            ("NONE", None),
+            ("EMPTY_TUPLE", None),
+            ("EMPTY_DICT", None),
+            ("NEWOBJ_EX", None),
+        ):
+            state.feed(op, arg)
+        self.assertEqual(len(state.stack), 1)
+        self.assertIsInstance(state.stack[0], exp._Unknown)
 
 
 if __name__ == "__main__":

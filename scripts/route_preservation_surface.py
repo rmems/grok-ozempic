@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 r"""
 The xai-dissect **route-preservation** gate surface, as data (GH #53 / RM-222).
 
@@ -9,6 +8,7 @@ it; ``route_preservation_metrics.py`` does the measuring.
 """
 
 from __future__ import annotations
+
 
 def gate(observed: float, threshold: float, higher_is_better: bool = True) -> str:
     if observed is None:
@@ -25,8 +25,8 @@ _SUMMARY_SPECS: tuple[tuple, ...] = (
     (
         "router_top1_agreement", "router_behavior", "routing_min",
         "router_top1_agreement", ">= 99.0%", 0.99,
-        "Worst case over evaluated d_model x d_model projections; router read from "
-        "the pack (fp16 preserve tier).",
+        ("Worst case over evaluated d_model x d_model projections; router read from "
+        "the pack (fp16 preserve tier)."),
     ),
     (
         "router_top2_set_agreement", "router_behavior", "routing_min",
@@ -41,8 +41,8 @@ _SUMMARY_SPECS: tuple[tuple, ...] = (
     (
         "expert_load_js_divergence", "router_behavior", "routing_max",
         "expert_load_js_divergence", None, None,
-        "Jensen-Shannon divergence (bits) between reference and pilot expert-load "
-        "distributions.",
+        ("Jensen-Shannon divergence (bits) between reference and pilot expert-load "
+        "distributions."),
     ),
     (
         "router_logit_rank_correlation", "router_behavior", "routing_min",
@@ -52,8 +52,8 @@ _SUMMARY_SPECS: tuple[tuple, ...] = (
     (
         "block_output_cosine", "block_behavior", "routing_min",
         "block_output_cosine", ">= 0.995", 0.995,
-        "Scoped to the quantized projection output, not a full block forward "
-        "(attention roles are unassigned upstream; MoE not executed).",
+        ("Scoped to the quantized projection output, not a full block forward "
+        "(attention roles are unassigned upstream; MoE not executed)."),
     ),
     (
         "block_output_rmse", "block_behavior", "routing_max",
@@ -83,13 +83,13 @@ _SUMMARY_SPECS: tuple[tuple, ...] = (
     (
         "per_channel_scale_error_summary", "weight_reconstruction", "weights_max",
         "per_channel_scale_error.relative_error_max", None, None,
-        "Worst per-output-channel relative reconstruction error; full per-tensor "
-        "spread under `weights`.",
+        ("Worst per-output-channel relative reconstruction error; full per-tensor "
+        "spread under `weights`."),
     ),
     (
         "logit_kl", "model_behavior", "none", "", None, None,
-        "Requires whole-model inference; out of scope for a bounded single-block "
-        "pilot (#53 non-goal).",
+        ("Requires whole-model inference; out of scope for a bounded single-block "
+        "pilot (#53 non-goal)."),
     ),
     (
         "perplexity_delta", "model_behavior", "none", "", None, None,

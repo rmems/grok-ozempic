@@ -121,9 +121,10 @@ set +e
   --conversion-manifest "$RUN3/conversion-manifest.json" \
   --block "$BLOCK" --mode "$MODE" \
   --output-dir "$STAGE" 2>&1 | tee "$ART/logs/$TAG-export.log"
-EXPORT_RC="${PIPESTATUS[0]}"
-EXPORT_TEE_RC="${PIPESTATUS[1]}"
+PIPESTATUS_COPY=("${PIPESTATUS[@]}")
 set -e
+EXPORT_RC=${PIPESTATUS_COPY[0]}
+EXPORT_TEE_RC=${PIPESTATUS_COPY[1]}
 if [ "$EXPORT_TEE_RC" -ne 0 ]; then
   echo "error: export log tee failed (exit $EXPORT_TEE_RC)" >&2
   exit "$EXPORT_TEE_RC"
@@ -204,9 +205,10 @@ set +e
   --manifest "$MANIFEST" \
   --input-format npy \
   --verify 2>&1 | tee "$ART/logs/$TAG-pack.log"
-PACK_RC="${PIPESTATUS[0]}"
-PACK_TEE_RC="${PIPESTATUS[1]}"
+PIPESTATUS_COPY=("${PIPESTATUS[@]}")
 set -e
+PACK_RC=${PIPESTATUS_COPY[0]}
+PACK_TEE_RC=${PIPESTATUS_COPY[1]}
 if [ "$PACK_TEE_RC" -ne 0 ]; then
   echo "error: pack log tee failed (exit $PACK_TEE_RC)" >&2
   exit "$PACK_TEE_RC"
@@ -220,9 +222,10 @@ echo "== [4/5] exact trit histogram"
 set +e
 python3 "$REPO/scripts/goz1_trit_histogram.py" "$PACK" \
   --json-out "$ART/$TAG-histogram.json" 2>&1 | tee "$ART/logs/$TAG-histogram.log"
-HIST_RC="${PIPESTATUS[0]}"
-HIST_TEE_RC="${PIPESTATUS[1]}"
+PIPESTATUS_COPY=("${PIPESTATUS[@]}")
 set -e
+HIST_RC=${PIPESTATUS_COPY[0]}
+HIST_TEE_RC=${PIPESTATUS_COPY[1]}
 if [ "$HIST_TEE_RC" -ne 0 ]; then
   echo "error: histogram log tee failed (exit $HIST_TEE_RC)" >&2
   exit "$HIST_TEE_RC"
@@ -293,9 +296,10 @@ python3 "$REPO/scripts/route_preservation_metrics.py" \
   --mode "$MODE" \
   --json-out "$ART/$TAG-route-preservation.json" 2>&1 |
   tee "$ART/logs/$TAG-metrics.log"
-METRICS_RC="${PIPESTATUS[0]}"
-TEE_RC="${PIPESTATUS[1]}"
+PIPESTATUS_COPY=("${PIPESTATUS[@]}")
 set -e
+METRICS_RC=${PIPESTATUS_COPY[0]}
+TEE_RC=${PIPESTATUS_COPY[1]}
 if [ "$TEE_RC" -ne 0 ]; then
   echo "error: metrics log tee failed (exit $TEE_RC)" >&2
   exit "$TEE_RC"
