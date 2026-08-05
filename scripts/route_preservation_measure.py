@@ -299,6 +299,12 @@ def measure_preserve(npy_dir: Path, pack: Path, preserve: dict[str, dict]) -> di
     for name in sorted(preserve):
         ref = _require_npy(npy_dir, name)
         got = read_f16(pack, preserve[name])
+        expected = tuple(int(d) for d in preserve[name]["shape"])
+        if tuple(ref.shape) != expected:
+            raise MetricsError(
+                f"{name}: npy shape {tuple(ref.shape)} != pack shape {expected}; "
+                "a reshaped or transposed preserve tensor would silently mis-measure"
+            )
         d = np.abs(ref - got).astype(np.float64)
         rms = float(np.sqrt((ref.astype(np.float64) ** 2).mean()))
         errors[name] = {

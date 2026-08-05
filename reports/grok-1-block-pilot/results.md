@@ -302,7 +302,7 @@ at 16× compression, which is exactly what #48 wants from the MoE FLOPs.
 cargo build --release --features cli --locked
 
 # run3 handoff (preferred over May run2); tests honor GROK_OZEMPIC_DISSECT_RUN
-export GROK_OZEMPIC_DISSECT_RUN=~/rmems/xai-dissect/out/LATEST_CORRECT_GROK1_RUN
+export GROK_OZEMPIC_DISSECT_RUN=~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN
 RUN3="$GROK_OZEMPIC_DISSECT_RUN/manifests/xai-grok-1-ckpt-0"
 
 # whole pilot: dequant export -> derived manifest -> pack --verify -> histogram -> metrics
@@ -330,7 +330,7 @@ Host paths (nothing under `~/.models` is committed):
 | Artifact | Path |
 |---|---|
 | Checkpoint | `~/.models/xai-grok-1/ckpt-0/` |
-| run3 handoff | `~/rmems/xai-dissect/out/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (→ `out/grok1_run3_20260802T023050Z`) |
+| run3 handoff | `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (→ `grok1_run3_20260802T023050Z`) |
 | Packs, derived manifests, metrics, logs | `~/.models/xai-grok-1/artifacts/block-pilot/` |
 | f32 npy stage | `mktemp` dir under `~/.models/xai-grok-1/`, removed on exit (`KEEP_NPY=1` to keep) |
 
