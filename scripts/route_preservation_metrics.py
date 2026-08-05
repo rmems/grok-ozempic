@@ -389,6 +389,14 @@ def stem_of(name: str) -> str:
     return name.replace(".", "__")
 
 
+def _require_npy(npy_dir: Path, name: str) -> np.ndarray:
+    """Load a tensor required by the gates; a miss is fatal, not a traceback."""
+    npy = npy_dir / f"{stem_of(name)}.npy"
+    if not npy.exists():
+        raise MetricsError(f"{name}: source npy missing at {npy}; required to evaluate gates")
+    return np.load(npy).astype(np.float32)
+
+
 def kind_of(name: str) -> str:
     """``block_000.slot_04.attn_proj_i8.model_width`` -> ``attn_proj_i8.model_width``."""
     return name.split(".", 2)[2] if name.count(".") >= 2 else name
@@ -398,10 +406,8 @@ def measure_weights(npy_dir: Path, pack: Path, ternary: dict[str, dict]) -> dict
     """Streamed reconstruction stats for every quantized tensor in the pack."""
     weights: dict[str, dict] = {}
     for name in sorted(ternary):
-        npy = npy_dir / f"{stem_of(name)}.npy"
-        if not npy.exists():
-            raise MetricsError(f"{name}: source npy missing at {npy}")
-        st = ternary_stats(npy, pack, ternary[name])
+        _require_npy(npy_dir, name)  # existence guard; ternary_stats reloads via memmap
+        st = ternary_stats(npy_dir / f"{stem_of(name)}.npy", pack, ternary[name])
         weights[name] = st
         print(
             f"  ternary {name:<46} zeros={st['sparsity'] * 100:6.2f}%  "
@@ -414,10 +420,7 @@ def measure_preserve(npy_dir: Path, pack: Path, preserve: dict[str, dict]) -> di
     """fp16 round-trip error for the preserve tier (fp16-at-rest in GOZ1 v1)."""
     errors: dict[str, dict] = {}
     for name in sorted(preserve):
-        npy = npy_dir / f"{stem_of(name)}.npy"
-        if not npy.exists():
-            raise MetricsError(f"{name}: source npy missing at {npy}; cannot compute fp16 round-trip error")
-        ref = np.load(npy).astype(np.float32)
+        ref = _require_npy(npy_dir, name)
         got = read_f16(pack, preserve[name])
         d = np.abs(ref - got).astype(np.float64)
         rms = float(np.sqrt((ref.astype(np.float64) ** 2).mean()))
@@ -445,7 +448,7 @@ def _resolve_router(npy_dir: Path, preserve: dict[str, dict]) -> tuple[str, np.n
         raise MetricsError(
             f"expected exactly one preserve-tier router in the pack, found {routers or 'none'}"
         )
-    ref = np.load(npy_dir / f"{stem_of(routers[0])}.npy").astype(np.float32)
+    ref = _require_npy(npy_dir, routers[0])
     if ref.ndim != 2 or ref.shape[0] <= ref.shape[1]:
         raise MetricsError(
             f"{routers[0]}: expected (d_model, experts) with d_model > experts, "
@@ -461,7 +464,7 @@ def _resolve_activations(
     norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
     if norm_name is None:
         raise MetricsError("no block_norm in pack; cannot build realistic activations")
-    gain = np.load(npy_dir / f"{stem_of(norm_name)}.npy").astype(np.float32)
+    gain = _require_npy(npy_dir, norm_name)
     if gain.shape != (d_model,):
         raise MetricsError(
             f"{norm_name}: shape {gain.shape} does not match router d_model {d_model}"
@@ -493,7 +496,7 @@ def measure_routing(
 
     routing: dict[str, dict] = {}
     for name in sorted(square):
-        w_ref = np.load(npy_dir / f"{stem_of(name)}.npy").astype(np.float32)
+        w_ref = _require_npy(npy_dir, name)
         w_pilot = reconstruct_full(pack, ternary[name], weights[name]["alpha_optimal"])
         r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
         r["activation_source"] = f"seeded N(0,1) tokens x RMSNorm gain {norm_name}"
