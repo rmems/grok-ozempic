@@ -26,6 +26,49 @@ _write_shard = _sf.write_shard
 _write_quantized = _sf.write_quantized
 
 
+class SplitQuantizedTests(unittest.TestCase):
+    """`split_quantized` is the last gate before a pack input is accepted."""
+
+    def _spec(self, descr: str, shape=(4, 4)):
+        item = {"i1": 1, "bfloat16": 2, "f4": 4}[descr]
+        n = 1
+        for d in shape:
+            n *= d
+        return exp.ArraySpec(shape, descr, 0, n * item)
+
+    def test_int8_then_bf16_accepted(self) -> None:
+        w, s = exp.split_quantized([self._spec("i1"), self._spec("bfloat16", (1, 4))])
+        self.assertEqual((w.descr, s.descr), ("i1", "bfloat16"))
+
+    def test_lone_f32_is_passthrough(self) -> None:
+        w, s = exp.split_quantized([self._spec("f4")])
+        self.assertIsNone(s)
+
+    def test_lone_int8_rejected(self) -> None:
+        """A quantized weight with no scales cannot be dequantized."""
+        with self.assertRaises(exp.ExportError):
+            exp.split_quantized([self._spec("i1")])
+
+    def test_reversed_order_rejected(self) -> None:
+        """bf16-then-int8 would treat the scales as the weight."""
+        with self.assertRaises(exp.ExportError):
+            exp.split_quantized([self._spec("bfloat16", (1, 4)), self._spec("i1")])
+
+    def test_three_arrays_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError):
+            exp.split_quantized(
+                [self._spec("i1"), self._spec("bfloat16", (1, 4)), self._spec("f4")]
+            )
+
+    def test_f32_pair_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError):
+            exp.split_quantized([self._spec("f4"), self._spec("f4")])
+
+    def test_empty_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError):
+            exp.split_quantized([])
+
+
 class StackGlobalDtypeTests(unittest.TestCase):
     """The real ckpt-0 names bfloat16 via ``STACK_GLOBAL ml_dtypes bfloat16``.
 
@@ -50,21 +93,40 @@ class StackGlobalDtypeTests(unittest.TestCase):
         self.assertEqual([sp.descr for sp in specs], ["i1", "bfloat16"])
         self.assertEqual(specs[0].shape, w.shape)
 
-    def test_dequant_matches_string_descriptor_framing(self) -> None:
-        """Both framings must produce byte-identical output."""
+    def test_untrusted_global_module_rejected(self) -> None:
+        """The element size decides what gets exported, so only known globals count."""
+        rng = np.random.default_rng(3)
+        w = rng.integers(-128, 128, size=(64, 32), dtype=np.int8)
+        s = rng.random((1, 32), dtype=np.float32) + 0.25
+        for module, name in (("evil_pkg", "bfloat16"), ("ml_dtypes", "float8_e4m3")):
+            with tempfile.TemporaryDirectory() as td:
+                p = Path(td) / "s"
+                _sf.write_quantized_global_dtype(p, w, s, module=module, name=name)
+                with self.assertRaises(exp.ExportError, msg=f"{module}.{name}"):
+                    exp.scan_shard(p)
+
+    def test_bare_bfloat16_string_descriptor_rejected(self) -> None:
+        """`bfloat16` is an ml_dtypes global name, not a numpy dtype spelling.
+
+        Accepting it as a loose string would let any occurrence of that word in
+        the stream set a 2-byte element size.
+        """
         rng = np.random.default_rng(3)
         w = rng.integers(-128, 128, size=(64, 32), dtype=np.int8)
         s = rng.random((1, 32), dtype=np.float32) + 0.25
         with tempfile.TemporaryDirectory() as td:
-            a, b = Path(td) / "a", Path(td) / "b"
-            _sf.write_quantized(a, w, s)
-            _sf.write_quantized_global_dtype(b, w, s)
-            outs = []
-            for shard in (a, b):
-                out = shard.with_suffix(".npy")
-                exp.export_tensor(shard, out)
-                outs.append(np.load(out))
-        np.testing.assert_array_equal(outs[0], outs[1])
+            p = Path(td) / "s"
+            _sf.write_quantized_string_dtype(p, w, s)
+            with self.assertRaises(exp.ExportError):
+                exp.scan_shard(p)
+
+    def test_native_string_descriptors_still_accepted(self) -> None:
+        """numpy's own spellings must keep working as bare strings."""
+        a = np.arange(24, dtype="<f4").reshape(4, 6)
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s"
+            _sf.write_shard(p, a)
+            self.assertEqual([sp.descr for sp in exp.scan_shard(p)], ["f4"])
 
 
 class ScanShardTests(unittest.TestCase):

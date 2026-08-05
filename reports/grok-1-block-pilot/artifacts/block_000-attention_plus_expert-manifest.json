@@ -8,8 +8,8 @@
   },
   "produced_by": {
     "tool": "grok-ozempic scripts/block_pilot_goz1.sh (derived; xai-dissect remains authoritative)",
-    "version": "0.2.0",
-    "commit": null
+    "commit": null,
+    "version": "0.2.0"
   },
   "defaults": {
     "precision": "ternary_snn"

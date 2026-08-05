@@ -17,7 +17,18 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import route_preservation_io as rio  # noqa: E402
-from goz1_trit_histogram import DATA_ALIGNMENT, TENSOR_F16, TENSOR_TERNARY  # noqa: E402
+
+# Import the *production* layout helpers rather than reimplementing them: the
+# reader validates cumulative offsets and truncation against these, so sharing
+# them makes the synthesized pack track any future alignment change instead of
+# silently diverging and letting these tests pass against a stale layout.
+from goz1_trit_histogram import (  # noqa: E402
+    DATA_ALIGNMENT,
+    TENSOR_F16,
+    TENSOR_TERNARY,
+    _align_up,
+    _payload_nbytes,
+)
 
 MAGIC = b"GOZ1"
 META_STR = 1
@@ -36,12 +47,21 @@ def _s(text: str) -> bytes:
     return _u64(len(raw)) + raw
 
 
-def _align(n: int, a: int = DATA_ALIGNMENT) -> int:
-    return (n + a - 1) // a * a
+def _align(n: int) -> int:
+    return _align_up(n, DATA_ALIGNMENT)
 
 
-def _payload_nbytes(kind: int, numel: int) -> int:
-    return (numel + 3) // 4 if kind == TENSOR_TERNARY else numel * 2
+def _assert_payload_size(name: str, shape: list[int], kind: int, payload: bytes) -> None:
+    """Keep fixtures locked to the size the reader will compute."""
+    numel = 1
+    for d in shape:
+        numel *= d
+    want = _payload_nbytes(kind, numel, name)
+    if len(payload) != want:
+        raise AssertionError(
+            f"{name}: fixture payload is {len(payload)} bytes, but the reader will "
+            f"expect {want} for shape {shape} -- fixture and reader have diverged"
+        )
 
 
 def build_pack(path: Path, tensors: list[tuple[str, list[int], int, bytes]], *, truncate: int = 0) -> Path:
@@ -56,6 +76,8 @@ def build_pack(path: Path, tensors: list[tuple[str, list[int], int, bytes]], *, 
 
     rel = 0
     for name, shape, kind, payload in tensors:
+        if not truncate:
+            _assert_payload_size(name, shape, kind, payload)
         head += _s(name) + _u32(len(shape))
         for d in shape:
             head += _u64(d)

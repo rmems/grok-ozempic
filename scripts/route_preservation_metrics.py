@@ -181,14 +181,31 @@ def _validate_pilot_args(
 
 
 def _load_manifest_tensors(path: Path | None) -> list[dict] | None:
+    """Read the conversion manifest, failing closed rather than by traceback."""
     if path is None:
         return None
-    with path.open("rb") as f:
-        doc = json.load(f)
+    doc = _read_json(path)
+    if not isinstance(doc, dict):
+        raise MetricsError(
+            f"{path}: conversion manifest root is {type(doc).__name__}, expected an object"
+        )
     tensors = doc.get("tensors")
     if not isinstance(tensors, list):
         raise MetricsError(f"{path}: no `tensors` array")
+    bad = [i for i, t in enumerate(tensors) if not isinstance(t, dict)]
+    if bad:
+        raise MetricsError(f"{path}: tensors[{bad[0]}] is not an object")
     return tensors
+
+
+def _read_json(path: Path) -> object:
+    try:
+        with path.open("rb") as f:
+            return json.load(f)
+    except OSError as exc:
+        raise MetricsError(f"{path}: cannot read conversion manifest: {exc}") from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise MetricsError(f"{path}: conversion manifest is not valid JSON: {exc}") from exc
 
 
 def _measure_routing(

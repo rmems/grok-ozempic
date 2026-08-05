@@ -63,30 +63,47 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
     index: dict[str, dict] = {}
     rel = 0
     for t in tensors:
-        name = t["name"]
-        if name in index:
-            raise MetricsError(
-                f"{name}: duplicate tensor name in pack; route metrics would silently "
-                "measure only one of the two payloads"
-            )
-        n = _num_elements(t["shape"])
-        nbytes = _payload_nbytes(t["tensor_type"], n, name)
-        if t["data_offset"] != rel:
-            raise MetricsError(f"{name}: data_offset {t['data_offset']} != cumulative {rel}")
-        abs_offset = data_start + rel
-        if abs_offset + nbytes > file_size:
-            raise MetricsError(
-                f"{name}: payload of {nbytes} bytes at {abs_offset} exceeds pack size "
-                f"{file_size} -- truncated pack"
-            )
-        index[name] = {
-            **t,
-            "numel": n,
-            "nbytes": nbytes,
-            "abs_offset": abs_offset,
-        }
-        rel = _align_up(rel + nbytes, DATA_ALIGNMENT)
+        entry = _index_entry(pack, t, index, rel, data_start, file_size)
+        index[t["name"]] = entry
+        rel = _align_up(rel + entry["nbytes"], DATA_ALIGNMENT)
     return metadata, index
+
+
+def _index_entry(
+    pack: Path, t: dict, index: dict, rel: int, data_start: int, file_size: int
+) -> dict:
+    """Validate one tensor header and return its index entry."""
+    name = t["name"]
+    if name in index:
+        raise MetricsError(
+            f"{name}: duplicate tensor name in pack; route metrics would silently "
+            "measure only one of the two payloads"
+        )
+    if t["data_offset"] != rel:
+        raise MetricsError(f"{name}: data_offset {t['data_offset']} != cumulative {rel}")
+    n = _num_elements(t["shape"])
+    nbytes = _tensor_nbytes(pack, t, n)
+    abs_offset = data_start + rel
+    if abs_offset + nbytes > file_size:
+        raise MetricsError(
+            f"{name}: payload of {nbytes} bytes at {abs_offset} exceeds pack size "
+            f"{file_size} -- truncated pack"
+        )
+    return {**t, "numel": n, "nbytes": nbytes, "abs_offset": abs_offset}
+
+
+def _tensor_nbytes(pack: Path, t: dict, numel: int) -> int:
+    """Payload size, converting parser errors to the CLI's controlled path.
+
+    An unsupported ``tensor_type`` raises ``Goz1Error``, which ``main`` does not
+    catch; every pack-parse failure must surface as ``MetricsError``.
+    """
+    try:
+        return _payload_nbytes(t["tensor_type"], numel, t["name"])
+    except MetricsError:
+        raise
+    except Exception as exc:
+        raise MetricsError(f"{pack}: {t['name']}: unsupported tensor layout: {exc}") from exc
 
 
 def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:

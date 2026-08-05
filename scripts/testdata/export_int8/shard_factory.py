@@ -28,34 +28,42 @@ def write_shard(path: Path, obj) -> None:
 
 
 def write_quantized(path: Path, weight: np.ndarray, scales_f32: np.ndarray) -> None:
-    """Emit a shard whose scales carry the ``bfloat16`` dtype descriptor.
+    """Emit a shard framed exactly as the official ckpt-0 frames bfloat16 scales.
 
-    numpy cannot name a ``bfloat16`` dtype without ``ml_dtypes``, so the array
-    is pickled as ``<u2`` and the descriptor bytes are rewritten in place --
-    same 2-byte itemsize, same payload, the framing JAX/ml_dtypes produces.
+    numpy cannot name a ``bfloat16`` dtype without ``ml_dtypes``, so the array is
+    pickled as ``<u2`` and the descriptor is rewritten into the opcodes that push
+    ``ml_dtypes.bfloat16`` -- same 2-byte itemsize, same payload, the framing
+    JAX/ml_dtypes actually produces. Fixtures therefore exercise the real code
+    path rather than a synthetic bare-string spelling the scanner rejects.
+    """
+    write_quantized_global_dtype(path, weight, scales_f32)
 
-    The substitution is pinned to how numpy frames a short dtype string under
-    pickle protocol 4 (``SHORT_BINUNICODE`` + memoize), as produced by **numpy
-    2.5.1 / CPython 3.14**. A byte-order prefix (``<u2``), a different memo
-    layout, or a newer default protocol would change those bytes; the count
-    assertion below turns that into a loud generation-time failure rather than
-    a silently malformed shard. See this directory's README before relaxing it.
+
+def write_quantized_string_dtype(
+    path: Path, weight: np.ndarray, scales_f32: np.ndarray, descr: str = "bfloat16"
+) -> None:
+    """Emit a shard naming the scales dtype as a bare descriptor string.
+
+    Not a framing numpy or ml_dtypes ever produces for bfloat16 -- it exists so
+    tests can confirm the scanner refuses to take a 2-byte element size from a
+    loose string in the stream.
     """
     raw = pickle.dumps(
         QuantizedWeight8bit(weight=weight, scales=bf16(scales_f32)), protocol=4
     )
-    old, new = b"\x8c\x02u2\x94", b"\x8c\x08bfloat16\x94"
+    old = b"\x8c\x02u2\x94"
     if raw.count(old) != 1:
-        raise ValueError(
-            f"expected exactly one u2 dtype descriptor, found {raw.count(old)}; "
-            f"numpy {np.__version__} may frame dtypes differently -- see "
-            "scripts/testdata/export_int8/README.md"
-        )
-    path.write_bytes(raw.replace(old, new))
+        raise ValueError(f"expected one u2 descr, found {raw.count(old)}")
+    text = descr.encode("utf-8")
+    path.write_bytes(raw.replace(old, b"\x8c" + bytes([len(text)]) + text + b"\x94"))
 
 
 def write_quantized_global_dtype(
-    path: Path, weight: np.ndarray, scales_f32: np.ndarray
+    path: Path,
+    weight: np.ndarray,
+    scales_f32: np.ndarray,
+    module: str = "ml_dtypes",
+    name: str = "bfloat16",
 ) -> None:
     """Emit a shard naming bfloat16 via ``STACK_GLOBAL``, as ckpt-0 really does.
 
@@ -75,12 +83,16 @@ def write_quantized_global_dtype(
             f"numpy {np.__version__} may frame dtypes differently -- see "
             "scripts/testdata/export_int8/README.md"
         )
-    # SHORT_BINUNICODE 'ml_dtypes' + MEMOIZE, 'bfloat16' + MEMOIZE, STACK_GLOBAL, MEMOIZE
-    new = (
-        b"\x8c\x09ml_dtypes\x94"
-        b"\x8c\x08bfloat16\x94"
-        b"\x93\x94"
-    )
+    # SHORT_BINUNICODE <module> + MEMOIZE, <name> + MEMOIZE, STACK_GLOBAL, MEMOIZE.
+    # `module`/`name` are parameterized so tests can build an *untrusted* global
+    # and confirm the scanner rejects it instead of trusting the name alone.
+    def short_binunicode(text: str) -> bytes:
+        raw_text = text.encode("utf-8")
+        if len(raw_text) > 255:
+            raise ValueError(f"{text!r} too long for SHORT_BINUNICODE")
+        return b"\x8c" + bytes([len(raw_text)]) + raw_text + b"\x94"
+
+    new = short_binunicode(module) + short_binunicode(name) + b"\x93\x94"
     path.write_bytes(raw.replace(old, new))
 
 

@@ -187,20 +187,25 @@ for e in m["ternary_candidates"]:
 m["ternary_candidates"] = cands
 # Strip the τ trap: defaults.gif_threshold outranks CLI --gif-threshold.
 m["defaults"].pop("gif_threshold", None)
-# The Rust side declares produced_by.version as String with serde(default):
-# a missing key is fine, an explicit null is not. Assert rather than emit null.
-if not isinstance(m["produced_by"].get("version"), str):
-    sys.exit(
-        f"error: {src} produced_by.version is "
-        f"{m['produced_by'].get('version')!r}, expected a string; "
-        "emitting null here would make the derived manifest fail deserialization"
-    )
-m["produced_by"] = {
+# The Rust side declares produced_by.version as String with serde(default): an
+# absent key is fine, an explicit null is not. So omit it when upstream omits it,
+# and only reject a present-but-non-string value.
+produced_by = {
     "tool": "grok-ozempic scripts/block_pilot_goz1.sh (derived; xai-dissect remains authoritative)",
-    "version": m["produced_by"]["version"],
     "commit": None,
 }
-json.dump(m, open(dst, "w"), indent=2)
+if "version" in m["produced_by"]:
+    version = m["produced_by"]["version"]
+    if not isinstance(version, str):
+        sys.exit(
+            f"error: {src} produced_by.version is {version!r}, expected a string; "
+            "emitting null here would make the derived manifest fail deserialization"
+        )
+    produced_by["version"] = version
+m["produced_by"] = produced_by
+with open(dst, "w") as fh:
+    json.dump(m, fh, indent=2)
+    fh.write("\n")
 print(f"derived {dst}: {len(m['preserve'])} preserve, {len(cands)} ternary candidate patterns")
 for c in cands:
     print(f"  ternary {c['name']:<44} tau={c['gif_threshold']}")
@@ -363,7 +368,9 @@ hist = json.load(open(src))
 # `file` is an absolute path under ~/.models that cannot resolve elsewhere.
 if "file" in hist:
     hist["file_basename"] = os.path.basename(hist.pop("file"))
-json.dump(hist, open(dst, "w"), indent=2)
+with open(dst, "w") as fh:
+    json.dump(hist, fh, indent=2)
+    fh.write("\n")
 print(f"wrote publish copy {dst}")
 PY
 
@@ -387,7 +394,9 @@ pilot["paths_note"] = (
     "BLOCK=<n> MODE=<mode> scripts/block_pilot_goz1.sh (the npy stage is a "
     "per-run mktemp directory deleted on exit)."
 )
-json.dump(rep, open(dst, "w"), indent=2)
+with open(dst, "w") as fh:
+    json.dump(rep, fh, indent=2)
+    fh.write("\n")
 print(f"wrote publish copy {dst}")
 PY
 
@@ -396,6 +405,7 @@ echo "== pilot artifacts"
 echo "   manifest   $MANIFEST"
 echo "   pack       $PACK"
 echo "   histogram  $ART/$TAG-histogram.json"
+echo "   publish    $ART/$TAG-histogram.publish.json  (copy this under reports/)"
 echo "   metrics    $ART/$TAG-route-preservation.json"
 echo "   publish    $ART/$TAG-route-preservation.publish.json  (copy this under reports/)"
 echo "   logs       $ART/logs/$TAG-*.log"

@@ -71,18 +71,23 @@ tensor00013_000: plain float32(6144, 8)                 -> bit-exact=True
 tensor00009_000: plain float32(6144,)                   -> bit-exact=True
 ```
 
-38 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
+55 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
 `.github/workflows/python-scripts.yml`) cover the opcode scanner, the grouping
 rule and its rejections, chunk-invariance, header alignment, mode selection, and
-the fail-loud paths: truncated shards, Fortran-ordered arrays, manifest/shard
-shape disagreement, and the guarantee that no payload is bulk-read.
+the fail-loud paths below. Fixtures frame bfloat16 scales exactly as the real
+checkpoint does (`STACK_GLOBAL ml_dtypes bfloat16`), so they exercise the same
+code path a real shard takes.
 
-The exporter refuses rather than guesses. A shard is rejected if its scale groups
-do not divide the contracting axis, if leading dims or the output dim disagree,
-if an array is Fortran-ordered (the writer emits C-order and will not silently
-transpose), if a payload runs past end-of-file, or if the manifest shape does not
-match the shard — the last checked **before** any bytes are written, so a
-disagreement cannot leave a wrong multi-GiB file for a later pack to consume.
+The exporter refuses rather than guesses:
+
+| Rejected | Why it matters |
+|---|---|
+| scale groups that do not divide the contracting axis; disagreeing leading or output dims | a wrong broadcast produces a plausible-looking but wrong tensor |
+| Fortran-ordered arrays | the writer emits C-order and must not silently transpose |
+| a payload running past end-of-file | truncated shard |
+| a manifest shape that differs from the shard | checked **before** any bytes are written, so a mismatch cannot leave a wrong multi-GiB file for a later pack to consume |
+| `bfloat16` named as a bare dtype string, or any `STACK_GLOBAL` outside `ml_dtypes.bfloat16` | the descriptor sets the element size, so an untrusted spelling could change how many bytes each value consumes |
+| unknown dtypes, unreadable/malformed manifests, non-int shape entries | surfaced as `ExportError` (clean `error:`, exit 2) rather than a traceback |
 
 > **Dependency note.** Unlike `export_grok1_embedding_npy.py` (stdlib-only,
 > byte-copy), dequantization is real arithmetic over up to 1.6e9 elements, so

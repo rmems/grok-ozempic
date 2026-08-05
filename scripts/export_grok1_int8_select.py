@@ -79,7 +79,8 @@ def load_manifest(path: Path) -> list[dict]:
             doc = json.load(fh)
     except OSError as exc:
         raise ExportError(f"{path}: cannot read conversion manifest: {exc}") from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # Invalid UTF-8 raises UnicodeDecodeError, not JSONDecodeError.
         raise ExportError(f"{path}: conversion manifest is not valid JSON: {exc}") from exc
     if not isinstance(doc, dict):
         raise ExportError(
@@ -134,12 +135,21 @@ def _require_keys(path: Path, i: int, t: dict) -> None:
 
 
 def _validate_shape(path: Path, i: int, shape: object) -> None:
-    try:
-        tuple(int(d) for d in shape)  # type: ignore[union-attr]
-    except (TypeError, ValueError) as exc:
+    """Require genuine ints, not int-coercible values.
+
+    ``int("3")`` and ``int(3.7)`` both succeed, so coercing would accept a
+    manifest whose shape disagrees with the shard while claiming to have
+    validated it. ``bool`` is an ``int`` subclass and is excluded explicitly.
+    """
+    bad = [
+        d for d in shape  # type: ignore[union-attr]
+        if not isinstance(d, int) or isinstance(d, bool)
+    ]
+    if bad:
         raise ExportError(
-            f"{path}: tensors[{i}].shape {shape!r} is not a list of ints"
-        ) from exc
+            f"{path}: tensors[{i}].shape {shape!r} is not a list of ints "
+            f"(offending value {bad[0]!r})"
+        )
 
 
 def select_tensors(

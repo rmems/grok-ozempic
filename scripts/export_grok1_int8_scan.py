@@ -31,7 +31,16 @@ _INT_DESCR = {"i1"}
 _F32_DESCR = {"f4"}
 _BF16_DESCR = {"bfloat16"}
 _KNOWN_DESCR = _INT_DESCR | _F32_DESCR | _BF16_DESCR
+# Spellings numpy itself writes as a dtype string. `bfloat16` is *not* one: it is
+# an ml_dtypes global name, reachable only via _GLOBAL_DESCRS below.
+_NATIVE_DESCR = _INT_DESCR | _F32_DESCR
 _ITEMSIZE = {"i1": 1, "bfloat16": 2, "f4": 4}
+# Dtypes reachable only as a STACK_GLOBAL, keyed by the exact (module, name) the
+# official checkpoint uses. Matching on name alone would let an untrusted shard
+# choose the element size.
+_GLOBAL_DESCRS = {("ml_dtypes", "bfloat16"): "bfloat16"}
+# Spellings that may *only* arrive via _GLOBAL_DESCRS, never as a loose string.
+_GLOBAL_ONLY_DESCR = frozenset(_GLOBAL_DESCRS.values())
 
 # Preserve tier per run3 quant-plan `keep_fp32`; never ternary, never dequantized.
 
@@ -135,21 +144,43 @@ def _descr_text(raw: object) -> str | None:
     * ``STACK_GLOBAL ml_dtypes bfloat16`` -- how the official Grok-1 checkpoint
       names bfloat16 scales, which arrives here as a :class:`_Global`.
 
+    The global form is accepted only for the exact ``(module, name)`` pairs in
+    ``_GLOBAL_DESCRS``: trusting any global whose *name* happened to be
+    ``bfloat16`` would let a tampered shard pick the element size, which decides
+    how many bytes each value consumes and therefore what gets exported.
+
     Anything else returns ``None``. Never fall back to ``str(raw)``: that turns
     an unrecognized object into a descriptor like
     ``"<..._Global object at 0x...>"``, which then fails far away in
     ``ArraySpec.itemsize`` instead of at the point of confusion.
     """
     if isinstance(raw, str):
-        return raw
+        return _reject_global_only(raw)
     if isinstance(raw, bytes):
         try:
-            return raw.decode("ascii")
+            return _reject_global_only(raw.decode("ascii"))
         except UnicodeDecodeError:
             return None
     if isinstance(raw, _Global):
-        return raw.name
+        return _GLOBAL_DESCRS.get((raw.module, raw.name))
     return None
+
+
+def _reject_global_only(text: str) -> str:
+    """Refuse a dtype spelling that must arrive as a trusted global.
+
+    ``numpy.dtype("bfloat16")`` is not a thing numpy can serialize; only
+    ``numpy.dtype(ml_dtypes.bfloat16)`` is. Accepting the bare string would let a
+    tampered shard name a 2-byte element size without going through the
+    module/name check in ``_GLOBAL_DESCRS``.
+    """
+    if text in _GLOBAL_ONLY_DESCR:
+        raise ExportError(
+            f"dtype {text!r} given as a plain string; it is only valid as a "
+            f"{'/'.join(m for m, _ in _GLOBAL_DESCRS)} global, so this shard is "
+            "not trustworthy"
+        )
+    return text
 
 
 class _HeaderState:
@@ -171,15 +202,27 @@ class _HeaderState:
         self.descr: str | None = None
         self.fortran: bool | None = None
 
-    def snapshot(self) -> tuple:
-        """Shallow copy of all mutable state, for retrying a window.
+    @staticmethod
+    def _clone(value: object) -> object:
+        """Copy a container so a retry cannot observe in-place mutation.
 
-        Shallow on purpose: a deep copy would clone the ``_MARK`` sentinel and
-        break the identity test in :meth:`_pop_to_mark`.
+        Not ``copy.deepcopy``: that would clone the ``_MARK`` sentinel and break
+        the identity test in :meth:`_pop_to_mark`. Everything the scanner pushes
+        is either immutable or one of these containers.
         """
+        if isinstance(value, list):
+            return [_HeaderState._clone(v) for v in value]
+        if isinstance(value, dict):
+            return {k: _HeaderState._clone(v) for k, v in value.items()}
+        if isinstance(value, set):
+            return set(value)
+        return value
+
+    def snapshot(self) -> tuple:
+        """Copy all mutable state so a grown-window retry restarts cleanly."""
         return (
-            list(self.stack),
-            dict(self.memo),
+            self._clone(self.stack),
+            self._clone(self.memo),
             self.memo_next,
             list(self.ints),
             self.shape,
@@ -197,8 +240,8 @@ class _HeaderState:
             self.descr,
             self.fortran,
         ) = snap
-        self.stack = list(stack)
-        self.memo = dict(memo)
+        self.stack = self._clone(stack)  # type: ignore[assignment]
+        self.memo = self._clone(memo)  # type: ignore[assignment]
         self.ints = list(ints)
 
     def _push(self, value: object) -> None:
@@ -224,11 +267,19 @@ class _HeaderState:
             self.ints = []
 
     def _set_descr(self, value: object) -> None:
-        """Extract a known dtype descriptor from a value if possible."""
+        """Extract a known dtype descriptor from a value if possible.
+
+        Bare strings are accepted only for numpy-native codes (``_NATIVE_DESCR``).
+        ``bfloat16`` is deliberately excluded: it is not a numpy dtype spelling,
+        it is the *name* of an ``ml_dtypes`` global, so accepting it here would
+        let any occurrence of that word in the stream set a 2-byte element size.
+        It reaches :attr:`descr` only through ``_GLOBAL_DESCRS`` in
+        :func:`_descr_text`.
+        """
         if isinstance(value, _Descr):
             self.descr = value.text
             return
-        if isinstance(value, str) and value in _KNOWN_DESCR:
+        if isinstance(value, str) and value in _NATIVE_DESCR:
             self.descr = value
             return
         if isinstance(value, bytes):
@@ -236,7 +287,7 @@ class _HeaderState:
                 s = value.decode("ascii")
             except UnicodeDecodeError:
                 return
-            if s in _KNOWN_DESCR:
+            if s in _NATIVE_DESCR:
                 self.descr = s
 
     def _memoize_top(self, idx: int) -> None:
