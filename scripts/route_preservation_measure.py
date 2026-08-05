@@ -285,14 +285,17 @@ def make_activations_from_embedding(
 
     Returns ``(activations, provenance)``.
     """
-    spec = _embedding_spec(shard, norm_gain, tokens)
-    vocab = spec.shape[0]
-    emb = np.memmap(shard, dtype="<f4", mode="r", offset=spec.offset, shape=spec.shape)
-    rng = np.random.default_rng(seed)
-    # Sorted, distinct row ids: distinct so no token is double-counted, sorted so
-    # the memmap reads walk forward through the file.
-    idx = np.sort(rng.choice(vocab, size=tokens, replace=False))
-    x = _rmsnorm(np.asarray(emb[idx], dtype=np.float32), norm_gain)
+    try:
+        spec = _embedding_spec(shard, norm_gain, tokens)
+        vocab = spec.shape[0]
+        emb = np.memmap(shard, dtype="<f4", mode="r", offset=spec.offset, shape=spec.shape)
+        rng = np.random.default_rng(seed)
+        # Sorted, distinct row ids: distinct so no token is double-counted, sorted so
+        # the memmap reads walk forward through the file.
+        idx = np.sort(rng.choice(vocab, size=tokens, replace=False))
+        x = _rmsnorm(np.asarray(emb[idx], dtype=np.float32), norm_gain)
+    except (OSError, ValueError) as exc:
+        raise MetricsError(f"{shard}: cannot read embedding rows: {exc}") from exc
     return x, {
         "source": "token_embedding_rows",
         "shard": str(shard),
