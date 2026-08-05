@@ -1,0 +1,380 @@
+{
+  "model_family": "grok-1",
+  "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
+  "pilot": {
+    "block": 0,
+    "mode": "attention_plus_expert",
+    "pack": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_plus_expert.goz1",
+    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.QBXhhz/npy",
+    "tokens": 4096,
+    "seed": 20260805,
+    "ternary_tensors": 7,
+    "preserve_tensors": 5,
+    "pack_metadata": {
+      "oz.gif_threshold": "0.05",
+      "oz.name": "grok-ozempic",
+      "oz.quantization_version": 1
+    },
+    "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
+    "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus"
+  },
+  "summary": [
+    {
+      "name": "router_top1_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "threshold": ">= 99.0%",
+      "observed": 0.677734375,
+      "detail": "Worst case over evaluated d_model x d_model projections; router read from the pack (fp16 preserve tier)."
+    },
+    {
+      "name": "router_top2_set_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "threshold": ">= 99.5%",
+      "observed": 0.475830078125,
+      "detail": "Fraction of tokens whose unordered top-2 expert set is unchanged."
+    },
+    {
+      "name": "expert_load_distribution_delta",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.029296875,
+      "detail": "Max per-expert share change in the top-1 load histogram."
+    },
+    {
+      "name": "expert_load_js_divergence",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.008284835625974757,
+      "detail": "Jensen-Shannon divergence (bits) between reference and pilot expert-load distributions."
+    },
+    {
+      "name": "router_logit_rank_correlation",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7434779575892858,
+      "detail": "Mean per-token Spearman correlation over the 8 router logits."
+    },
+    {
+      "name": "block_output_cosine",
+      "scope": "block_behavior",
+      "status": "fail",
+      "threshold": ">= 0.995",
+      "observed": 0.8603326972461066,
+      "detail": "Scoped to the quantized projection output, not a full block forward (attention roles are unassigned upstream; MoE not executed)."
+    },
+    {
+      "name": "block_output_rmse",
+      "scope": "block_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.31328528521042653,
+      "detail": "RMSE of the projection output against the f32 reference path."
+    },
+    {
+      "name": "residual_stream_drift",
+      "scope": "block_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.5110284146751712,
+      "detail": "Projection-output RMSE normalized by reference output RMS."
+    },
+    {
+      "name": "weight_reconstruction_mse",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.0001426260740471936,
+      "detail": "Worst quantized tensor, at the least-squares optimal ternary scale."
+    },
+    {
+      "name": "weight_cosine_similarity",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.8596620582316677,
+      "detail": "Worst quantized tensor; independent of the chosen ternary scale."
+    },
+    {
+      "name": "weight_max_absolute_error",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7098091729063252,
+      "detail": "Exact max |w - alpha*t| over all quantized tensors."
+    },
+    {
+      "name": "per_channel_scale_error_summary",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.6915393643243799,
+      "detail": "Worst per-output-channel relative reconstruction error; full per-tensor spread under `weights`."
+    },
+    {
+      "name": "logit_kl",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires whole-model inference; out of scope for a bounded single-block pilot (#53 non-goal)."
+    },
+    {
+      "name": "perplexity_delta",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires a calibration corpus and whole-model inference; not run."
+    },
+    {
+      "name": "generation_sanity_summary",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires whole-model inference; not run."
+    }
+  ],
+  "weights": {
+    "block_000.slot_00.moe_expert.gate": {
+      "elements": 1610612736,
+      "zeros": 1051486556,
+      "sparsity": 0.6528487776716551,
+      "rms": 0.02355775763440494,
+      "alpha_optimal": 0.03446429262403113,
+      "weight_cosine_similarity": 0.8619751964369023,
+      "weight_reconstruction_mse": 0.0001426260740471936,
+      "weight_nrmse": 0.5069504519453194,
+      "weight_max_absolute_error": 0.3879905413603439,
+      "per_channel_scale_error": {
+        "channels": 32768,
+        "alpha_min": 0.03287951808223325,
+        "alpha_median": 0.03437332352987105,
+        "alpha_max": 0.04808088908903078,
+        "relative_error_min": 0.4597789281183819,
+        "relative_error_median": 0.5070380143687383,
+        "relative_error_max": 0.5914096369429476
+      }
+    },
+    "block_000.slot_01.moe_expert.down": {
+      "elements": 1610612736,
+      "zeros": 1026408312,
+      "sparsity": 0.6372781544923782,
+      "rms": 0.015693050566611258,
+      "alpha_optimal": 0.022704254828049837,
+      "weight_cosine_similarity": 0.8713381608146713,
+      "weight_reconstruction_mse": 5.9294823061690267e-05,
+      "weight_nrmse": 0.49068300307643253,
+      "weight_max_absolute_error": 0.7098091729063252,
+      "per_channel_scale_error": {
+        "channels": 6144,
+        "alpha_min": 0.019577180543400595,
+        "alpha_median": 0.022664331887169802,
+        "alpha_max": 0.06467694498468159,
+        "relative_error_min": 0.47864928351510366,
+        "relative_error_median": 0.4828791671889745,
+        "relative_error_max": 0.6912169908761315
+      }
+    },
+    "block_000.slot_02.moe_expert.up": {
+      "elements": 1610612736,
+      "zeros": 1037831274,
+      "sparsity": 0.6443704627454281,
+      "rms": 0.023556988649651,
+      "alpha_optimal": 0.034396705025337225,
+      "weight_cosine_similarity": 0.8707550095889084,
+      "weight_reconstruction_mse": 0.00013417456034684017,
+      "weight_nrmse": 0.4917171069586861,
+      "weight_max_absolute_error": 0.4656032949746628,
+      "per_channel_scale_error": {
+        "channels": 32768,
+        "alpha_min": 0.03154450412921358,
+        "alpha_median": 0.03419574614209367,
+        "alpha_max": 0.057575822287470935,
+        "relative_error_min": 0.45303273101940394,
+        "relative_error_median": 0.4904262310168028,
+        "relative_error_max": 0.6915393643243799
+      }
+    },
+    "block_000.slot_03.attn_proj_i8.narrow": {
+      "elements": 6291456,
+      "zeros": 2117334,
+      "sparsity": 0.33654117584228516,
+      "rms": 0.010578140941314469,
+      "alpha_optimal": 0.011270628247707765,
+      "weight_cosine_similarity": 0.8678521892011365,
+      "weight_reconstruction_mse": 2.7619841182005376e-05,
+      "weight_nrmse": 0.4968224810722588,
+      "weight_max_absolute_error": 0.14666546794369847,
+      "per_channel_scale_error": {
+        "channels": 1024,
+        "alpha_min": 0.006836130454696068,
+        "alpha_median": 0.010566048929377264,
+        "alpha_max": 0.017267009752871754,
+        "relative_error_min": 0.42969516475250813,
+        "relative_error_median": 0.4560618527348418,
+        "relative_error_max": 0.5195065313718404
+      }
+    },
+    "block_000.slot_04.attn_proj_i8.model_width": {
+      "elements": 37748736,
+      "zeros": 12596418,
+      "sparsity": 0.3336911201477051,
+      "rms": 0.007302213918588603,
+      "alpha_optimal": 0.00769032174762091,
+      "weight_cosine_similarity": 0.8596620582316677,
+      "weight_reconstruction_mse": 1.3916122278912443e-05,
+      "weight_nrmse": 0.5108631378724569,
+      "weight_max_absolute_error": 0.16381083792034784,
+      "per_channel_scale_error": {
+        "channels": 6144,
+        "alpha_min": 0.006207052114847544,
+        "alpha_median": 0.007478435324833169,
+        "alpha_max": 0.03994824617600841,
+        "relative_error_min": 0.40419477855512526,
+        "relative_error_median": 0.46801929305190104,
+        "relative_error_max": 0.6438901094327641
+      }
+    },
+    "block_000.slot_05.attn_proj_i8.model_width": {
+      "elements": 37748736,
+      "zeros": 12161834,
+      "sparsity": 0.3221785757276747,
+      "rms": 0.0105771638496767,
+      "alpha_optimal": 0.011285860723522544,
+      "weight_cosine_similarity": 0.8784622437138425,
+      "weight_reconstruction_mse": 2.5541838170253586e-05,
+      "weight_nrmse": 0.4778117687638526,
+      "weight_max_absolute_error": 0.1272715733585087,
+      "per_channel_scale_error": {
+        "channels": 6144,
+        "alpha_min": 0.0069844022693250005,
+        "alpha_median": 0.011054195166908821,
+        "alpha_max": 0.021125657010477607,
+        "relative_error_min": 0.42282016873465333,
+        "relative_error_median": 0.4610193731608061,
+        "relative_error_max": 0.5241617605562177
+      }
+    },
+    "block_000.slot_06.attn_proj_i8.narrow": {
+      "elements": 6291456,
+      "zeros": 2047031,
+      "sparsity": 0.3253668149312337,
+      "rms": 0.010577328232367855,
+      "alpha_optimal": 0.011283784705669356,
+      "weight_cosine_similarity": 0.8762189872473086,
+      "weight_reconstruction_mse": 2.5983013638560264e-05,
+      "weight_nrmse": 0.4819131523286129,
+      "weight_max_absolute_error": 0.11128625313612751,
+      "per_channel_scale_error": {
+        "channels": 1024,
+        "alpha_min": 0.008036103038273021,
+        "alpha_median": 0.010932057911501905,
+        "alpha_max": 0.01778287054721133,
+        "relative_error_min": 0.4296315201504765,
+        "relative_error_median": 0.46042890588686025,
+        "relative_error_max": 0.5166798793234245
+      }
+    }
+  },
+  "preserve_fp16_roundtrip": {
+    "block_000.slot_07.block_norm": {
+      "max_absolute_error": 0.0013875961303710938,
+      "relative_rmse": 0.0002078451996099635,
+      "bit_exact": false
+    },
+    "block_000.slot_08.block_norm": {
+      "max_absolute_error": 0.0019283294677734375,
+      "relative_rmse": 0.0001965988264285251,
+      "bit_exact": false
+    },
+    "block_000.slot_09.block_norm": {
+      "max_absolute_error": 0.0008301734924316406,
+      "relative_rmse": 0.00021666898691768515,
+      "bit_exact": false
+    },
+    "block_000.slot_10.block_norm": {
+      "max_absolute_error": 0.0009748935699462891,
+      "relative_rmse": 0.00020079402752299537,
+      "bit_exact": false
+    },
+    "block_000.slot_11.router": {
+      "max_absolute_error": 6.00963830947876e-05,
+      "relative_rmse": 0.0002092983467282326,
+      "bit_exact": false
+    }
+  },
+  "routing": {
+    "block_000.slot_04.attn_proj_i8.model_width": {
+      "tokens": 4096,
+      "router_top1_agreement": 0.78076171875,
+      "router_top2_set_agreement": 0.572509765625,
+      "router_logit_rank_correlation": 0.8092506045386905,
+      "expert_load_distribution_delta": 0.029296875,
+      "expert_load_js_divergence": 0.008284835625974757,
+      "expert_load_reference": [
+        0.325439453125,
+        0.035888671875,
+        0.09033203125,
+        0.33447265625,
+        0.041748046875,
+        0.092041015625,
+        0.053466796875,
+        0.026611328125
+      ],
+      "expert_load_pilot": [
+        0.322509765625,
+        0.020263671875,
+        0.06787109375,
+        0.3408203125,
+        0.071044921875,
+        0.069091796875,
+        0.07080078125,
+        0.03759765625
+      ],
+      "block_output_cosine": 0.8603326972461066,
+      "block_output_cosine_min": 0.7312909484623686,
+      "block_output_rmse": 0.21364068531991967,
+      "residual_stream_drift": 0.5110284146751712,
+      "activation_source": "seeded N(0,1) tokens x RMSNorm gain block_000.slot_07.block_norm"
+    },
+    "block_000.slot_05.attn_proj_i8.model_width": {
+      "tokens": 4096,
+      "router_top1_agreement": 0.677734375,
+      "router_top2_set_agreement": 0.475830078125,
+      "router_logit_rank_correlation": 0.7434779575892858,
+      "expert_load_distribution_delta": 0.0068359375,
+      "expert_load_js_divergence": 0.0003211878172770235,
+      "expert_load_reference": [
+        0.342529296875,
+        0.021484375,
+        0.059326171875,
+        0.34619140625,
+        0.05859375,
+        0.0576171875,
+        0.06201171875,
+        0.05224609375
+      ],
+      "expert_load_pilot": [
+        0.343994140625,
+        0.025146484375,
+        0.052490234375,
+        0.34130859375,
+        0.05908203125,
+        0.061279296875,
+        0.062744140625,
+        0.053955078125
+      ],
+      "block_output_cosine": 0.8672657790184625,
+      "block_output_cosine_min": 0.8213046107654381,
+      "block_output_rmse": 0.31328528521042653,
+      "residual_stream_drift": 0.4970945891360385,
+      "activation_source": "seeded N(0,1) tokens x RMSNorm gain block_000.slot_07.block_norm"
+    }
+  }
+}

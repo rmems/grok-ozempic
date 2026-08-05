@@ -1,0 +1,125 @@
+{
+  "file": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_only.goz1",
+  "file_size": 22168640,
+  "version": 1,
+  "metadata": {
+    "grok1.architecture": "grok-1",
+    "grok1.attention.head_count": 48,
+    "grok1.attention.head_count_kv": 8,
+    "grok1.block_count": 64,
+    "grok1.context_length": 8192,
+    "grok1.embedding_length": 6144,
+    "grok1.expert_count": 8,
+    "grok1.feed_forward_length": 32768,
+    "oz.gif_threshold": "0.05",
+    "oz.name": "grok-ozempic",
+    "oz.quantization_version": 1
+  },
+  "tensors": [
+    {
+      "name": "block_000.slot_03.attn_proj_i8.narrow",
+      "shape": [
+        6144,
+        1024
+      ],
+      "num_elements": 6291456,
+      "type": "ternary",
+      "histogram": {
+        "zeros": 2117334,
+        "pos": 2085009,
+        "neg": 2089113,
+        "invalid": 0
+      },
+      "sparsity": 0.33654117584228516
+    },
+    {
+      "name": "block_000.slot_04.attn_proj_i8.model_width",
+      "shape": [
+        6144,
+        6144
+      ],
+      "num_elements": 37748736,
+      "type": "ternary",
+      "histogram": {
+        "zeros": 12596418,
+        "pos": 12576958,
+        "neg": 12575360,
+        "invalid": 0
+      },
+      "sparsity": 0.3336911201477051
+    },
+    {
+      "name": "block_000.slot_05.attn_proj_i8.model_width",
+      "shape": [
+        6144,
+        6144
+      ],
+      "num_elements": 37748736,
+      "type": "ternary",
+      "histogram": {
+        "zeros": 12161834,
+        "pos": 12792574,
+        "neg": 12794328,
+        "invalid": 0
+      },
+      "sparsity": 0.3221785757276747
+    },
+    {
+      "name": "block_000.slot_06.attn_proj_i8.narrow",
+      "shape": [
+        6144,
+        1024
+      ],
+      "num_elements": 6291456,
+      "type": "ternary",
+      "histogram": {
+        "zeros": 2047031,
+        "pos": 2122564,
+        "neg": 2121861,
+        "invalid": 0
+      },
+      "sparsity": 0.3253668149312337
+    },
+    {
+      "name": "block_000.slot_07.block_norm",
+      "shape": [
+        6144
+      ],
+      "num_elements": 6144,
+      "type": "f16"
+    },
+    {
+      "name": "block_000.slot_08.block_norm",
+      "shape": [
+        6144
+      ],
+      "num_elements": 6144,
+      "type": "f16"
+    },
+    {
+      "name": "block_000.slot_09.block_norm",
+      "shape": [
+        6144
+      ],
+      "num_elements": 6144,
+      "type": "f16"
+    },
+    {
+      "name": "block_000.slot_10.block_norm",
+      "shape": [
+        6144
+      ],
+      "num_elements": 6144,
+      "type": "f16"
+    },
+    {
+      "name": "block_000.slot_11.router",
+      "shape": [
+        6144,
+        8
+      ],
+      "num_elements": 49152,
+      "type": "f16"
+    }
+  ]
+}

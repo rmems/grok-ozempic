@@ -1,0 +1,314 @@
+# Grok-1 bounded block pilot — run3 planning surface → GOZ1 → route preservation
+
+- **GitHub:** #53
+- **Linear:** RM-222
+- **Beads:** `goz-4ic2` (pilot), `goz-dus0` (int8 dequant export)
+- **Host:** ShipOfTheseus (Linux 7.1.4-200.fc44, 32 cores, 60 GiB RAM, 201 GiB free on `/home`)
+- **Date:** 2026-08-05
+- **Agent:** Claude Code: Fable 5 (xhigh)
+- **Crate version:** 0.2.0
+
+## Question
+
+xai-dissect **run3** ships a planning surface (`quant-plan`, `pilot-selection-plan`,
+`route-preservation-report`) whose runtime gates are all `status: unknown` —
+xai-dissect defines the gates but does not execute a quantization runtime. Can
+`grok-ozempic` pack a real Grok-1 block under that plan, and what are the
+observed route-preservation numbers?
+
+**Answer: yes to the pack, no to the gates.** Both pilots pack cleanly with the
+policy honored exactly, and every route-preservation threshold **fails** by a
+wide margin. The failure is not a tuning miss — it is the information-theoretic
+ceiling of single-scale ternary (§ "Why the gate is unreachable").
+
+## Blocker cleared first: int8 → f32 dequant export (`goz-dus0`)
+
+Official `ckpt-0` ships every attention projection and MoE expert as
+`__main__.QuantizedWeight8bit`, and the float stream rejects int8
+(`SourceDtype::Other`). New: **`scripts/export_grok1_int8_npy.py`**.
+
+Observed on-disk layout (recovered with `pickletools.genops`; the shard is
+**never unpickled**, so no `STACK_GLOBAL` target is ever imported or called):
+
+```text
+__main__.QuantizedWeight8bit
+  .weight  ndarray int8       ( *lead, K, N )
+  .scales  ndarray bfloat16   ( *lead, G, N )    K % G == 0
+```
+
+Scales are **grouped along the contracting axis** `K`: group `g` covers rows
+`[g·K/G, (g+1)·K/G)`. `G` is the tensor-parallel shard count of that axis in the
+original 8-way checkpoint — `G = 8` where `K` was sharded, `G = 1` where the
+output axis `N` was sharded instead.
+
+```text
+w_f32 = weight.reshape(*lead, G, K//G, N) * scales[..., :, None, :]
+```
+
+Block 0 layout, as parsed:
+
+| structural name | weight | scales | G |
+|---|---|---|---|
+| `block_000.slot_00.moe_expert.gate` | int8 `(8, 6144, 32768)` | bf16 `(8, 1, 32768)` | 1 |
+| `block_000.slot_01.moe_expert.down` | int8 `(8, 32768, 6144)` | bf16 `(8, 8, 6144)` | 8 |
+| `block_000.slot_02.moe_expert.up` | int8 `(8, 6144, 32768)` | bf16 `(8, 1, 32768)` | 1 |
+| `block_000.slot_03.attn_proj_i8.narrow` | int8 `(6144, 1024)` | bf16 `(1, 1024)` | 1 |
+| `block_000.slot_04.attn_proj_i8.model_width` | int8 `(6144, 6144)` | bf16 `(8, 6144)` | 8 |
+| `block_000.slot_05.attn_proj_i8.model_width` | int8 `(6144, 6144)` | bf16 `(1, 6144)` | 1 |
+| `block_000.slot_06.attn_proj_i8.narrow` | int8 `(6144, 1024)` | bf16 `(1, 1024)` | 1 |
+| `block_000.slot_07..10.block_norm` | f32 `(6144,)` | — | passthrough |
+| `block_000.slot_11.router` | f32 `(6144, 8)` | — | passthrough |
+
+**Correctness evidence.** The dequant was validated **bit-exact** against
+ground truth obtained by genuinely unpickling three shards with a stub
+`QuantizedWeight8bit` and `ml_dtypes` — covering the grouped (`G=8`),
+ungrouped (`G=1`) and f32-passthrough cases:
+
+```text
+tensor00005_000: int8(6144, 1024) x bfloat16(1, 1024)   -> bit-exact=True
+tensor00006_000: int8(6144, 6144) x bfloat16(8, 6144)   -> bit-exact=True
+tensor00013_000: plain float32(6144, 8)                 -> bit-exact=True
+tensor00009_000: plain float32(6144,)                   -> bit-exact=True
+```
+
+23 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
+`.github/workflows/python-scripts.yml`) cover the opcode scanner, the grouping
+rule and its rejections, chunk-invariance, header alignment, and mode selection.
+
+> **Dependency note.** Unlike `export_grok1_embedding_npy.py` (stdlib-only,
+> byte-copy), dequantization is real arithmetic over up to 1.6e9 elements, so
+> this script **requires numpy** — already a CI dependency of the Python-scripts
+> workflow. Writes are chunked; peak RSS tracks `--chunk-mib`, not tensor size.
+
+## Pack policy (run3 quant-plan, enforced not assumed)
+
+`scripts/block_pilot_goz1.sh` derives the pilot manifest **at runtime** from the
+in-tree V2 structural manifest; nothing under `dissect/` is modified and no
+xai-dissect schema field is invented. The deriver **hard-fails** if a preserve
+rule names a family not in run3's `keep_fp32`, or a ternary candidate names a
+family not in `pilot_quantize`.
+
+| Tier | Families | Treatment |
+|---|---|---|
+| preserve | `router`, `block_norm`, `final_norm` | never ternary, no τ |
+| ternary | `attn_proj_i8.*` | τ = **0.4** |
+| ternary | `moe_expert.*` | τ = **0.9** |
+| deferred | `token_embedding` | **dropped from candidates** — a stray embedding npy hard-errors instead of packing |
+
+τ values come from the #51 / RM-201 per-tier table (attention 0.3–0.5,
+experts 0.65–1.12 for the 50–75 % event-driven band). `defaults.gif_threshold`
+is stripped and per-tensor τ set instead, because defaults silently outrank CLI
+`--gif-threshold` (the #51 τ trap, `src/core/precision.rs::resolve_threshold`).
+
+## Results
+
+Both pilots on **block 0** (pilot-selection-plan rationale: *early baseline*).
+
+| Mode | Source npy | Pack `file_size` | ternary | fp16/preserve | export wall | pack wall | pack max RSS |
+|---|---|---|---|---|---|---|---|
+| `attention_only` | 0.328 GiB | 22,168,640 | 4 | 5 | 0.25 s | 0.58 s | 299 MiB |
+| `attention_plus_expert` | 18.328 GiB | 1,230,128,448 | 7 | 5 | 14.76 s | 33.49 s | 12.37 GiB |
+
+Both verified: `GOZ1 verify ok: version=1, N tensor header(s), file_size=…`.
+
+**Preserve/ternary counters match intent exactly.** In both modes the 5
+preserve-tier tensors are the 4 `block_norm` vectors plus the router; **no
+router or norm was ternaryized**, and no expert/attention tensor escaped
+quantization.
+
+### Measured sparsity (exact trit counts read back from the packs)
+
+| Tensor | τ | zeros | zeros % |
+|---|---|---|---|
+| `slot_00.moe_expert.gate` | 0.9 | 1,051,486,556 | 65.28 |
+| `slot_01.moe_expert.down` | 0.9 | 1,026,408,312 | 63.73 |
+| `slot_02.moe_expert.up` | 0.9 | 1,037,831,274 | 64.44 |
+| `slot_03.attn_proj_i8.narrow` | 0.4 | 2,117,334 | 33.65 |
+| `slot_04.attn_proj_i8.model_width` | 0.4 | 12,596,418 | 33.37 |
+| `slot_05.attn_proj_i8.model_width` | 0.4 | 12,161,834 | 32.22 |
+| `slot_06.attn_proj_i8.narrow` | 0.4 | 2,047,031 | 32.54 |
+
+Experts land in the 63–65 % band — inside #51's 50–75 % event-driven target.
+Invalid `0b11` trit codes: **0** in every tensor.
+
+> ⚠ **`oz.gif_threshold` metadata is wrong for per-tensor τ.** Both packs record
+> `oz.gif_threshold = "0.05"` (the CLI default) while the τ that actually applied
+> was 0.4 / 0.9. The metadata only records `defaults || config`, so it cannot see
+> per-tensor overrides — the exact blind spot #51 flagged. The sparsity above is
+> the trustworthy evidence (4 % zeros would indicate τ=0.05; 33 %/65 % confirms
+> 0.4/0.9). Tracked as a follow-up.
+
+### Route-preservation surface — `unknown` → observed
+
+Filling run3's `route-preservation-report.json` gates for block 0. Reference =
+the dequantized f32 npy; pilot = tensors **read back out of the pack** (trits for
+ternary, fp16 for preserve, so the preserve tier's own round-trip error is
+included). Worst case over the two evaluated `model_width` projections.
+
+| Metric | Scope | Threshold | Observed | Status |
+|---|---|---|---|---|
+| `router_top1_agreement` | router_behavior | ≥ 99.0 % | **67.77 %** | ❌ fail |
+| `router_top2_set_agreement` | router_behavior | ≥ 99.5 % | **47.58 %** | ❌ fail |
+| `block_output_cosine` | block_behavior | ≥ 0.995 | **0.8603** | ❌ fail |
+| `expert_load_distribution_delta` | router_behavior | — | 0.0293 | measured |
+| `expert_load_js_divergence` | router_behavior | — | 0.00828 bits | measured |
+| `router_logit_rank_correlation` | router_behavior | — | 0.7435 | measured |
+| `block_output_rmse` | block_behavior | — | 0.3133 | measured |
+| `residual_stream_drift` | block_behavior | — | 0.5110 | measured |
+| `weight_reconstruction_mse` | weight_reconstruction | — | 1.426e-4 | measured |
+| `weight_cosine_similarity` | weight_reconstruction | — | 0.8597 | measured |
+| `weight_max_absolute_error` | weight_reconstruction | — | 0.7098 | measured |
+| `per_channel_scale_error_summary` | weight_reconstruction | — | 0.6915 | measured |
+| `logit_kl` | model_behavior | — | null | **unknown** |
+| `perplexity_delta` | model_behavior | — | null | **unknown** |
+| `generation_sanity_summary` | model_behavior | — | null | **unknown** |
+
+12 of 15 metrics now carry observed values. The three `model_behavior` metrics
+stay `unknown`: they need whole-model inference, an explicit #53 non-goal.
+
+Per-projection routing detail (4096 tokens, seed 20260805):
+
+| Projection | top-1 | top-2 set | rank corr | out cosine (mean / min) | load JS |
+|---|---|---|---|---|---|
+| `slot_04.attn_proj_i8.model_width` | 78.08 % | 57.25 % | 0.8093 | 0.8603 / 0.7313 | 0.00828 |
+| `slot_05.attn_proj_i8.model_width` | 67.77 % | 47.58 % | 0.7435 | 0.8673 / 0.8213 | 0.00032 |
+
+Top-1 expert load, `slot_04` (reference → pilot):
+
+```text
+ref   [0.3254, 0.0359, 0.0903, 0.3345, 0.0417, 0.0920, 0.0535, 0.0266]
+pilot [0.3225, 0.0203, 0.0679, 0.3408, 0.0710, 0.0691, 0.0708, 0.0376]
+```
+
+The aggregate load distribution barely moves (JS ≈ 0.008 bits) while **per-token
+routing flips ~22–32 % of the time**. A load-balance check alone would have
+called this healthy — the per-token agreement gates are what catch it.
+
+Preserve-tier fp16 round-trip (GOZ1 v1 stores the preserve tier as fp16-at-rest,
+so run3's `keep_fp32` is honored *as a tier*, not as f32 bits):
+
+| Tensor | max abs err | relative RMSE |
+|---|---|---|
+| `slot_11.router` | 6.01e-05 | 2.09e-04 |
+| `slot_07..10.block_norm` | 8.30e-04 … 1.93e-03 | ~2.0e-04 |
+
+Router perturbation is ~2e-4 relative — four orders of magnitude smaller than the
+routing drift, confirming the flips come from the **quantized projection input**,
+not from the preserved router itself.
+
+#### Measurement scope (read before quoting these numbers)
+
+- **Activations are synthetic**: seeded standard-normal tokens passed through the
+  block's *real* RMSNorm gain vector. No calibration corpus exists offline, so
+  these are **weight-perturbation** route-preservation numbers, not corpus
+  perplexity.
+- **`block_output_cosine` is scoped to a single projection's output**, not a full
+  block forward. xai-dissect labels the attention projections
+  `attn_proj_i8.narrow` / `.model_width` with policy `wrap_existing_int8_unknown`
+  — it assigns **no q/k/v/o roles**. Rather than invent a role mapping, both
+  `model_width` projections are evaluated independently and both reported. MoE
+  expert routing is not executed.
+- **Ternary reconstruction uses the least-squares optimal scale**
+  `α = Σ|w| over fired / count(fired)`. GOZ1 v1 stores no per-tensor scale, so
+  these are **best-case** numbers for this container. `cos(w, α·t)` is
+  independent of `α`, so the cosine figures hold for any positive scale.
+
+## Why the gate is unreachable (not a tuning miss)
+
+Sweeping τ over the attention projections — weight cosine, projection-output
+cosine, and router agreement (numpy pass over the exported npy, 4096 tokens):
+
+| τ | zeros % | w_cos `slot_04` | top-1 `slot_04` | w_cos `slot_05` | top-1 `slot_05` |
+|---|---|---|---|---|---|
+| 0.0 | 0.00 | 0.7674 | 74.19 % | 0.7865 | 57.62 % |
+| 0.2 | ~16.8 | 0.8241 | 76.00 % | 0.8428 | 63.53 % |
+| 0.4 | ~32.8 | 0.8597 | 78.08 % | 0.8785 | 67.77 % |
+| **0.6** | ~47.3 | **0.8722** | 79.22 % | **0.8917** | 69.58 % |
+| 0.7 | ~53.9 | 0.8699 | 79.03 % | 0.8899 | 68.85 % |
+| 0.8 | ~60.0 | 0.8621 | 79.32 % | 0.8826 | 67.97 % |
+| 1.0 | ~70.5 | 0.8320 | 79.17 % | 0.8530 | 65.89 % |
+
+Weight cosine peaks at **τ ≈ 0.6** and tops out near **0.89**. For reference, the
+analytic ceiling for single-scale ternary on a Gaussian matrix is
+
+```text
+max_τ  E[|z|·1{|z|>τ}] / sqrt(P(|z|>τ))  =  0.899903   at τ = 0.612·σ
+```
+
+Measured 0.8722 (`slot_04`, kurtosis 8.21 — heavy-tailed, so below the Gaussian
+ceiling) and 0.8917 (`slot_05`, kurtosis 3.42 — near-Gaussian, essentially at the
+ceiling). The measurement matches theory, which is itself a check on the harness.
+
+Giving every output channel its own scale — the obvious next lever, and one GOZ1
+v1 cannot express — moves cosine only to **0.8877 / 0.8962** at τ = 0.6. Still
+nowhere near 0.995.
+
+**Conclusion.** A ≥ 0.995 block-output cosine is **not reachable with 2-bit
+ternary at any τ, with or without per-channel scales**; the ceiling is ~0.90.
+Meeting run3's route-preservation gates requires a different mechanism — a
+higher-precision tier for attention, residual/error-feedback quantization, or
+gate thresholds renegotiated for a spiking-sparse target. Ternary remains
+appropriate where the consumer is an event-driven kernel and the gate is
+compute reduction rather than bit-fidelity: the expert tier hits 63–65 % zeros
+at 16× compression, which is exactly what #48 wants from the MoE FLOPs.
+
+## Reproduce
+
+```bash
+cargo build --release --features cli --locked
+
+# run3 handoff (preferred over May run2); tests honor GROK_OZEMPIC_DISSECT_RUN
+export GROK_OZEMPIC_DISSECT_RUN=~/rmems/xai-dissect/out/LATEST_CORRECT_GROK1_RUN
+RUN3="$GROK_OZEMPIC_DISSECT_RUN/manifests/xai-grok-1-ckpt-0"
+
+# whole pilot: dequant export -> derived manifest -> pack --verify -> histogram -> metrics
+BLOCK=0 MODE=attention_only          scripts/block_pilot_goz1.sh
+BLOCK=0 MODE=attention_plus_expert   scripts/block_pilot_goz1.sh
+
+# just the dequant export (any pilot block / mode)
+python3 scripts/export_grok1_int8_npy.py \
+  --conversion-manifest "$RUN3/conversion-manifest.json" \
+  --block 0 --mode attention_plus_expert \
+  --output-dir ~/.models/xai-grok-1/export-npy/block000
+python3 scripts/export_grok1_int8_npy.py --inspect ~/.models/xai-grok-1/ckpt-0/tensor00006_000
+
+# metrics against an existing pack
+python3 scripts/route_preservation_metrics.py \
+  --npy-dir ~/.models/xai-grok-1/export-npy/block000 \
+  --pack ~/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_only.goz1 \
+  --block 0 --mode attention_only --json-out /tmp/route-preservation.json
+
+python3 -m unittest scripts.test_export_grok1_int8_npy -v
+```
+
+Host paths (nothing under `~/.models` is committed):
+
+| Artifact | Path |
+|---|---|
+| Checkpoint | `~/.models/xai-grok-1/ckpt-0/` |
+| run3 handoff | `~/rmems/xai-dissect/out/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (→ `out/grok1_run3_20260802T023050Z`) |
+| Packs, derived manifests, metrics, logs | `~/.models/xai-grok-1/artifacts/block-pilot/` |
+| f32 npy stage | `mktemp` dir under `~/.models/xai-grok-1/`, removed on exit (`KEEP_NPY=1` to keep) |
+
+The τ-sweep and per-channel-ceiling tables came from one-off chunked numpy passes
+over the exported npy (mirroring `quantizer.rs`: `τ = gif_threshold × rms`, then
+trits, then optimal α). numpy is a host-side analysis convenience, not a pipeline
+dependency — consistent with #51.
+
+## Remaining work
+
+Blocks 8, 28, 60 and 63, and the `expert_only` mode, were not run. The block-0
+result is mode- and τ-independent in its conclusion (the ceiling is a property of
+2-bit ternary, not of a block), so the remaining pilots are confirmation rather
+than discovery — but they are still open against #53's full checklist.
+
+## Relation to open work
+
+- **#48 / RM-196 (multi-tensor epic):** the ternary ceiling above is the decisive
+  input — the route-preservation gates need a mechanism change, not a τ sweep.
+- **#51 / RM-201:** per-tier τ table consumed as specified; the τ trap avoided;
+  `oz.gif_threshold` blind spot now demonstrated on a per-tensor manifest.
+- **#40 / RM-191:** the V2 fail-closed bridge is what makes the preserve counters
+  trustworthy — an unmatched name aborts instead of defaulting to ternary.
+- **#50:** event-driven kernels that would cash in the 63–65 % expert sparsity
+  belong to `myelin-accelerator`, not here.

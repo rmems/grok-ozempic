@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   export-npy-tests:
-    name: export_grok1_embedding_npy unittest
+    name: export script unittests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,5 +27,8 @@ jobs:
       - name: Install NumPy (round-trip load check)
         run: python3 -m pip install --user 'numpy>=1.26,<3'
 
-      - name: Unit tests
+      - name: Unit tests (f32 embedding export)
         run: python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+
+      - name: Unit tests (int8 dequant export)
+        run: python3 -m unittest scripts.test_export_grok1_int8_npy -v
