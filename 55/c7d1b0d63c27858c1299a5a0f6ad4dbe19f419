@@ -1,0 +1,28 @@
+scripts/export_grok1_int8_npy.py
+  s_f430523a053518::t_334de1d5f4ce8a 129-140
+  s_f430523a053518::t_e53995cbfbad98 153
+scripts/export_grok1_int8_scan.py
+  s_f430523a053518::t_dc128f4f140d36 549-556,560-564
+scripts/export_grok1_int8_select.py
+  s_f430523a053518::t_c08a77dcbcf796 6
+  s_f430523a053518::t_51c0a3f24ccd1b 159
+  s_f430523a053518::t_57c411ea9c652d 167-173
+  s_f430523a053518::t_8443186d0e7554 95-101,108-113,123-129,134-142
+  s_f430523a053518::t_9d5dcaebe6d5dc 114-122,130,132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "55c7d1b0d63c27858c1299a5a0f6ad4dbe19f419",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
