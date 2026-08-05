@@ -329,7 +329,7 @@ python3 "$REPO/scripts/route_preservation_metrics.py" \
   --conversion-manifest "$RUN3/conversion-manifest.json" \
   --block "$BLOCK" \
   --mode "$MODE" \
-  "${EMBED_ARGS[@]}" \
+  ${EMBED_ARGS[@]+"${EMBED_ARGS[@]}"} \
   --json-out "$ART/$TAG-route-preservation.json" 2>&1 |
   tee "$ART/logs/$TAG-metrics.log"
 PIPESTATUS_COPY=("${PIPESTATUS[@]}")

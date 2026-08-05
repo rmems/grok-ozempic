@@ -266,6 +266,13 @@ not from the preserved router itself.
   — it assigns **no q/k/v/o roles**. Rather than invent a role mapping, both
   `model_width` projections are evaluated independently and both reported. MoE
   expert routing is not executed.
+- **Routing gates are a single-projection proxy, not a full block forward.** The
+  router logits are computed as `h = x @ w` (one attention-projection output)
+  then `l = h @ router`, because this bounded pilot does not run a full block
+  forward to obtain the residual-stream hidden state the real MoE routers consume.
+  The top-1/top-2 agreement, load JS, and decoupling/τ conclusions are therefore
+  relative to that proxy; they bound routing damage under this projection-input
+  assumption, not a claim about the full block's routing behavior.
 - **Ternary reconstruction uses the least-squares optimal scale**
   `α = Σ|w| over fired / count(fired)`. GOZ1 v1 stores no per-tensor scale, so
   these are **best-case** numbers for this container. `cos(w, α·t)` is

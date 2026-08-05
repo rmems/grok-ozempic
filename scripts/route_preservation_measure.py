@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from export_grok1_int8_scan import scan_shard  # noqa: E402
+from export_grok1_int8_scan import ExportError, scan_shard  # noqa: E402
 from route_preservation_io import (  # noqa: E402
     MetricsError,
     read_f16,
@@ -253,7 +253,10 @@ def make_activations_from_embedding(
 
     Returns ``(activations, provenance)``.
     """
-    specs = scan_shard(shard)
+    try:
+        specs = scan_shard(shard)
+    except (ExportError, OSError, ValueError) as exc:
+        raise MetricsError(f"{shard}: cannot read embedding shard: {exc}") from exc
     f32 = [s for s in specs if s.descr == "f4" and len(s.shape) == 2]
     if len(f32) != 1:
         raise MetricsError(
@@ -262,6 +265,11 @@ def make_activations_from_embedding(
         )
     spec = f32[0]
     vocab, d_model = spec.shape
+    if tokens > vocab:
+        raise MetricsError(
+            f"--tokens {tokens} exceeds embedding vocabulary {vocab} in {shard}; "
+            "choose a smaller sample or omit --embedding-shard"
+        )
     if d_model != norm_gain.size:
         raise MetricsError(
             f"{shard}: embedding width {d_model} != block_norm width {norm_gain.size}; "
@@ -270,16 +278,15 @@ def make_activations_from_embedding(
 
     emb = np.memmap(shard, dtype="<f4", mode="r", offset=spec.offset, shape=spec.shape)
     rng = np.random.default_rng(seed)
-    count = min(tokens, vocab)
     # Sorted, distinct row ids: distinct so no token is double-counted, sorted so
     # the memmap reads walk forward through the file.
-    idx = np.sort(rng.choice(vocab, size=count, replace=False))
+    idx = np.sort(rng.choice(vocab, size=tokens, replace=False))
     x = _rmsnorm(np.asarray(emb[idx], dtype=np.float32), norm_gain)
     return x, {
         "source": "token_embedding_rows",
         "shard": str(shard),
         "vocab_size": int(vocab),
-        "rows_sampled": int(count),
+        "rows_sampled": int(tokens),
         "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
         "detail": (
             "block 0's attention input is rmsnorm(embedding lookup), so these are "

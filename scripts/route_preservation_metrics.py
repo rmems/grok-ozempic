@@ -306,6 +306,18 @@ def main(argv: list[str]) -> int:
     return report_gates(result["summary"])
 
 
+def _activation_provenance(args: argparse.Namespace) -> str:
+    """Describe how the routing activation matrix was produced, if routing ran."""
+    if args.mode not in ROUTING_MODES:
+        return (
+            f"routing not evaluated for mode {args.mode}; "
+            "--embedding-shard is not read even if provided"
+        )
+    if args.embedding_shard is not None:
+        return "real token-embedding rows through the block's RMSNorm gain"
+    return "SYNTHETIC seeded standard-normal rows (no --embedding-shard given)"
+
+
 def _pilot_provenance(
     args: argparse.Namespace, metadata: dict, n_ternary: int, n_preserve: int
 ) -> dict:
@@ -324,11 +336,7 @@ def _pilot_provenance(
             "least-squares optimal alpha = sum(|w| fired)/count(fired); "
             "GOZ1 v1 stores no scale"
         ),
-        "activations": (
-            "real token-embedding rows through the block's RMSNorm gain"
-            if args.embedding_shard is not None
-            else "SYNTHETIC seeded standard-normal rows (no --embedding-shard given)"
-        ),
+        "activations": _activation_provenance(args),
     }
 
 
