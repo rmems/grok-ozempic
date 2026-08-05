@@ -16,10 +16,16 @@ xai-dissect defines the gates but does not execute a quantization runtime. Can
 `grok-ozempic` pack a real Grok-1 block under that plan, and what are the
 observed route-preservation numbers?
 
-**Answer: yes to the pack, no to the gates.** Both pilots pack cleanly with the
-policy honored exactly, and every route-preservation threshold **fails** by a
-wide margin. The failure is not a tuning miss — it is the information-theoretic
-ceiling of single-scale ternary (§ "Why the gate is unreachable").
+**Answer: yes to the pack, no to the gates — but the routing margin is narrow and
+the measurement is a lower bound.** Both pilots pack cleanly with the policy
+honored exactly, and every route-preservation threshold **fails**.
+
+Two separate results, with different confidence:
+
+| Result | Confidence |
+|---|---|
+| **Weight reconstruction is capped at ~0.90 cosine.** Analytic and measured, activation-independent. `block_output_cosine ≥ 0.995` is unreachable by 2-bit ternary at any τ. | **High** — theory and measurement agree |
+| **Router agreement fails 99.0 % / 99.5 %.** Direct-path measurement says 63.96 % / 42.11 %; a residual-inclusive estimate under the most favorable assumptions reaches 96.97 % / 94.26 %. Both fail, but the honest gap is ~2 pts (top-1) and ~5 pts (top-2), not the 35 pts the summary table implies. | **Medium** — the pilot does not run a block forward pass; see § "The routing numbers above are a pessimistic lower bound" |
 
 Routing is measured against **real block-0 activations** — rows of the actual
 token embedding through this block's own RMSNorm gain, which is exactly what
@@ -123,6 +129,31 @@ family not in `pilot_quantize`.
 experts 0.65–1.12 for the 50–75 % event-driven band). `defaults.gif_threshold`
 is stripped and per-tensor τ set instead, because defaults silently outrank CLI
 `--gif-threshold` (the #51 τ trap, `src/core/precision.rs::resolve_threshold`).
+
+### The preserve tier is not a guess — run3 scores it
+
+`exports/xai-grok-1-ckpt-0/saaq-readiness.json` ranks all 770 tensors. Every one
+of the **13 tensors it labels `risky_tensors` is a router**, and all 64 routers
+carry `disposition: avoid_for_now` with risk 0.651–0.727 — the highest in the
+model. By contrast the block-0 tensors this pilot quantized score risk
+0.154–0.163 with `disposition: potential_compression_target`:
+
+| Tensor | rank (of 448) | readiness | risk |
+|---|---|---|---|
+| `slot_01.moe_expert.down` | 91 | 0.188 | 0.157 |
+| `slot_02.moe_expert.up` | 188 | 0.188 | 0.158 |
+| `slot_00.moe_expert.gate` | 192 | 0.187 | 0.163 |
+| `slot_04.attn_proj_i8.model_width` | 249 | 0.166 | 0.154 |
+| `slot_05.attn_proj_i8.model_width` | 296 | 0.165 | 0.158 |
+| `slot_03.attn_proj_i8.narrow` | 334 | 0.163 | 0.157 |
+| `slot_06.attn_proj_i8.narrow` | 419 | 0.162 | 0.158 |
+
+So "preserve the routers" is a scored conclusion (4.3–4.7× the risk of anything
+this pilot touched), not a convention — and the pack's preserve counters
+enforcing it is the load-bearing safety property, independent of how the gates
+came out. Worth noting block 0's tensors rank 91–419 of 448, i.e. mid-to-low:
+run3 picked it as *early baseline*, not as a favourable case (the top candidate
+model-wide is `block_030.slot_01.moe_expert.down`).
 
 ## Results
 
@@ -244,6 +275,61 @@ Router perturbation is ~2e-4 relative — four orders of magnitude smaller than 
 routing drift, confirming the flips come from the **quantized projection input**,
 not from the preserved router itself.
 
+#### ⚠ The routing numbers above are a pessimistic lower bound
+
+The metrics script measures `activations → projection → router`. The real block-0
+path has two terms it omits, both of which *dilute* the quantization
+perturbation before the router sees it:
+
+1. **The residual stream.** Grok-1 is pre-norm with a residual add, so the
+   router's input is `rmsnorm(h + attn_out)`, not `attn_out`. The full-magnitude
+   `h` term is untouched by quantization and dominates the sum.
+2. **A second norm.** `xai-dissect`'s inventory shows **four** `block_norm`
+   tensors per block (slots 7–10) with materially different RMS (0.7345, 0.9650,
+   0.2875, 0.5360), i.e. sandwich norm — pre *and* post for both attention and
+   MoE. The router reads a different norm than the projection input does.
+
+Measured offline with the real tensors, feeding the embedding rows through
+`h1 = h0 + postnorm(attn_in @ W)` and then `prenorm(h1) @ router`:
+
+| Path | top-1 `slot_04` | top-1 `slot_05` |
+|---|---|---|
+| direct (what the table above reports) | 68.63 % | 63.96 % |
+| + residual, norms (post=8, pre=9) | 70.24 % | 83.86 % |
+| + residual, norms (post=9, pre=8) | **90.65 %** | **95.36 %** |
+
+**xai-dissect does not disambiguate which of the four norms plays which role**,
+and the two orderings differ by 20 points, so no single residual-inclusive number
+is publishable as authoritative. That is why the summary table keeps the direct
+path: it is what the tool actually measures, reproducibly, and it *bounds* the
+answer from below.
+
+Sweeping τ under the **most favorable** combination (residual included, best norm
+assignment):
+
+| τ | top-1 `slot_04` | top-2 `slot_04` | top-1 `slot_05` | top-2 `slot_05` |
+|---|---|---|---|---|
+| 0.4 | 90.65 % | 84.35 % | 95.36 % | 93.36 % |
+| 0.8 | 92.43 % | 86.04 % | 96.41 % | 93.70 % |
+| **1.0** | 92.07 % | 85.03 % | **96.97 %** | 94.14 % |
+| 1.2 | 90.89 % | 81.69 % | 96.83 % | 92.70 % |
+| 2.0 | 81.25 % | 67.70 % | 91.99 % | 85.99 % |
+
+**The gates still fail — but narrowly, and the margin claim in the summary is
+overstated.** Best case anywhere: **96.97 % top-1** against 99.0 %, and
+**94.26 % top-2** against 99.5 %. Top-2 set agreement is the binding constraint,
+missing by ~5 points where top-1 misses by ~2.
+
+That changes the engineering implication materially. A 2-point top-1 gap is
+plausibly closable — a higher-precision tier for one projection, error-feedback
+quantization, or a τ chosen for routing rather than reconstruction — whereas the
+direct-path 63.96 % reads as hopeless. **Settling this needs a real forward pass**
+(attention mixing with RoPE and softmax, which this pilot does not implement) and
+the norm role assignment, both tracked on #59.
+
+Attention mixing is the remaining approximation even in the favorable variant:
+`attn_out` is modelled as `attn_in @ W`, skipping `softmax(QK^T)V`.
+
 #### Measurement scope (read before quoting these numbers)
 
 - **Activations are real, for the block that was piloted.** A decoder block
@@ -261,11 +347,17 @@ not from the preserved router itself.
   hard-errors for `--block != 0` rather than quietly mislabeling synthetic rows
   as real (#59).
 - **`block_output_cosine` is scoped to a single projection's output**, not a full
-  block forward. xai-dissect labels the attention projections
-  `attn_proj_i8.narrow` / `.model_width` with policy `wrap_existing_int8_unknown`
-  — it assigns **no q/k/v/o roles**. Rather than invent a role mapping, both
-  `model_width` projections are evaluated independently and both reported. MoE
-  expert routing is not executed.
+  block forward. xai-dissect labels the attention projections only by width
+  (`narrow` / `model_width`, policy `wrap_existing_int8_unknown`) — it assigns
+  **no q/k/v/o roles**. Rather than invent a mapping, both `model_width`
+  projections are evaluated independently and both reported. MoE expert routing
+  is not executed.
+  The shapes do narrow it down, though: Grok-1 is grouped-query attention
+  (48 heads × 128 = 6144; 8 KV heads × 128 = 1024), so the two `narrow`
+  projections are K and V, and the two `model_width` ones are **Q and the output
+  projection**. Only the output projection's result enters the residual stream the
+  router reads — so of the two rows reported, one is a structurally meaningful
+  routing path and the other is not, and which is which is unresolved.
 - **Routing gates are a single-projection proxy, not a full block forward.** The
   router logits are computed as `h = x @ w` (one attention-projection output)
   then `l = h @ router`, because this bounded pilot does not run a full block
@@ -345,9 +437,13 @@ any τ, with or without per-channel scales**; the ceiling is ~0.90. The gate is
 named `block_output_cosine` upstream, but what was measured is one projection's
 output, not a full block forward — see "Measurement scope" above. That scope is
 empirical — it is not a universal claim about all 2-bit ternary weight matrices.
-Router agreement is bounded even harder: the best top-1 anywhere in the extended
-τ sweep is **79.81 %** against a 99.0 % gate, and it *falls* on either side of
-τ ≈ 1.2.
+Router agreement is a **weaker** claim than the cosine ceiling, not a stronger
+one. On the direct path the best top-1 anywhere in the extended τ sweep is
+79.81 %, but that path omits the residual stream and the second norm; with those
+included under the most favorable norm assignment it reaches **96.97 %** against
+the 99.0 % gate (top-2: 94.26 % against 99.5 %). The gates still fail, but by
+~2–5 points, not by 20+. Do not quote the direct-path routing numbers as the
+size of the gap.
 
 Meeting run3's route-preservation gates requires a different mechanism — a
 higher-precision tier for attention, residual/error-feedback quantization, or
@@ -363,8 +459,18 @@ worth carrying into #48's acceptance design:
    load balance *is* a usable signal here — the opposite of what the Gaussian
    run implied.
 2. **Output cosine does not track routing.** `slot_05` posts 0.9630 cosine and
-   still misroutes 36 % of tokens, so a cosine-only gate is not a safe proxy for
-   the router-behavior gates.
+   still misroutes 36 % of tokens on the direct path, so a cosine-only gate is not
+   a safe proxy for the router-behavior gates. (Its residual-inclusive misroute
+   rate is 3–16 %, which is the honest figure — the decoupling direction holds
+   either way, since 0.9630 cosine does not buy 99 % routing.)
+
+And one thing reading the xai-dissect run itself changed, independent of
+activations: the routing measurement omits the residual stream and the second
+block norm, so the reported router numbers are a **lower bound**, and the real
+gap to the gates is ~2–5 points rather than 20+. That reframes the ask on #48
+from "ternary cannot do this" to "ternary is a couple of points short on routing
+while structurally capped on reconstruction fidelity" — a different engineering
+decision. Resolving it needs a forward pass (#59).
 
 ## Reproduce
 
@@ -404,6 +510,7 @@ Host paths (nothing under `~/.models` is committed):
 |---|---|
 | Checkpoint | `~/.models/xai-grok-1/ckpt-0/` |
 | run3 handoff | `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (→ `grok1_run3_20260802T023050Z`) |
+| run3 `exports/` (per-tensor stats, risk scores) | same run root, `exports/xai-grok-1-ckpt-0/` — `saaq-readiness.json`, `stats.json`, `routing-report.json`, `inventory.json` |
 | Packs, derived manifests, metrics, logs | `~/.models/xai-grok-1/artifacts/block-pilot/` |
 | f32 npy stage | `mktemp` dir under `~/.models/xai-grok-1/`, removed on exit (`KEEP_NPY=1` to keep) |
 
