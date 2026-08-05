@@ -1,0 +1,21 @@
+scripts/test_export_grok1_int8_select.py
+  s_f430523a053518::t_3489da259e71fe 1-250
+.github/workflows/python-scripts.yml
+  s_f430523a053518::t_ab62409e736ee1 36-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "9317c11139df3f3a6c4b3bf5d0843af4774ec214",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
