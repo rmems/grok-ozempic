@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from export_grok1_int8_scan import ExportError
@@ -91,49 +92,54 @@ def load_manifest(path: Path) -> list[dict]:
     return tensors
 
 
-_REQUIRED_TENSOR_KEYS = ("structural_name", "source_shard_path", "shape")
+# Required keys and the type each must carry, checked declaratively so adding a
+# key does not add a branch.
+_REQUIRED_TENSOR_KEYS: dict[str, tuple[type, ...]] = {
+    "structural_name": (str,),
+    "source_shard_path": (str,),
+    "shape": (list, tuple),
+}
 
 
 def _validate_entries(path: Path, tensors: list) -> None:
     """Reject entries the exporter would otherwise fail on far from the cause."""
     seen: set[str] = set()
     for i, t in enumerate(tensors):
-        if not isinstance(t, dict):
-            raise ExportError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
-        missing = [k for k in _REQUIRED_TENSOR_KEYS if k not in t]
-        if missing:
+        _validate_entry(path, i, t, seen)
+
+
+def _validate_entry(path: Path, i: int, t: object, seen: set[str]) -> None:
+    if not isinstance(t, dict):
+        raise ExportError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
+    _require_keys(path, i, t)
+    name = t["structural_name"]
+    if name in seen:
+        raise ExportError(f"{path}: duplicate structural_name {name!r} at tensors[{i}]")
+    seen.add(name)
+    _validate_shape(path, i, t["shape"])
+
+
+def _require_keys(path: Path, i: int, t: dict) -> None:
+    missing = [k for k in _REQUIRED_TENSOR_KEYS if k not in t]
+    if missing:
+        raise ExportError(
+            f"{path}: tensors[{i}] missing required key(s): {', '.join(missing)}"
+        )
+    for key, want in _REQUIRED_TENSOR_KEYS.items():
+        if not isinstance(t[key], want):
+            names = " or ".join(w.__name__ for w in want)
             raise ExportError(
-                f"{path}: tensors[{i}] missing required key(s): {', '.join(missing)}"
+                f"{path}: tensors[{i}].{key} is {type(t[key]).__name__}, expected {names}"
             )
-        name = t["structural_name"]
-        if not isinstance(name, str):
-            raise ExportError(
-                f"{path}: tensors[{i}].structural_name is {type(name).__name__}, "
-                "expected a string"
-            )
-        if name in seen:
-            raise ExportError(
-                f"{path}: duplicate structural_name {name!r} at tensors[{i}]"
-            )
-        seen.add(name)
-        shard = t["source_shard_path"]
-        if not isinstance(shard, str):
-            raise ExportError(
-                f"{path}: tensors[{i}].source_shard_path is {type(shard).__name__}, "
-                "expected a string"
-            )
-        shape = t["shape"]
-        if not isinstance(shape, (list, tuple)):
-            raise ExportError(
-                f"{path}: tensors[{i}].shape is {type(shape).__name__}, "
-                "expected a list of ints"
-            )
-        try:
-            tuple(int(d) for d in shape)
-        except (TypeError, ValueError) as exc:
-            raise ExportError(
-                f"{path}: tensors[{i}].shape {shape!r} is not a list of ints"
-            ) from exc
+
+
+def _validate_shape(path: Path, i: int, shape: object) -> None:
+    try:
+        tuple(int(d) for d in shape)  # type: ignore[union-attr]
+    except (TypeError, ValueError) as exc:
+        raise ExportError(
+            f"{path}: tensors[{i}].shape {shape!r} is not a list of ints"
+        ) from exc
 
 
 def select_tensors(
@@ -150,17 +156,19 @@ def select_tensors(
 
 
 def _select_by_names(tensors: list[dict], names: list[str]) -> list[dict]:
-    if len(names) != len(set(names)):
-        counts: dict[str, int] = {}
-        for n in names:
-            counts[n] = counts.get(n, 0) + 1
-        dups = [n for n, c in counts.items() if c > 1]
-        raise ExportError(f"duplicate --structural-name entries: {', '.join(sorted(dups))}")
+    _reject_repeated(names)
     by_name = {t["structural_name"]: t for t in tensors}
     missing = [n for n in names if n not in by_name]
     if missing:
         raise ExportError(f"structural names not in manifest: {', '.join(missing)}")
     return [by_name[n] for n in names]
+
+
+def _reject_repeated(names: list[str]) -> None:
+    """A name given twice would export the same tensor twice under one stem."""
+    dups = sorted({n for n, c in Counter(names).items() if c > 1})
+    if dups:
+        raise ExportError(f"duplicate --structural-name entries: {', '.join(dups)}")
 
 
 def _select_by_block(tensors: list[dict], block: int | None, mode: str) -> list[dict]:

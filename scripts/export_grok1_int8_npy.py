@@ -126,6 +126,18 @@ def run_exports(picked: list[dict], output_dir: Path, chunk_mib: int, dry_run: b
     return total
 
 
+def _validate_export_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject argument combinations that cannot produce a well-defined export."""
+    if not args.conversion_manifest:
+        parser.error("--conversion-manifest is required (or use --inspect)")
+    if not args.output_dir:
+        parser.error("--output-dir is required")
+    if args.block is None and not args.names:
+        parser.error("need --block (with --mode) or at least one --structural-name")
+    if args.chunk_mib <= 0:
+        parser.error("--chunk-mib must be a positive integer")
+
+
 def main(argv: list[str]) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -138,14 +150,7 @@ def main(argv: list[str]) -> int:
             )
         return 0
 
-    if not args.conversion_manifest:
-        parser.error("--conversion-manifest is required (or use --inspect)")
-    if not args.output_dir:
-        parser.error("--output-dir is required")
-    if args.block is None and not args.names:
-        parser.error("need --block (with --mode) or at least one --structural-name")
-    if args.chunk_mib <= 0:
-        parser.error("--chunk-mib must be a positive integer")
+    _validate_export_args(parser, args)
 
     picked = select_tensors(
         load_manifest(args.conversion_manifest),

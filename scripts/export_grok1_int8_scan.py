@@ -546,18 +546,22 @@ def _scan_one(mm, base: int, size: int, name: str, state: _HeaderState):
         snap = state.snapshot()
         try:
             spec = _scan_window(mm[base:end], base, name, state)
-        except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
-            if end < size and window < _MAX_SCAN_WINDOW:
-                state.restore(snap)
-                window = min(window * 4, _MAX_SCAN_WINDOW)
-                continue
-            return None, exc
-        if spec is None and end < size and window < _MAX_SCAN_WINDOW:
-            # Nothing found but the window was cut short: grow before concluding.
+            exc = None
+        except (ValueError, IndexError, AssertionError, struct.error, EOFError) as err:
+            spec, exc = None, err
+        if spec is not None:
+            return spec, None
+        # Nothing found (or a parse error): if the window stopped short of EOF it
+        # may simply have cut a payload in half, so grow it and try again.
+        if _can_grow(end, size, window):
             state.restore(snap)
             window = min(window * 4, _MAX_SCAN_WINDOW)
             continue
-        return spec, None
+        return None, exc
+
+
+def _can_grow(end: int, size: int, window: int) -> bool:
+    return end < size and window < _MAX_SCAN_WINDOW
 
 
 def _scan_mmap(mm, size: int, name: str) -> list[ArraySpec]:
