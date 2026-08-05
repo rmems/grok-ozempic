@@ -33,6 +33,9 @@ jobs:
       - name: Unit tests (int8 dequant export)
         run: python3 -m unittest scripts.test_export_grok1_int8_npy -v
 
+      - name: Unit tests (manifest selection + output-path safety)
+        run: python3 -m unittest scripts.test_export_grok1_int8_select -v
+
       - name: Unit tests (route-preservation gates)
         run: python3 -m unittest scripts.test_route_preservation_surface -v
 
