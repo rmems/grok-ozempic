@@ -71,7 +71,7 @@ tensor00013_000: plain float32(6144, 8)                 -> bit-exact=True
 tensor00009_000: plain float32(6144,)                   -> bit-exact=True
 ```
 
-28 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
+38 unit tests (`scripts/test_export_grok1_int8_npy.py`, wired into
 `.github/workflows/python-scripts.yml`) cover the opcode scanner, the grouping
 rule and its rejections, chunk-invariance, header alignment, mode selection, and
 the fail-loud paths: truncated shards, Fortran-ordered arrays, manifest/shard
@@ -87,7 +87,10 @@ disagreement cannot leave a wrong multi-GiB file for a later pack to consume.
 > **Dependency note.** Unlike `export_grok1_embedding_npy.py` (stdlib-only,
 > byte-copy), dequantization is real arithmetic over up to 1.6e9 elements, so
 > this script **requires numpy** — already a CI dependency of the Python-scripts
-> workflow. Writes are chunked; peak RSS tracks `--chunk-mib`, not tensor size.
+> workflow. No tensor is ever fully materialized, but `--chunk-mib` bounds the
+> compute buffer, **not** peak RSS: peak is dominated by source-shard mmap
+> residency (measured 2.03 GiB exporting all of block 0 — see the results table).
+> Size hosts from that number, not from the chunk setting.
 
 ## Pack policy (run3 quant-plan, enforced not assumed)
 
@@ -233,6 +236,17 @@ not from the preserved router itself.
   `(8, 6144, 32768)` has 8 × 32768 channels rather than 32768 pooled across
   experts. Pooling would understate the worst case — it read 0.6915 before this
   was corrected, against 0.7655 measured per-expert.
+- **The RMSNorm gain is one arbitrary choice of four.** A block carries four
+  `block_norm` vectors and upstream assigns none of them a role, so the
+  lowest-numbered slot shapes the activations for *every* projection (recorded
+  per result as `activation_source`). That keeps the comparison internally
+  consistent; it is not a claim about the block's true activation path.
+- **Summary rows are per-metric worst cases and may come from different
+  tensors.** `block_output_cosine` (0.8603, `slot_04`) and `block_output_rmse`
+  (0.3133, `slot_05`) are each the worst over the evaluated projections, so
+  quoting two summary numbers together describes no single tensor. Per-projection
+  values are preserved under `routing` in the JSON — use those when a coherent
+  picture of one projection is needed.
 
 ## Why the gate is unreachable (not a tuning miss)
 
@@ -265,9 +279,11 @@ v1 cannot express — moves cosine only to **0.8877 / 0.8962** at τ = 0.6. Stil
 nowhere near 0.995.
 
 **Conclusion.** For the two `model_width` attention projections evaluated here,
-a ≥ 0.995 block-output cosine is **not reachable with 2-bit ternary at any τ, with
-or without per-channel scales**; the ceiling is ~0.90. That scope is empirical —
-it is not a universal claim about all 2-bit ternary weight matrices.
+a ≥ 0.995 **projection-output** cosine is **not reachable with 2-bit ternary at
+any τ, with or without per-channel scales**; the ceiling is ~0.90. The gate is
+named `block_output_cosine` upstream, but what was measured is one projection's
+output, not a full block forward — see "Measurement scope" above. That scope is
+empirical — it is not a universal claim about all 2-bit ternary weight matrices.
 Meeting run3's route-preservation gates requires a different mechanism — a
 higher-precision tier for attention, residual/error-feedback quantization, or
 gate thresholds renegotiated for a spiking-sparse target. Ternary remains

@@ -10,7 +10,8 @@ it; ``route_preservation_metrics.py`` does the measuring.
 from __future__ import annotations
 
 
-def gate(observed: float, threshold: float, higher_is_better: bool = True) -> str:
+def gate(observed: float | None, threshold: float, higher_is_better: bool = True) -> str:
+    """Status for one thresholded metric; `None` means it was never measured."""
     if observed is None:
         return "unknown"
     ok = observed >= threshold if higher_is_better else observed <= threshold

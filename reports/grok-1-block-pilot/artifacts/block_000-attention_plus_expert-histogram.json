@@ -1,5 +1,4 @@
 {
-  "file": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_plus_expert.goz1",
   "file_size": 1230128448,
   "version": 1,
   "metadata": {
@@ -14,7 +13,7 @@
     "oz.gif_threshold": "0.05",
     "oz.name": "grok-ozempic",
     "oz.quantization_version": 1,
-    "oz.gif_threshold_note": "per-tensor (0.4 attn_proj_i8.*, 0.9 moe_expert.*); pipeline default 0.05"
+    "oz.gif_threshold_note": "per-tensor effective_tau: 0.4 for attn_proj_i8.*, 0.9 for moe_expert.*; pipeline default 0.05"
   },
   "tensors": [
     {
@@ -180,5 +179,6 @@
       "num_elements": 49152,
       "type": "f16"
     }
-  ]
+  ],
+  "file_basename": "block_000-attention_plus_expert.goz1"
 }

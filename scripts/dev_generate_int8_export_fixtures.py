@@ -1,21 +1,38 @@
 #!/usr/bin/env python3
-"""Offline fixture helper (no pickle in-repo).
+"""Point developers at the fixture factory (no pickle usage in this file).
 
-Golden bins live under ``scripts/testdata/export_int8/``. To regenerate
-synthetic pickle frames for unit tests, run the ignored factory module on a
-dev machine:
+The unit tests do **not** load the ``.bin`` corpus under
+``scripts/testdata/export_int8/``: they build synthetic pickle frames in memory
+through ``scripts.testdata.export_int8.shard_factory`` on each run, so there is
+nothing to regenerate for CI to pass. The committed bins are a reference corpus
+for eyeballing real numpy pickle framing.
 
-  python3 -c "from scripts.testdata.export_int8.shard_factory import write_shard; ..."
-
-This file intentionally contains no pickle usage so Codacy stays quiet.
+This module deliberately contains no ``pickle`` import so the scanner-facing
+scripts stay free of deserialization findings; the factory (under ``testdata/``,
+which Codacy ignores) is where that lives.
 """
+
 from __future__ import annotations
 
-def main() -> None:
-    raise SystemExit(
-        "Fixture generation lives in scripts/testdata/export_int8/shard_factory.py "
-        "(excluded from Codacy). Use that module offline."
-    )
+import sys
+
+GUIDANCE = """\
+Fixtures are generated in-memory by the test suite; nothing needs regenerating.
+
+  Run the tests:      python3 -m unittest scripts.test_export_grok1_int8_npy
+  Build a shard:      from scripts.testdata.export_int8.shard_factory import (
+                          write_shard, write_quantized,
+                      )
+
+See scripts/testdata/export_int8/README.md for the numpy-version caveat that
+applies when writing new .bin fixtures.\
+"""
+
+
+def main() -> int:
+    print(GUIDANCE)
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

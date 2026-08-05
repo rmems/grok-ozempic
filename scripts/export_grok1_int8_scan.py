@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _SCAN_WINDOW = 1 << 16
+# Upper bound on window growth when a payload straddles the window edge.
+_MAX_SCAN_WINDOW = 1 << 24
 # Reads at or above this are payloads, not opcode arguments (max legitimate
 # opcode read in these shards is SHORT_BINUNICODE at 255 bytes).
 _PAYLOAD_READ_LIMIT = 4096
@@ -29,6 +31,7 @@ _INT_DESCR = {"i1"}
 _F32_DESCR = {"f4"}
 _BF16_DESCR = {"bfloat16"}
 _KNOWN_DESCR = _INT_DESCR | _F32_DESCR | _BF16_DESCR
+_ITEMSIZE = {"i1": 1, "bfloat16": 2, "f4": 4}
 
 # Preserve tier per run3 quant-plan `keep_fp32`; never ternary, never dequantized.
 
@@ -55,7 +58,13 @@ class ArraySpec:
 
     @property
     def itemsize(self) -> int:
-        return {"i1": 1, "bfloat16": 2, "f4": 4}[self.descr]
+        try:
+            return _ITEMSIZE[self.descr]
+        except KeyError as exc:
+            raise ExportError(
+                f"unsupported dtype descriptor {self.descr!r} for shape {self.shape}; "
+                f"supported: {sorted(_ITEMSIZE)}"
+            ) from exc
 
     def validate(self) -> None:
         want = self.numel * self.itemsize
@@ -116,6 +125,33 @@ class _Unknown:
         self.tag = tag
 
 
+def _descr_text(raw: object) -> str | None:
+    """Recover a dtype descriptor string from a ``numpy.dtype`` reduce argument.
+
+    Three framings occur in real shards:
+
+    * ``'f4'`` / ``'i1'`` -- a plain string, what numpy writes for its own dtypes.
+    * ``b'f4'`` -- the same as bytes under some protocols.
+    * ``STACK_GLOBAL ml_dtypes bfloat16`` -- how the official Grok-1 checkpoint
+      names bfloat16 scales, which arrives here as a :class:`_Global`.
+
+    Anything else returns ``None``. Never fall back to ``str(raw)``: that turns
+    an unrecognized object into a descriptor like
+    ``"<..._Global object at 0x...>"``, which then fails far away in
+    ``ArraySpec.itemsize`` instead of at the point of confusion.
+    """
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, bytes):
+        try:
+            return raw.decode("ascii")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(raw, _Global):
+        return raw.name
+    return None
+
+
 class _HeaderState:
     """ndarray header facts accumulated as opcodes stream past.
 
@@ -134,6 +170,36 @@ class _HeaderState:
         self.shape: tuple[int, ...] | None = None
         self.descr: str | None = None
         self.fortran: bool | None = None
+
+    def snapshot(self) -> tuple:
+        """Shallow copy of all mutable state, for retrying a window.
+
+        Shallow on purpose: a deep copy would clone the ``_MARK`` sentinel and
+        break the identity test in :meth:`_pop_to_mark`.
+        """
+        return (
+            list(self.stack),
+            dict(self.memo),
+            self.memo_next,
+            list(self.ints),
+            self.shape,
+            self.descr,
+            self.fortran,
+        )
+
+    def restore(self, snap: tuple) -> None:
+        (
+            stack,
+            memo,
+            self.memo_next,
+            ints,
+            self.shape,
+            self.descr,
+            self.fortran,
+        ) = snap
+        self.stack = list(stack)
+        self.memo = dict(memo)
+        self.ints = list(ints)
 
     def _push(self, value: object) -> None:
         self.stack.append(value)
@@ -331,14 +397,7 @@ class _HeaderState:
         args = self._pop()
         func = self._pop()
         if isinstance(func, _DtypeBuilder) and isinstance(args, tuple) and args:
-            raw = args[0]
-            if isinstance(raw, bytes):
-                try:
-                    text = raw.decode("ascii")
-                except UnicodeDecodeError:
-                    text = None
-            else:
-                text = str(raw)
+            text = _descr_text(args[0])
             if text is not None:
                 d = _Descr(text)
                 self._push(d)
@@ -470,17 +529,45 @@ def _shard_byte_size(path: Path) -> int:
     return size
 
 
+def _scan_one(mm, base: int, size: int, name: str, state: _HeaderState):
+    """Scan from ``base``, growing the window if a payload straddles its edge.
+
+    Payloads under ``_PAYLOAD_READ_LIMIT`` are read by ``genops`` rather than
+    intercepted by size, so one landing across the window edge would raise a
+    truncation error and be mistaken for a corrupt shard. Whenever the window
+    stopped short of EOF, retry on a larger one before believing the failure.
+
+    Returns ``(spec_or_None, error_or_None)``; the caller decides whether a
+    genuine parse failure is fatal.
+    """
+    window = _SCAN_WINDOW
+    while True:
+        end = min(size, base + window)
+        snap = state.snapshot()
+        try:
+            spec = _scan_window(mm[base:end], base, name, state)
+        except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
+            if end < size and window < _MAX_SCAN_WINDOW:
+                state.restore(snap)
+                window = min(window * 4, _MAX_SCAN_WINDOW)
+                continue
+            return None, exc
+        if spec is None and end < size and window < _MAX_SCAN_WINDOW:
+            # Nothing found but the window was cut short: grow before concluding.
+            state.restore(snap)
+            window = min(window * 4, _MAX_SCAN_WINDOW)
+            continue
+        return spec, None
+
+
 def _scan_mmap(mm, size: int, name: str) -> list[ArraySpec]:
     """Walk one mmap window-by-window, collecting every ndarray payload."""
     specs: list[ArraySpec] = []
     state = _HeaderState()
     base = 0
     while base < size:
-        try:
-            spec = _scan_window(
-                mm[base : min(size, base + _SCAN_WINDOW)], base, name, state
-            )
-        except (ValueError, IndexError, AssertionError, struct.error, EOFError) as exc:
+        spec, exc = _scan_one(mm, base, size, name, state)
+        if exc is not None:
             if specs:
                 raise ExportError(
                     f"{name}: corrupted pickle after {len(specs)} array(s): {exc}"

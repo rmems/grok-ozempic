@@ -231,7 +231,16 @@ def _build_result(
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     _validate_tokens(args)
-    pack_path = args.pack.expanduser().resolve()
+    # Expand every path argument up front. A quoted "~/..." is not expanded by
+    # the shell, and writing the report to a literal directory named "~" would
+    # look like success while the file lands somewhere nobody looks.
+    args.pack = args.pack.expanduser()
+    args.npy_dir = args.npy_dir.expanduser()
+    if args.json_out is not None:
+        args.json_out = args.json_out.expanduser()
+    if getattr(args, "conversion_manifest", None) is not None:
+        args.conversion_manifest = args.conversion_manifest.expanduser()
+    pack_path = args.pack.resolve()
     if args.json_out is not None and _json_out_conflicts_with_pack(args.json_out, pack_path):
         raise MetricsError(
             f"--json-out {args.json_out} resolves to the input pack; "

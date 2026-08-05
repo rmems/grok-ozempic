@@ -25,11 +25,23 @@ def structural_stem(name: str) -> str:
     Rejects path separators, Windows drive letters, and parent-reference
     segments so a malformed conversion manifest cannot write outside
     ``--output-dir``.
+
+    ``__`` is the reserved encoding of ``.`` and is rejected inside a name:
+    without that guard ``a.b`` and ``a__b`` both map to ``a__b``, so two
+    distinct manifest entries would silently overwrite each other's ``.npy``
+    and feed the wrong tensor to the pack. Rejecting keeps the encoding
+    injective, which is what ``npy_stem_to_tensor_name`` assumes on the Rust
+    side.
     """
     if any(sep in name for sep in "/\\"):
         raise ExportError(f"structural name contains path separator: {name!r}")
     if ":" in name:
         raise ExportError(f"structural name contains colon (drive-relative path): {name!r}")
+    if "__" in name:
+        raise ExportError(
+            f"structural name contains the reserved '__' separator: {name!r}; "
+            "'__' encodes '.' in npy stems, so this name is not round-trippable"
+        )
     parts = name.split(".")
     if any(part in ("", "..") for part in parts):
         raise ExportError(
@@ -54,11 +66,35 @@ def _safe_out_path(output_dir: Path, name: str) -> Path:
 
 
 def load_manifest(path: Path) -> list[dict]:
-    with open(path, "rb") as fh:
-        doc = json.load(fh)
+    """Read an xai-dissect conversion manifest, failing closed on bad input.
+
+    Unreadable or malformed manifests surface as ``ExportError`` (clean
+    ``error:`` + exit 2) rather than an ``OSError``/``JSONDecodeError``
+    traceback, so a drifted run3 input is reported the same way as every other
+    rejected layout.
+    """
+    try:
+        with open(path, "rb") as fh:
+            doc = json.load(fh)
+    except OSError as exc:
+        raise ExportError(f"{path}: cannot read conversion manifest: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ExportError(f"{path}: conversion manifest is not valid JSON: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise ExportError(
+            f"{path}: conversion manifest root is {type(doc).__name__}, expected an object"
+        )
     tensors = doc.get("tensors")
     if not isinstance(tensors, list) or not tensors:
         raise ExportError(f"{path}: no `tensors` array (not an xai-dissect conversion manifest?)")
+    for i, t in enumerate(tensors):
+        if not isinstance(t, dict):
+            raise ExportError(f"{path}: tensors[{i}] is {type(t).__name__}, expected an object")
+        missing = [k for k in ("structural_name", "source_shard_path", "shape") if k not in t]
+        if missing:
+            raise ExportError(
+                f"{path}: tensors[{i}] missing required key(s): {', '.join(missing)}"
+            )
     return tensors
 
 

@@ -86,14 +86,16 @@ elif isinstance(plan, dict):
             if key in plan and isinstance(plan[key], list):
                 allowed = [(p.get("block"), p.get("mode")) for p in plan[key] if isinstance(p, dict)]
                 break
-    if not allowed:
-        for k, v in plan.items():
-            if isinstance(v, dict) and "modes" in v:
-                for m in v["modes"]:
-                    allowed.append((int(k) if k.isdigit() else k, m))
-            elif isinstance(v, list):
-                for m in v:
-                    allowed.append((int(k) if k.isdigit() else k, m))
+    # No last-ditch "scrape every top-level key" fallback: it could synthesize a
+    # (block, mode) pair the plan never authorized (any numeric-keyed list of
+    # strings would validate), which is exactly what this fail-closed gate is
+    # here to prevent. An unrecognized schema must abort, not guess.
+if not allowed:
+    sys.exit(
+        f"error: {path} has no recognizable pilot matrix "
+        "(expected `selected_blocks` + `modes`, or a list of {block, mode} objects); "
+        "refusing to validate BLOCK/MODE against an unknown schema"
+    )
 try:
     block_val = int(block)
 except ValueError:
@@ -185,9 +187,17 @@ for e in m["ternary_candidates"]:
 m["ternary_candidates"] = cands
 # Strip the τ trap: defaults.gif_threshold outranks CLI --gif-threshold.
 m["defaults"].pop("gif_threshold", None)
+# The Rust side declares produced_by.version as String with serde(default):
+# a missing key is fine, an explicit null is not. Assert rather than emit null.
+if not isinstance(m["produced_by"].get("version"), str):
+    sys.exit(
+        f"error: {src} produced_by.version is "
+        f"{m['produced_by'].get('version')!r}, expected a string; "
+        "emitting null here would make the derived manifest fail deserialization"
+    )
 m["produced_by"] = {
     "tool": "grok-ozempic scripts/block_pilot_goz1.sh (derived; xai-dissect remains authoritative)",
-    "version": m["produced_by"].get("version"),
+    "version": m["produced_by"]["version"],
     "commit": None,
 }
 json.dump(m, open(dst, "w"), indent=2)
@@ -242,11 +252,13 @@ hist_path, tau_attn, tau_expert = sys.argv[1:4]
 hist = json.load(open(hist_path))
 def kind_of(name):
     return name.split(".", 2)[2] if name.count(".") >= 2 else name
-default = hist["metadata"].get("oz.gif_threshold", "?")
-hist["metadata"]["oz.gif_threshold"] = default
+# Never invent a value: if the pack recorded no oz.gif_threshold, leave the key
+# absent so a reader can tell "pack said nothing" from "pack said X".
+default = hist["metadata"].get("oz.gif_threshold")
+pipeline = f"pipeline default {default}" if default is not None else "no pipeline default recorded"
 hist["metadata"]["oz.gif_threshold_note"] = (
     f"per-tensor effective_tau: {tau_attn} for attn_proj_i8.*, "
-    f"{tau_expert} for moe_expert.*; pipeline default {default}"
+    f"{tau_expert} for moe_expert.*; {pipeline}"
 )
 for t in hist["tensors"]:
     if t["type"] != "ternary":
@@ -319,11 +331,13 @@ rep = json.load(open(path))
 def kind_of(name):
     return name.split(".", 2)[2] if name.count(".") >= 2 else name
 md = rep.setdefault("pilot", {}).setdefault("pack_metadata", {})
-default = md.get("oz.gif_threshold", "?")
-md["oz.gif_threshold"] = default
+# Never invent a value: if the pack recorded no oz.gif_threshold, leave the key
+# absent so a reader can tell "pack said nothing" from "pack said X".
+default = md.get("oz.gif_threshold")
+pipeline = f"pipeline default {default}" if default is not None else "no pipeline default recorded"
 md["oz.gif_threshold_note"] = (
     f"per-tensor effective_tau: {tau_attn} for attn_proj_i8.*, "
-    f"{tau_expert} for moe_expert.*; pipeline default {default}"
+    f"{tau_expert} for moe_expert.*; {pipeline}"
 )
 rep["pilot"]["effective_tau_policy"] = {
     "attn_proj_i8.*": float(tau_attn),
@@ -340,10 +354,48 @@ json.dump(rep, open(path, "w"), indent=2)
 print(f"annotated {path} with per-tensor effective_tau")
 PY
 
+echo "== [5c/5] write publish copies with host-local paths reduced"
+python3 - "$ART/$TAG-histogram.json" "$ART/$TAG-histogram.publish.json" <<'PY'
+import json, os, sys
+
+src, dst = sys.argv[1:3]
+hist = json.load(open(src))
+# `file` is an absolute path under ~/.models that cannot resolve elsewhere.
+if "file" in hist:
+    hist["file_basename"] = os.path.basename(hist.pop("file"))
+json.dump(hist, open(dst, "w"), indent=2)
+print(f"wrote publish copy {dst}")
+PY
+
+python3 - "$ART/$TAG-route-preservation.json" "$ART/$TAG-route-preservation.publish.json" <<'PY'
+import json, os, sys
+
+src, dst = sys.argv[1:3]
+rep = json.load(open(src))
+pilot = rep.get("pilot", {})
+# The working copy keeps absolute paths (useful while debugging on this host).
+# The publish copy is what belongs under reports/: the npy stage is a mktemp dir
+# that no longer exists after the run, and an absolute /home/<user>/... path
+# cannot resolve on any other machine, so committing it implies a
+# reproducibility that does not exist. Basenames + the documented driver command
+# are the honest provenance.
+for key in ("pack", "npy_dir"):
+    if key in pilot:
+        pilot[f"{key}_basename"] = os.path.basename(str(pilot.pop(key)).rstrip("/"))
+pilot["paths_note"] = (
+    "Host-local absolute paths removed for publication; regenerate with "
+    "BLOCK=<n> MODE=<mode> scripts/block_pilot_goz1.sh (the npy stage is a "
+    "per-run mktemp directory deleted on exit)."
+)
+json.dump(rep, open(dst, "w"), indent=2)
+print(f"wrote publish copy {dst}")
+PY
+
 echo
 echo "== pilot artifacts"
 echo "   manifest   $MANIFEST"
 echo "   pack       $PACK"
 echo "   histogram  $ART/$TAG-histogram.json"
 echo "   metrics    $ART/$TAG-route-preservation.json"
+echo "   publish    $ART/$TAG-route-preservation.publish.json  (copy this under reports/)"
 echo "   logs       $ART/logs/$TAG-*.log"

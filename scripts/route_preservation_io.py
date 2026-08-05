@@ -44,21 +44,46 @@ class MetricsError(RuntimeError):
 
 
 def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
-    """Return ``(metadata, {name: entry})`` with absolute payload offsets."""
-    with pack.open("rb") as f:
-        _version, metadata, tensors, data_start = read_header(f)
+    """Return ``(metadata, {name: entry})`` with absolute payload offsets.
+
+    Fails fast on a truncated or malformed pack rather than letting the first
+    ``read_trits``/``read_f16`` discover it mid-measurement, and surfaces the
+    header parser's own errors as ``MetricsError`` so the CLI reports them on
+    its controlled ``error:`` path instead of as a traceback.
+    """
+    try:
+        file_size = pack.stat().st_size
+        with pack.open("rb") as f:
+            _version, metadata, tensors, data_start = read_header(f)
+    except OSError as exc:
+        raise MetricsError(f"{pack}: cannot read pack: {exc}") from exc
+    except Exception as exc:  # Goz1Error and friends from the header parser
+        raise MetricsError(f"{pack}: malformed GOZ1 header: {exc}") from exc
+
     index: dict[str, dict] = {}
     rel = 0
     for t in tensors:
+        name = t["name"]
+        if name in index:
+            raise MetricsError(
+                f"{name}: duplicate tensor name in pack; route metrics would silently "
+                "measure only one of the two payloads"
+            )
         n = _num_elements(t["shape"])
-        nbytes = _payload_nbytes(t["tensor_type"], n, t["name"])
+        nbytes = _payload_nbytes(t["tensor_type"], n, name)
         if t["data_offset"] != rel:
-            raise MetricsError(f"{t['name']}: data_offset {t['data_offset']} != cumulative {rel}")
-        index[t["name"]] = {
+            raise MetricsError(f"{name}: data_offset {t['data_offset']} != cumulative {rel}")
+        abs_offset = data_start + rel
+        if abs_offset + nbytes > file_size:
+            raise MetricsError(
+                f"{name}: payload of {nbytes} bytes at {abs_offset} exceeds pack size "
+                f"{file_size} -- truncated pack"
+            )
+        index[name] = {
             **t,
             "numel": n,
             "nbytes": nbytes,
-            "abs_offset": data_start + rel,
+            "abs_offset": abs_offset,
         }
         rel = _align_up(rel + nbytes, DATA_ALIGNMENT)
     return metadata, index

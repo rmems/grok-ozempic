@@ -26,6 +26,47 @@ _write_shard = _sf.write_shard
 _write_quantized = _sf.write_quantized
 
 
+class StackGlobalDtypeTests(unittest.TestCase):
+    """The real ckpt-0 names bfloat16 via ``STACK_GLOBAL ml_dtypes bfloat16``.
+
+    ``write_quantized`` rewrites the descriptor into a plain string, so it does
+    not exercise that framing. Without these, a scanner that stringifies the
+    global into a junk descriptor passes the whole suite while every real-shard
+    export fails.
+    """
+
+    def _shard(self, td: str):
+        rng = np.random.default_rng(3)
+        w = rng.integers(-128, 128, size=(64, 32), dtype=np.int8)
+        s = rng.random((1, 32), dtype=np.float32) + 0.25
+        p = Path(td) / "s"
+        _sf.write_quantized_global_dtype(p, w, s)
+        return p, w, s
+
+    def test_descriptor_recovered_from_stack_global(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p, w, _s = self._shard(td)
+            specs = exp.scan_shard(p)
+        self.assertEqual([sp.descr for sp in specs], ["i1", "bfloat16"])
+        self.assertEqual(specs[0].shape, w.shape)
+
+    def test_dequant_matches_string_descriptor_framing(self) -> None:
+        """Both framings must produce byte-identical output."""
+        rng = np.random.default_rng(3)
+        w = rng.integers(-128, 128, size=(64, 32), dtype=np.int8)
+        s = rng.random((1, 32), dtype=np.float32) + 0.25
+        with tempfile.TemporaryDirectory() as td:
+            a, b = Path(td) / "a", Path(td) / "b"
+            _sf.write_quantized(a, w, s)
+            _sf.write_quantized_global_dtype(b, w, s)
+            outs = []
+            for shard in (a, b):
+                out = shard.with_suffix(".npy")
+                exp.export_tensor(shard, out)
+                outs.append(np.load(out))
+        np.testing.assert_array_equal(outs[0], outs[1])
+
+
 class ScanShardTests(unittest.TestCase):
     def test_plain_f32(self) -> None:
         a = np.arange(24, dtype="<f4").reshape(4, 6)

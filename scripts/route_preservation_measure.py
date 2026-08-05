@@ -69,7 +69,12 @@ class _TernaryAccumulator:
         self.col_nf[li] += fired.sum(axis=0)
 
     def _per_channel(self) -> dict:
-        """Optimal per-channel alpha and relative error; each holds ``rows`` values."""
+        """Optimal per-channel alpha and relative error.
+
+        Both arrays are shaped ``(lead, cols)`` -- one entry per channel, where
+        a channel is a ``(leading index, last axis)`` pair. ``rows`` is the
+        number of *elements averaged into* each channel, not the array length.
+        """
         with np.errstate(divide="ignore", invalid="ignore"):
             nf = np.maximum(self.col_nf, 1)
             alpha_col = np.where(self.col_nf > 0, self.col_s1f / nf, 0.0)
@@ -332,7 +337,15 @@ def _resolve_router(npy_dir: Path, preserve: dict[str, dict]) -> tuple[str, np.n
 def _resolve_activations(
     npy_dir: Path, preserve: dict[str, dict], d_model: int, tokens: int, seed: int
 ) -> tuple[str, np.ndarray]:
-    """Seeded tokens shaped by the block's real RMSNorm gain."""
+    """Seeded tokens shaped by the block's real RMSNorm gain.
+
+    A Grok-1 block carries four ``block_norm`` vectors and xai-dissect assigns
+    no role to any of them, so there is no principled way to pick the one that
+    actually feeds a given projection. The lowest-numbered slot is used for
+    every projection and recorded in each result's ``activation_source``; the
+    resulting numbers are therefore a consistent weight-perturbation
+    comparison, not a claim about the block's true activation path.
+    """
     norm_name = next((n for n in sorted(preserve) if n.endswith("block_norm")), None)
     if norm_name is None:
         raise MetricsError("no block_norm in pack; cannot build realistic activations")
@@ -361,10 +374,16 @@ def measure_routing(
 
     square = [n for n, e in ternary.items() if list(e["shape"]) == [d_model, d_model]]
     if not square:
-        raise MetricsError(
-            f"no {d_model}x{d_model} projection among the pack's ternary tensors, so no "
-            "routing gate can be evaluated; re-run with a mode that quantizes attention"
+        # A weight-only mode (e.g. expert_only) legitimately has no d_model x
+        # d_model projection. Aborting here would discard the weight and
+        # preserve measurements already computed and force a multi-GiB
+        # re-export, so return empty routing: the summary marks the routing
+        # gates `unknown` and the run still exits non-zero via report_gates.
+        print(
+            f"  note: no {d_model}x{d_model} projection in this pack; routing gates "
+            "stay unknown (weight and preserve metrics are still reported)"
         )
+        return {}
 
     routing: dict[str, dict] = {}
     for name in sorted(square):

@@ -4,8 +4,6 @@
   "pilot": {
     "block": 0,
     "mode": "attention_plus_expert",
-    "pack": "/home/raulmc/.models/xai-grok-1/artifacts/block-pilot/block_000-attention_plus_expert.goz1",
-    "npy_dir": "/home/raulmc/.models/xai-grok-1/block-pilot-stage.2GrvlM/npy",
     "tokens": 4096,
     "seed": 20260805,
     "ternary_tensors": 7,
@@ -14,14 +12,17 @@
       "oz.gif_threshold": "0.05",
       "oz.name": "grok-ozempic",
       "oz.quantization_version": 1,
-      "oz.gif_threshold_note": "per-tensor (0.4 attn_proj_i8.*, 0.9 moe_expert.*); pipeline default 0.05"
+      "oz.gif_threshold_note": "per-tensor effective_tau: 0.4 for attn_proj_i8.*, 0.9 for moe_expert.*; pipeline default 0.05"
     },
     "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
     "activations": "seeded standard-normal tokens shaped by the block's real RMSNorm gain; no calibration corpus",
     "effective_tau_policy": {
       "attn_proj_i8.*": 0.4,
       "moe_expert.*": 0.9
-    }
+    },
+    "pack_basename": "block_000-attention_plus_expert.goz1",
+    "npy_dir_basename": "npy",
+    "paths_note": "Host-local absolute paths removed for publication; regenerate with BLOCK=<n> MODE=<mode> scripts/block_pilot_goz1.sh (the npy stage is a per-run mktemp directory deleted on exit)."
   },
   "summary": [
     {
