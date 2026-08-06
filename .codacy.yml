@@ -17,3 +17,7 @@ exclude_paths:
   - "target/"
   - ".kilo/"
   - ".codacy/"
+  - "docs/"
+  - "scripts/testdata/"
+  - "scripts/testdata/**"
+  - "scripts/dev_generate_int8_export_fixtures.py"

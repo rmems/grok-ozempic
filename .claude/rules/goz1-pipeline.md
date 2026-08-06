@@ -11,7 +11,9 @@ Official Grok-1 `ckpt-0` shards are JAX **pickle**. `quantize-goz1` / `run_quant
 
 ### Export script scope
 
-`scripts/export_grok1_embedding_npy.py` is **stdlib-only**. Defaults target the token embedding on one pickle shard (not a full 770-tensor pack). With `--stem` and layout flags it can export **another single f32 tensor** from a shard — still one file per invocation, not bulk export.
+Two exporters, different jobs — pick by source dtype.
+
+`scripts/export_grok1_embedding_npy.py` is **stdlib-only** and **f32-only**. Defaults target the token embedding on one pickle shard (not a full 770-tensor pack). With `--stem` and layout flags it can export **another single f32 tensor** from a shard — still one file per invocation, not bulk export.
 
 ```bash
 python3 scripts/export_grok1_embedding_npy.py \
@@ -19,7 +21,39 @@ python3 scripts/export_grok1_embedding_npy.py \
   --output-dir "$OUT"
 ```
 
-Default stem mapping: `embedding__slot_00__token_embedding.npy` → logical `embedding.slot_00.token_embedding` (`__` → `.`).
+`scripts/export_grok1_int8_npy.py` (**requires numpy**) handles everything the f32 exporter cannot: official ckpt-0 ships all attention projections and MoE experts as `__main__.QuantizedWeight8bit` (int8 `weight` × bfloat16 `scales`), which the float stream rejects. The **pilot contract** is manifest-driven whole-block export via `--block`/`--mode` (quantized *and* f32 preserve tiers in one invocation). `scripts/block_pilot_goz1.sh` uses only that path.
+
+```bash
+python3 scripts/export_grok1_int8_npy.py \
+  --conversion-manifest "$RUN3/conversion-manifest.json" \
+  --block 0 --mode attention_plus_expert \
+  --output-dir "$OUT"
+```
+
+`--structural-name` (repeatable; may omit `--block`) is a **debug/repair hatch** for re-exporting individual tensors — not part of the pilot contract. Partial exports are fine for inspection or fixing a single bad npy. Do not treat `--structural-name` as the supported production export mode.
+
+⚠ **V2 fail-closed does not detect under-packing.** It rejects an *input name that matches no rule* — a misclassification guard. A tensor that is simply **absent** from the npy directory produces no name to match, so V2 is silent about it and the pack comes out short. Completeness is enforced separately, by explicit inventory and counter checks against the xai-dissect **conversion manifest**:
+
+| Check | Where |
+|-------|-------|
+| Expected ternary / preserve names per block+mode vs pack contents | `scripts/route_preservation_metrics.py` (`_validate_ternary_inventory`, `_validate_preserve_inventory`) |
+| Pack ternary / preserve counters vs the selected mode | `scripts/block_pilot_goz1.sh` step 4b |
+
+Without `--conversion-manifest` the metrics run is **diagnostic-only**: it prints observed values but reports thresholded rows as `diagnostic`, records `certification.certified: false`, and exits non-zero. A kinds-only check cannot certify a gate, because matching the *kinds present* says nothing about whether every expected tensor is there.
+
+Scales are **grouped along the contracting axis**: weight `(*lead, K, N)`, scales `(*lead, G, N)`, `K % G == 0`, so `w_f32 = weight.reshape(*lead, G, K//G, N) * scales[..., :, None, :]`. `G` is the tensor-parallel shard count of that axis (8 when `K` was sharded, 1 when `N` was). Verified bit-exact against unpickled ground truth — see `reports/grok-1-block-pilot/results.md`.
+
+Both use stem mapping `embedding__slot_00__token_embedding.npy` → logical `embedding.slot_00.token_embedding` (`__` → `.`).
+
+### Bounded block pilot
+
+`scripts/block_pilot_goz1.sh` runs the whole #53 loop: dequant export → tier-aware V2 manifest derived at runtime (never mutating `dissect/`) → `quantize-goz1 --verify` → exact trit histogram → route-preservation metrics.
+
+```bash
+BLOCK=0 MODE=attention_plus_expert scripts/block_pilot_goz1.sh
+```
+
+The deriver hard-fails if a preserve rule names a family outside run3's `keep_fp32`, or a ternary candidate names one outside `pilot_quantize`.
 
 ## Real pack recipes
 
@@ -65,8 +99,12 @@ Since #40 / RM-191, **runtime** packs prefer the V2 `structural-manifest.json` w
 | Ternary / fp16-preserve counts | Pack CLI summary line (`… X ternary, Y fp16/preserve`) |
 | Total GOZ1 **file_size** (bytes) | `--verify` line: `GOZ1 verify ok: … file_size=…` |
 | Wall / max RSS | External: `/usr/bin/time -v`, `gtime -v`, or BSD `time -l` |
+| Exact trit counts / sparsity | `scripts/goz1_trit_histogram.py PACK.goz1` |
+| Route-preservation gates | `scripts/route_preservation_metrics.py` (fills run3's `unknown` surface) |
 
 Claim ternary only when the CLI ternary counter matches expectation.
+
+⚠ **`oz.gif_threshold` cannot be trusted under per-tensor τ.** It records `defaults || config` only, so a manifest carrying per-tensor `ternary_candidates[].gif_threshold` still reports the CLI default. Verify the applied τ from measured sparsity instead (#51 trap; demonstrated in `reports/grok-1-block-pilot/results.md`).
 
 ## Ownership
 

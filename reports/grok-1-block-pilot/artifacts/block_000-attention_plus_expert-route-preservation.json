@@ -1,0 +1,423 @@
+{
+  "model_family": "grok-1",
+  "produced_by": "grok-ozempic scripts/route_preservation_metrics.py (GH #53 / RM-222)",
+  "certification": {
+    "certified": true,
+    "basis": "pack inventory verified against the xai-dissect conversion manifest",
+    "conversion_manifest_basename": "conversion-manifest.json"
+  },
+  "pilot": {
+    "block": 0,
+    "mode": "attention_plus_expert",
+    "tokens": 4096,
+    "seed": 20260805,
+    "ternary_tensors": 7,
+    "preserve_tensors": 5,
+    "pack_metadata": {
+      "oz.gif_threshold": "0.05",
+      "oz.name": "grok-ozempic",
+      "oz.quantization_version": 1,
+      "oz.gif_threshold_note": "per-tensor effective_tau: 0.4 for attn_proj_i8.*, 0.9 for moe_expert.*; pipeline default 0.05"
+    },
+    "ternary_scale": "least-squares optimal alpha = sum(|w| fired)/count(fired); GOZ1 v1 stores no scale",
+    "activations": "real token-embedding rows through the block's RMSNorm gain",
+    "effective_tau_policy": {
+      "attn_proj_i8.*": 0.4,
+      "moe_expert.*": 0.9
+    },
+    "pack_basename": "block_000-attention_plus_expert.goz1",
+    "npy_dir_basename": "npy",
+    "paths_note": "Host-local absolute paths removed for publication; regenerate with BLOCK=<n> MODE=<mode> scripts/block_pilot_goz1.sh (the npy stage is a per-run mktemp directory deleted on exit)."
+  },
+  "summary": [
+    {
+      "name": "router_top1_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "threshold": ">= 99.0%",
+      "observed": 0.6396484375,
+      "detail": "Worst case over evaluated d_model x d_model projections; router read from the pack (fp16 preserve tier)."
+    },
+    {
+      "name": "router_top2_set_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "threshold": ">= 99.5%",
+      "observed": 0.421142578125,
+      "detail": "Fraction of tokens whose unordered top-2 expert set is unchanged."
+    },
+    {
+      "name": "expert_load_distribution_delta",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.24853515625,
+      "detail": "Max per-expert share change in the top-1 load histogram."
+    },
+    {
+      "name": "expert_load_js_divergence",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.11021330045422195,
+      "detail": "Jensen-Shannon divergence (bits) between reference and pilot expert-load distributions."
+    },
+    {
+      "name": "router_logit_rank_correlation",
+      "scope": "router_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7528366815476191,
+      "detail": "Mean per-token Spearman correlation over the router logits."
+    },
+    {
+      "name": "block_output_cosine",
+      "scope": "block_behavior",
+      "status": "fail",
+      "threshold": ">= 0.995",
+      "observed": 0.8492034016757434,
+      "detail": "Scoped to the quantized projection output, not a full block forward (attention roles are unassigned upstream; MoE not executed)."
+    },
+    {
+      "name": "block_output_rmse",
+      "scope": "block_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7658854546679026,
+      "detail": "RMSE of the projection output against the f32 reference path."
+    },
+    {
+      "name": "residual_stream_drift",
+      "scope": "block_behavior",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.5341102824225851,
+      "detail": "Projection-output RMSE normalized by reference output RMS."
+    },
+    {
+      "name": "weight_reconstruction_mse",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.0001426260740471938,
+      "detail": "Worst quantized tensor, at the least-squares optimal ternary scale."
+    },
+    {
+      "name": "weight_cosine_similarity",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.8596620582316677,
+      "detail": "Worst quantized tensor; independent of the chosen ternary scale."
+    },
+    {
+      "name": "weight_max_absolute_error",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7098091729063252,
+      "detail": "Exact max |w - alpha*t| over all quantized tensors."
+    },
+    {
+      "name": "per_channel_scale_error_summary",
+      "scope": "weight_reconstruction",
+      "status": "measured",
+      "threshold": null,
+      "observed": 0.7654989064033166,
+      "detail": "Worst per-output-channel relative reconstruction error; full per-tensor spread under `weights`."
+    },
+    {
+      "name": "logit_kl",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires whole-model inference; out of scope for a bounded single-block pilot (#53 non-goal)."
+    },
+    {
+      "name": "perplexity_delta",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires a calibration corpus and whole-model inference; not run."
+    },
+    {
+      "name": "generation_sanity_summary",
+      "scope": "model_behavior",
+      "status": "unknown",
+      "threshold": null,
+      "observed": null,
+      "detail": "Requires whole-model inference; not run."
+    }
+  ],
+  "weights": {
+    "block_000.slot_00.moe_expert.gate": {
+      "elements": 1610612736,
+      "zeros": 1051486556,
+      "sparsity": 0.6528487776716551,
+      "rms": 0.023557757634404944,
+      "alpha_optimal": 0.03446429262403113,
+      "weight_cosine_similarity": 0.8619751964369022,
+      "weight_reconstruction_mse": 0.0001426260740471938,
+      "weight_nrmse": 0.5069504519453197,
+      "weight_max_absolute_error": 0.3879905413603439,
+      "per_channel_scale_error": {
+        "channels": 262144,
+        "channel_definition": "(leading index, last axis) pairs: 8 x 32768, 6144 elements each",
+        "alpha_min": 0.028118791881937995,
+        "alpha_median": 0.03403930523622656,
+        "alpha_max": 0.0870242716704669,
+        "relative_error_min": 0.3634878046928346,
+        "relative_error_median": 0.49800192292541123,
+        "relative_error_max": 0.6629830233906198
+      },
+      "effective_tau": 0.9
+    },
+    "block_000.slot_01.moe_expert.down": {
+      "elements": 1610612736,
+      "zeros": 1026408312,
+      "sparsity": 0.6372781544923782,
+      "rms": 0.015693050566611258,
+      "alpha_optimal": 0.022704254828049837,
+      "weight_cosine_similarity": 0.8713381608146713,
+      "weight_reconstruction_mse": 5.9294823061690226e-05,
+      "weight_nrmse": 0.49068300307643237,
+      "weight_max_absolute_error": 0.7098091729063252,
+      "per_channel_scale_error": {
+        "channels": 49152,
+        "channel_definition": "(leading index, last axis) pairs: 8 x 6144, 32768 elements each",
+        "alpha_min": 0.01841033930450419,
+        "alpha_median": 0.022658524682175385,
+        "alpha_max": 0.07389202658827633,
+        "relative_error_min": 0.46961685056316743,
+        "relative_error_median": 0.4829285653138257,
+        "relative_error_max": 0.7654989064033166
+      },
+      "effective_tau": 0.9
+    },
+    "block_000.slot_02.moe_expert.up": {
+      "elements": 1610612736,
+      "zeros": 1037831274,
+      "sparsity": 0.6443704627454281,
+      "rms": 0.023556988649650997,
+      "alpha_optimal": 0.034396705025337225,
+      "weight_cosine_similarity": 0.8707550095889084,
+      "weight_reconstruction_mse": 0.00013417456034684003,
+      "weight_nrmse": 0.4917171069586859,
+      "weight_max_absolute_error": 0.4656032949746628,
+      "per_channel_scale_error": {
+        "channels": 262144,
+        "channel_definition": "(leading index, last axis) pairs: 8 x 32768, 6144 elements each",
+        "alpha_min": 0.026669803182221657,
+        "alpha_median": 0.033621509961957834,
+        "alpha_max": 0.1206848401921898,
+        "relative_error_min": 0.3132606326996389,
+        "relative_error_median": 0.48894518830345157,
+        "relative_error_max": 0.7478036794405515
+      },
+      "effective_tau": 0.9
+    },
+    "block_000.slot_03.attn_proj_i8.narrow": {
+      "elements": 6291456,
+      "zeros": 2117334,
+      "sparsity": 0.33654117584228516,
+      "rms": 0.010578140941314469,
+      "alpha_optimal": 0.011270628247707765,
+      "weight_cosine_similarity": 0.8678521892011365,
+      "weight_reconstruction_mse": 2.7619841182005376e-05,
+      "weight_nrmse": 0.4968224810722588,
+      "weight_max_absolute_error": 0.14666546794369847,
+      "per_channel_scale_error": {
+        "channels": 1024,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 1024, 6144 elements each",
+        "alpha_min": 0.006836130454696068,
+        "alpha_median": 0.010566048929377264,
+        "alpha_max": 0.017267009752871754,
+        "relative_error_min": 0.42969516475250813,
+        "relative_error_median": 0.4560618527348418,
+        "relative_error_max": 0.5195065313718404
+      },
+      "effective_tau": 0.4
+    },
+    "block_000.slot_04.attn_proj_i8.model_width": {
+      "elements": 37748736,
+      "zeros": 12596418,
+      "sparsity": 0.3336911201477051,
+      "rms": 0.007302213918588603,
+      "alpha_optimal": 0.00769032174762091,
+      "weight_cosine_similarity": 0.8596620582316677,
+      "weight_reconstruction_mse": 1.3916122278912443e-05,
+      "weight_nrmse": 0.5108631378724569,
+      "weight_max_absolute_error": 0.16381083792034784,
+      "per_channel_scale_error": {
+        "channels": 6144,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 6144, 6144 elements each",
+        "alpha_min": 0.006207052114847544,
+        "alpha_median": 0.007478435324833169,
+        "alpha_max": 0.03994824617600841,
+        "relative_error_min": 0.40419477855512526,
+        "relative_error_median": 0.46801929305190104,
+        "relative_error_max": 0.6438901094327641
+      },
+      "effective_tau": 0.4
+    },
+    "block_000.slot_05.attn_proj_i8.model_width": {
+      "elements": 37748736,
+      "zeros": 12161834,
+      "sparsity": 0.3221785757276747,
+      "rms": 0.0105771638496767,
+      "alpha_optimal": 0.011285860723522544,
+      "weight_cosine_similarity": 0.8784622437138425,
+      "weight_reconstruction_mse": 2.5541838170253586e-05,
+      "weight_nrmse": 0.4778117687638526,
+      "weight_max_absolute_error": 0.1272715733585087,
+      "per_channel_scale_error": {
+        "channels": 6144,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 6144, 6144 elements each",
+        "alpha_min": 0.0069844022693250005,
+        "alpha_median": 0.011054195166908821,
+        "alpha_max": 0.021125657010477607,
+        "relative_error_min": 0.42282016873465333,
+        "relative_error_median": 0.4610193731608061,
+        "relative_error_max": 0.5241617605562177
+      },
+      "effective_tau": 0.4
+    },
+    "block_000.slot_06.attn_proj_i8.narrow": {
+      "elements": 6291456,
+      "zeros": 2047031,
+      "sparsity": 0.3253668149312337,
+      "rms": 0.010577328232367855,
+      "alpha_optimal": 0.011283784705669356,
+      "weight_cosine_similarity": 0.8762189872473086,
+      "weight_reconstruction_mse": 2.5983013638560264e-05,
+      "weight_nrmse": 0.4819131523286129,
+      "weight_max_absolute_error": 0.11128625313612751,
+      "per_channel_scale_error": {
+        "channels": 1024,
+        "channel_definition": "(leading index, last axis) pairs: 1 x 1024, 6144 elements each",
+        "alpha_min": 0.008036103038273021,
+        "alpha_median": 0.010932057911501905,
+        "alpha_max": 0.01778287054721133,
+        "relative_error_min": 0.4296315201504765,
+        "relative_error_median": 0.46042890588686025,
+        "relative_error_max": 0.5166798793234245
+      },
+      "effective_tau": 0.4
+    }
+  },
+  "preserve_fp16_roundtrip": {
+    "block_000.slot_07.block_norm": {
+      "max_absolute_error": 0.0013875961303710938,
+      "relative_rmse": 0.0002078451996099635,
+      "bit_exact": false
+    },
+    "block_000.slot_08.block_norm": {
+      "max_absolute_error": 0.0019283294677734375,
+      "relative_rmse": 0.0001965988264285251,
+      "bit_exact": false
+    },
+    "block_000.slot_09.block_norm": {
+      "max_absolute_error": 0.0008301734924316406,
+      "relative_rmse": 0.00021666898691768515,
+      "bit_exact": false
+    },
+    "block_000.slot_10.block_norm": {
+      "max_absolute_error": 0.0009748935699462891,
+      "relative_rmse": 0.00020079402752299537,
+      "bit_exact": false
+    },
+    "block_000.slot_11.router": {
+      "max_absolute_error": 6.00963830947876e-05,
+      "relative_rmse": 0.0002092983467282326,
+      "bit_exact": false
+    }
+  },
+  "routing": {
+    "block_000.slot_04.attn_proj_i8.model_width": {
+      "tokens": 4096,
+      "router_top1_agreement": 0.686279296875,
+      "router_top2_set_agreement": 0.4423828125,
+      "router_logit_rank_correlation": 0.7739606584821428,
+      "expert_load_distribution_delta": 0.140869140625,
+      "expert_load_js_divergence": 0.06889692300140215,
+      "expert_load_reference": [
+        0.03076171875,
+        0.15673828125,
+        0.03076171875,
+        0.450927734375,
+        0.012451171875,
+        0.2197265625,
+        0.08935546875,
+        0.00927734375
+      ],
+      "expert_load_pilot": [
+        0.061279296875,
+        0.085205078125,
+        0.0517578125,
+        0.44189453125,
+        0.041015625,
+        0.078857421875,
+        0.1884765625,
+        0.051513671875
+      ],
+      "block_output_cosine": 0.8492034016757434,
+      "block_output_cosine_min": 0.7120308525669509,
+      "block_output_rmse": 0.26373385065945526,
+      "residual_stream_drift": 0.5341102824225851,
+      "activations": {
+        "source": "token_embedding_rows",
+        "vocab_size": 131072,
+        "rows_sampled": 4096,
+        "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
+        "detail": "block 0's attention input is rmsnorm(embedding lookup), so these are real activations for this block rather than a synthetic distribution",
+        "rmsnorm_gain": "block_000.slot_07.block_norm",
+        "shard_basename": "tensor00000_000"
+      },
+      "effective_tau": 0.4
+    },
+    "block_000.slot_05.attn_proj_i8.model_width": {
+      "tokens": 4096,
+      "router_top1_agreement": 0.6396484375,
+      "router_top2_set_agreement": 0.421142578125,
+      "router_logit_rank_correlation": 0.7528366815476191,
+      "expert_load_distribution_delta": 0.24853515625,
+      "expert_load_js_divergence": 0.11021330045422195,
+      "expert_load_reference": [
+        0.46337890625,
+        0.0,
+        0.0,
+        0.44873046875,
+        0.04736328125,
+        0.038330078125,
+        0.002197265625,
+        0.0
+      ],
+      "expert_load_pilot": [
+        0.42724609375,
+        0.000244140625,
+        0.000244140625,
+        0.2001953125,
+        0.127685546875,
+        0.24365234375,
+        0.000732421875,
+        0.0
+      ],
+      "block_output_cosine": 0.9630472132115836,
+      "block_output_cosine_min": 0.938282154715757,
+      "block_output_rmse": 0.7658854546679026,
+      "residual_stream_drift": 0.3356917020354853,
+      "activations": {
+        "source": "token_embedding_rows",
+        "vocab_size": 131072,
+        "rows_sampled": 4096,
+        "sampling": "uniform over vocab without replacement (no corpus token frequencies)",
+        "detail": "block 0's attention input is rmsnorm(embedding lookup), so these are real activations for this block rather than a synthetic distribution",
+        "rmsnorm_gain": "block_000.slot_07.block_norm",
+        "shard_basename": "tensor00000_000"
+      },
+      "effective_tau": 0.4
+    }
+  }
+}

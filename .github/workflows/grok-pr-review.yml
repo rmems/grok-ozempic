@@ -1,36 +1,178 @@
 name: Grok PR Review
 
+# Manual only. Auto pull_request runs red the PR "review" check whenever
+# GROK_AUTH_JSON is stale (SuperGrok OIDC ~hours), and GitHub still reports
+# that check as fail even with continue-on-error / fail_on: never.
+# Re-enable on: pull_request only if you keep the secret fresh or switch to
+# a durable credential.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
 
 permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: grok-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    # NOTE: continue-on-error is scoped to the review step, not the job. At job
+    # level it also swallowed the validation and resolve steps, so a garbage
+    # pr_number printed ::error:: and still reported the run green.
     steps:
-      - uses: actions/checkout@v4
+      # `pr_number` is interpolated into a git ref below, so accept only a plain
+      # decimal with no leading zeros: `0057` is all digits but
+      # refs/pull/0057/head does not exist, which would fail later and less
+      # clearly than failing here.
+      - name: Validate pr_number
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          case "$PR_NUMBER" in
+            '' | *[!0-9]*)
+              echo "::error::pr_number must be digits only, got '$PR_NUMBER'"
+              exit 1
+              ;;
+            0*)
+              echo "::error::pr_number must not have leading zeros, got '$PR_NUMBER'"
+              exit 1
+              ;;
+          esac
+
+      # Resolve the head SHA once and pin everything to it. refs/pull/N/head is
+      # a moving target: a push landing mid-run would let the action diff one
+      # commit while the checked-out tree is another, reporting findings against
+      # code that was never together in one revision.
+      - name: Resolve PR head and base commits
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          sha="$(printf '%s' "$json" | jq -r .head.sha)"
+          base="$(printf '%s' "$json" | jq -r .base.sha)"
+          for v in "$sha" "$base"; do
+            case "$v" in
+              [0-9a-f]*) : ;;
+              *) echo "::error::could not resolve commits for PR ${PR_NUMBER}"; exit 1 ;;
+            esac
+          done
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "Reviewing PR ${PR_NUMBER} at ${sha} (base ${base})"
+
+      # workflow_dispatch checks out the dispatch branch by default, which would
+      # review main instead of the requested PR. fetch-depth 0 so the action can
+      # diff against the base branch.
+      - name: Check out the PR under review
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.pr.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The action reads AGENTS.md / CLAUDE.md from the repo root automatically
+      # (documented in its action.yml) and offers no input to disable that. Those
+      # files come from the PR head, so an untrusted PR could otherwise supply its
+      # own review criteria. Replace them with the base revision's copies —
+      # trusted, and still project-accurate — or remove them if base has none.
+      #
+      # PARTIAL MITIGATION, not a trust boundary. This closes the file-read path
+      # only. The action still embeds the PR diff in its prompt, so a PR that
+      # edits these files can put instruction-shaped text in front of the model
+      # that way, and the action exposes no path filter to stop it. Treat this
+      # workflow's output as advisory on untrusted PRs; it is manual-dispatch and
+      # non-blocking by design.
+      - name: Use trusted reviewer instructions from base
+        env:
+          BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          for f in AGENTS.md CLAUDE.md; do
+            if git cat-file -e "${BASE}:${f}" 2>/dev/null; then
+              git checkout "${BASE}" -- "$f"
+              echo "restored $f from base ${BASE}"
+            elif [ -e "$f" ]; then
+              rm -f "$f"
+              echo "removed PR-supplied $f (absent on base)"
+            fi
+          done
+
+      # Abort rather than review a stale snapshot if the PR moved between the
+      # resolve step and here.
+      - name: Confirm head has not moved
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PINNED: ${{ steps.pr.outputs.sha }}
+        run: |
+          now="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"
+          if [ "$now" != "$PINNED" ]; then
+            echo "::error::PR ${PR_NUMBER} head moved ${PINNED} -> ${now} during setup; re-run the review"
+            exit 1
+          fi
 
       - uses: 0xr3ngar/grok-build-review-action@v1
+        # Advisory only: a stale GROK_AUTH_JSON must not red the PR. Scoped here
+        # so the validation and pinning steps above can still fail the run.
+        continue-on-error: true
         with:
           grok_auth_json: ${{ secrets.GROK_AUTH_JSON }}
+          pr_number: ${{ inputs.pr_number }}
           roast_level: professional
-          fail_on: bugs
+          fail_on: never
           effort: high
           max_diff_kb: "300"
+          # Kept inline on purpose: this workflow file comes from the default
+          # branch, so these instructions are trusted. The action also picks up
+          # AGENTS.md / CLAUDE.md automatically; the step above has already
+          # replaced those with the base revision's copies.
           custom_instructions: |
             This is a Rust (edition 2024) crate for Grok-1 GOZ1 quantization.
             Flag: pickle accepted by quantize-goz1; preserve/fp16 misclassification
             via name mismatch; V2 structural manifests used for runtime packs before
             #40/RM-191; CUDA kernels living in this repo instead of myelin-accelerator;
-            inventing xai-dissect manifest fields. Prefer project AGENTS.md / CLAUDE.md.
+            inventing xai-dissect manifest fields.
+
+      # The action takes only `pr_number` and re-queries the live PR for its diff
+      # (its action.yml exposes no sha/ref input), so a push during the review can
+      # still make the reported patch disagree with the checked-out tree.
+      #
+      # DETECTION, NOT PREVENTION. The action posts its inline and status comments
+      # before this step runs, so a mid-run push can leave stale comments on the PR
+      # that this cannot retract — it only fails the run so the result is not
+      # mistaken for authoritative. Genuine fail-closed behaviour would need the
+      # action to accept a pinned diff. The window is bounded by the pre-flight
+      # check above plus this one.
+      - name: Warn if the PR moved during review
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PINNED_HEAD: ${{ steps.pr.outputs.sha }}
+          PINNED_BASE: ${{ steps.pr.outputs.base }}
+        run: |
+          json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          head_now="$(printf '%s' "$json" | jq -r .head.sha)"
+          base_now="$(printf '%s' "$json" | jq -r .base.sha)"
+          moved=0
+          if [ "$head_now" != "$PINNED_HEAD" ]; then
+            echo "::error::head moved ${PINNED_HEAD} -> ${head_now} during the review"
+            moved=1
+          fi
+          # The base matters as much as the head: a base advance or a retarget
+          # changes the diff the action computes, while the checkout and the
+          # restored instruction files stay pinned to the original base.
+          if [ "$base_now" != "$PINNED_BASE" ]; then
+            echo "::error::base moved ${PINNED_BASE} -> ${base_now} during the review"
+            moved=1
+          fi
+          if [ "$moved" = 1 ]; then
+            echo "::error::findings may mix revisions — re-run the review"
+            exit 1
+          fi
+          echo "PR stable for the whole review (head ${PINNED_HEAD}, base ${PINNED_BASE})"

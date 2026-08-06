@@ -6,3 +6,9 @@ node_modules/
 *.sarif
 .codacy/
 docs/
+
+# Offline fixture generator uses pickle.dumps once; tests do not
+scripts/dev_generate_int8_export_fixtures.py
+
+scripts/testdata/
+scripts/dev_generate_int8_export_fixtures.py
