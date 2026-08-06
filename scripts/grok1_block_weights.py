@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess  # nosec B404
 import sys
 from collections.abc import Iterable
@@ -94,14 +95,22 @@ def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool
     must still write its metrics rather than abort.
     """
     root = repo_root or Path(__file__).resolve().parent.parent
+    git = shutil.which("git")
+    if git is None:
+        return {"commit": None, "dirty": None}
+    # Both argv lists are fully literal apart from ``root``, which derives from
+    # ``__file__`` and never from user input, and ``git`` is resolved to an
+    # absolute path above. No shell is involved (shell=False is the default).
+    # Hence nosec B603 / noqa S603: both tools flag every subprocess call, and
+    # each annotation names only its own tool's rule.
     try:
-        sha = subprocess.run(  # noqa: S603
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
+        sha = subprocess.run(  # nosec B603  # noqa: S603
+            [git, "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=30, check=True,
         ).stdout.strip()
-        status = subprocess.run(  # noqa: S603
+        status = subprocess.run(  # nosec B603  # noqa: S603
             [
-                "git", "-C", str(root), "status", "--porcelain",
+                git, "-C", str(root), "status", "--porcelain",
                 "--untracked-files=no", "--", "scripts", "src",
             ],
             capture_output=True, text=True, timeout=30, check=True,
