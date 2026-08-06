@@ -28,6 +28,7 @@ from grok1_block_weights import (  # noqa: E402
     EXPERT_ROLES,
     PRESERVED_ROLES,
     MixedWeights,
+    PackWeights,
     TernaryScale,
     implementation_commit,
     sha256_file,
@@ -144,38 +145,39 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(got, {"commit": None, "dirty": None})
 
 
+class _FakeCacheHost:
+    """Minimal host for :meth:`PackWeights._load_cache`.
+
+    The cache loader only needs a cache path and a fingerprint, so binding the
+    two real methods onto a small object exercises them directly -- no GOZ1 pack
+    or 19 GiB of reference weights required. Bound at class scope rather than
+    patched in ``setUp`` so they are ordinary methods to a reader and to pylint.
+    """
+
+    _load_cache = PackWeights._load_cache
+    _discard_cache = PackWeights._discard_cache
+
+    def __init__(self, path: Path, fingerprint: dict) -> None:
+        self._cache_path = path
+        self._fp = fingerprint
+
+    def _fingerprint(self) -> dict:
+        return self._fp
+
+
 class AlphaCacheDiscardTests(unittest.TestCase):
     """A malformed cache must be recomputed, never fatal.
 
     The cache is derived data with deterministic recomputation, so aborting would
-    let one corrupt file block the experiment until deleted by hand. These drive
-    ``_load_cache`` directly through a stub rather than building a real pack.
+    let one corrupt file block the experiment until deleted by hand.
     """
-
-    class _Fake:
-        """Just enough of PackWeights to exercise _load_cache."""
-
-        _load_cache = None  # bound below
-
-        def __init__(self, path: Path, fingerprint: dict) -> None:
-            self._cache_path = path
-            self._fp = fingerprint
-
-        def _fingerprint(self) -> dict:
-            return self._fp
-
-    def setUp(self) -> None:
-        from grok1_block_weights import PackWeights
-
-        self._Fake._load_cache = PackWeights._load_cache
-        self._Fake._discard_cache = PackWeights._discard_cache
 
     def _load(self, payload: str, fingerprint: dict | None = None):
         fp = {"pack_size": 1} if fingerprint is None else fingerprint
         with tempfile.TemporaryDirectory() as td:
-            p = Path(td) / "c.json"
-            p.write_text(payload)
-            return self._Fake(p, fp)._load_cache()
+            path = Path(td) / "c.json"
+            path.write_text(payload)
+            return _FakeCacheHost(path, fp)._load_cache()
 
     def test_unreadable_json_is_discarded(self) -> None:
         self.assertEqual(self._load("{ not json"), {})
@@ -194,6 +196,11 @@ class AlphaCacheDiscardTests(unittest.TestCase):
     def test_fingerprint_mismatch_discards_quietly(self) -> None:
         payload = json.dumps({"fingerprint": {"pack_size": 999}, "scales": {}})
         self.assertEqual(self._load(payload), {})
+
+    def test_missing_cache_file_is_an_empty_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            host = _FakeCacheHost(Path(td) / "absent.json", {"pack_size": 1})
+            self.assertEqual(host._load_cache(), {})
 
     def test_matching_fingerprint_loads_the_scales(self) -> None:
         fp = {"pack_size": 1}
