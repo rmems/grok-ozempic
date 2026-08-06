@@ -1,0 +1,34 @@
+scripts/test_grok1_block_forward.py
+  s_f430523a053518::t_e798a84f7e4125 34,152-183
+scripts/grok1_block0_experiment.py
+  s_f430523a053518::t_2801f380b08cbc 40,515-518
+  s_f430523a053518::t_a5e218c4d67691 475-510,519-522
+  s_f430523a053518::t_8db763e4d41852 64-66
+CLAUDE.md
+  s_f430523a053518::t_9d5eaab1ae9d29 23-29
+.claude/hooks/coauthor-commit.sh
+  s_f430523a053518::t_e799855131dddb 21-23
+  s_f430523a053518::t_8639250348ff99 2-10,12-20,24-28,30-40,42-45,47-48,50,52-58
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_34b5f1c79e0525 6-7,128,133,229,325,421
+.gitignore
+  s_f430523a053518::t_8df23032b46c4c 25-29
+scripts/grok1_block_forward.py
+  s_f430523a053518::t_db32f86149bf98 54,96-106,193-195,203,220-222,224,233,235,238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7d788dacf716411604eca5d7746005ed8f5b62ec",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
