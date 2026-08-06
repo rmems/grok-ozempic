@@ -359,39 +359,43 @@ class PackWeights(WeightSource):
                 stats[npy.name] = [st.st_size, st.st_mtime_ns]
         return stats
 
+    def _discard_cache(self, reason: str) -> dict[str, TernaryScale]:
+        """Report an unusable cache and fall back to recomputation.
+
+        Every malformed-cache path lands here rather than raising. The cache is
+        *derived* data whose recomputation is deterministic, so aborting would
+        leave a corrupt file permanently blocking the experiment until someone
+        deleted it by hand -- a worse outcome for no correctness gain. The
+        warning keeps it from being silent, since a corrupt cache can be a
+        symptom of something real.
+        """
+        print(
+            f"warning: {self._cache_path.name}: {reason}; recomputing oracle alphas",
+            file=sys.stderr,
+        )
+        return {}
+
     def _load_cache(self) -> dict[str, TernaryScale]:
-        """Load cached scales, discarding them if the inputs have changed."""
+        """Load cached scales, discarding them if unusable or inputs changed."""
         if not self._cache_path.exists():
             return {}
         try:
             raw = json.loads(self._cache_path.read_text())
         except json.JSONDecodeError as exc:
-            # A cache is derived data, so recomputing is the right recovery --
-            # but do it loudly, since a corrupt file may point at a real problem.
-            print(
-                f"warning: {self._cache_path.name} is unreadable ({exc}); "
-                "recomputing oracle alphas",
-                file=sys.stderr,
-            )
-            return {}
-        # Validate that the decoded payload is a dict before accessing keys.
-        # main() only catches (ForwardError, MetricsError, OSError, ValueError),
-        # so a raw AttributeError/TypeError here would surface as an uncaught
-        # traceback rather than a clean CLI error.
+            return self._discard_cache(f"unreadable ({exc})")
         if not isinstance(raw, dict):
-            raise ForwardError(f"{self._cache_path.name}: cache payload is not a JSON object")
-        # Legacy flat caches carry no fingerprint and cannot be validated.
+            return self._discard_cache("payload is not a JSON object")
+        # Legacy flat caches carry no fingerprint and cannot be validated. This is
+        # the expected miss, not a fault, so it stays quiet.
         if raw.get("fingerprint") != self._fingerprint():
             return {}
-        scales_data = raw.get("scales", {})
-        if not isinstance(scales_data, dict):
-            raise ForwardError(f"{self._cache_path.name}: 'scales' field is not a JSON object")
+        scales = raw.get("scales", {})
+        if not isinstance(scales, dict):
+            return self._discard_cache("'scales' is not a JSON object")
         try:
-            return {n: TernaryScale(**v) for n, v in scales_data.items()}
+            return {name: TernaryScale(**entry) for name, entry in scales.items()}
         except TypeError as exc:
-            raise ForwardError(
-                f"{self._cache_path.name}: malformed scale entry ({exc})"
-            ) from exc
+            return self._discard_cache(f"malformed scale entry ({exc})")
 
     def _save_cache(self) -> None:
         payload = {

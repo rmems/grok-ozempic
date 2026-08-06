@@ -218,9 +218,10 @@ better.
 
 ### Cosine is actively anti-correlated with routing at high τ
 
-Attention-output cosine rises monotonically with τ (0.659 → 0.899) while top-2
-agreement rises initially (peaking at τ=0.6) before declining to end lower
-overall (0.278 → 0.148). The best-reconstructing setting is the worst-routing one.
+Attention-output cosine rises **monotonically** with τ, 0.659 → 0.899. Top-2
+agreement does not: it improves to 0.308 at τ=0.6, then falls away to 0.148 by
+τ=1.6 — ending *below* where it started at 0.278. So the best-reconstructing
+setting (τ=1.6) is simultaneously the worst-routing one.
 
 The metric that *does* track routing is the **normalized MoE-input cosine** —
 the router's actual input — which peaks and then falls in step with agreement.
