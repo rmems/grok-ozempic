@@ -512,6 +512,21 @@ class CloneAliasingAcrossRootsTests(unittest.TestCase):
         st.restore(st.snapshot())
         self.assertIs(st.stack[0], st.memo[0])
 
+
+    def test_alias_of_a_set_survives_round_trip(self) -> None:
+        """Sets reach the parser via EMPTY_SET / ADDITEMS, which this scanner handles.
+
+        The set branch of `_clone` returns a fresh set, so it has to register that
+        clone in `seen` like the list/dict branches or the alias is lost.
+        """
+        st = self._state()
+        shared = {1, 2}
+        st.stack = [shared]
+        st.memo = {0: shared}
+        st.restore(st.snapshot())
+        self.assertIs(st.stack[0], st.memo[0])
+        self.assertEqual(st.stack[0], {1, 2})
+
     def test_round_trip_does_not_alias_back_to_the_snapshot(self) -> None:
         """A second retry must not mutate the objects held by the first snapshot."""
         st = self._state()

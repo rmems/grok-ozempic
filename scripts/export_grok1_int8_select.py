@@ -190,7 +190,10 @@ def _block_from_name(name: str) -> int | None:
     if not head.startswith(prefix):
         return None
     digits = head[len(prefix) :]
-    if not digits.isdigit():
+    # `str.isdigit()` is true for superscripts and circled forms ('²', '①') that
+    # `int()` then rejects, which leaked an uncaught ValueError. Require ASCII
+    # decimals only — that is what a structural name is allowed to contain.
+    if not (digits.isascii() and digits.isdecimal()):
         raise ExportError(
             f"structural name {name!r} has a 'block_' prefix with non-numeric "
             f"suffix {digits!r}; cannot tell which block it belongs to"

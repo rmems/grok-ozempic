@@ -318,6 +318,17 @@ class BlockNameConsistencyTests(unittest.TestCase):
             )
         self.assertIn("not block-scoped", str(ctx.exception))
 
+
+    def test_non_ascii_digit_block_rejected(self) -> None:
+        """`str.isdigit()` accepts forms `int()` rejects, e.g. '²' and '①'.
+
+        Those leaked an uncaught ValueError past the exporter's error boundary.
+        """
+        for bad in ("block_\u00b2", "block_\u2460", "block_\u0663"):
+            with self.assertRaises(exp.ExportError, msg=bad) as ctx:
+                self._load(structural_name=f"{bad}.slot_00.moe_expert.gate")
+            self.assertIn("non-numeric suffix", str(ctx.exception))
+
     def test_matching_pairs_accepted(self) -> None:
         self.assertEqual(len(self._load()), 1)
         self.assertEqual(

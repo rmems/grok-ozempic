@@ -81,6 +81,13 @@ jobs:
       # files come from the PR head, so an untrusted PR could otherwise supply its
       # own review criteria. Replace them with the base revision's copies —
       # trusted, and still project-accurate — or remove them if base has none.
+      #
+      # PARTIAL MITIGATION, not a trust boundary. This closes the file-read path
+      # only. The action still embeds the PR diff in its prompt, so a PR that
+      # edits these files can put instruction-shaped text in front of the model
+      # that way, and the action exposes no path filter to stop it. Treat this
+      # workflow's output as advisory on untrusted PRs; it is manual-dispatch and
+      # non-blocking by design.
       - name: Use trusted reviewer instructions from base
         env:
           BASE: ${{ steps.pr.outputs.base }}
@@ -133,20 +140,39 @@ jobs:
 
       # The action takes only `pr_number` and re-queries the live PR for its diff
       # (its action.yml exposes no sha/ref input), so a push during the review can
-      # still make the reported patch disagree with the tree that was checked out.
-      # That cannot be prevented from here, so detect it: if the head moved, say so
-      # loudly rather than let a mixed-revision report look authoritative.
+      # still make the reported patch disagree with the checked-out tree.
+      #
+      # DETECTION, NOT PREVENTION. The action posts its inline and status comments
+      # before this step runs, so a mid-run push can leave stale comments on the PR
+      # that this cannot retract — it only fails the run so the result is not
+      # mistaken for authoritative. Genuine fail-closed behaviour would need the
+      # action to accept a pinned diff. The window is bounded by the pre-flight
+      # check above plus this one.
       - name: Warn if the PR moved during review
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ inputs.pr_number }}
-          PINNED: ${{ steps.pr.outputs.sha }}
+          PINNED_HEAD: ${{ steps.pr.outputs.sha }}
+          PINNED_BASE: ${{ steps.pr.outputs.base }}
         run: |
-          now="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)"
-          if [ "$now" != "$PINNED" ]; then
-            echo "::error::PR ${PR_NUMBER} head moved ${PINNED} -> ${now} during the review;"
-            echo "::error::findings may mix revisions — re-run against ${now}"
+          json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          head_now="$(printf '%s' "$json" | jq -r .head.sha)"
+          base_now="$(printf '%s' "$json" | jq -r .base.sha)"
+          moved=0
+          if [ "$head_now" != "$PINNED_HEAD" ]; then
+            echo "::error::head moved ${PINNED_HEAD} -> ${head_now} during the review"
+            moved=1
+          fi
+          # The base matters as much as the head: a base advance or a retarget
+          # changes the diff the action computes, while the checkout and the
+          # restored instruction files stay pinned to the original base.
+          if [ "$base_now" != "$PINNED_BASE" ]; then
+            echo "::error::base moved ${PINNED_BASE} -> ${base_now} during the review"
+            moved=1
+          fi
+          if [ "$moved" = 1 ]; then
+            echo "::error::findings may mix revisions — re-run the review"
             exit 1
           fi
-          echo "PR head stable at ${PINNED} for the whole review"
+          echo "PR stable for the whole review (head ${PINNED_HEAD}, base ${PINNED_BASE})"
