@@ -1,0 +1,29 @@
+.gitignore
+  s_f430523a053518::t_8917f58b78bb7c 4-8,12
+.claude/rules/agent-workflow.md
+  s_f430523a053518::t_11933d8f09337b 6,37
+AGENTS.md
+  s_f430523a053518::t_11933d8f09337b 14,97
+CLAUDE.md
+  s_f430523a053518::t_11933d8f09337b 18,30-31,75
+scripts/grok1_block_weights.py
+  s_f430523a053518::t_6a900dc8a346a4 98-105,108,113
+  s_f430523a053518::t_e0455209128314 107,111
+  s_f430523a053518::t_9305d5d41c7476 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5fdcd40c2d3c709c3831612809843b51b56efa55",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
