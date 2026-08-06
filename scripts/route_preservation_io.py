@@ -140,9 +140,14 @@ def read_f16_slice(pack: Path, entry: dict, start: int, count: int) -> np.ndarra
     all 3.2 GiB.
     """
     numel = int(entry["numel"])
-    if start + count > numel:
+    # Negative values must be rejected too, not just an over-long end: a negative
+    # start would seek backwards into the preceding tensor's payload and return
+    # plausible-looking floats from the wrong weights, and a negative count makes
+    # the read silently empty.
+    if start < 0 or count < 0 or start + count > numel:
         raise MetricsError(
-            f"{entry['name']}: slice [{start}, {start + count}) exceeds tensor size {numel}"
+            f"{entry['name']}: slice [{start}, {start + count}) is not within "
+            f"[0, {numel}) -- refusing to read outside the tensor payload"
         )
     want = count * 2
     with pack.open("rb") as f:

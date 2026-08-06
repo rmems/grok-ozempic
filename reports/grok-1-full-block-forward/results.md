@@ -311,14 +311,23 @@ python3 scripts/grok1_block0_tau_sweep.py \
 python3 -m unittest scripts.test_grok1_block_forward
 ```
 
-Cost at 2048 tokens, as recorded in `block0-forward-metrics.json`: reference
-18.1 s, fp16 control 30.9 s, full pack 89.2 s (this run included the one-time
-oracle-α computation over 19 GiB of reference weights), attention-only 13.4 s,
-expert-only 32.9 s. Peak RSS **4.98 GiB** — expert tensors are streamed one at a
-time and never materialized whole, against 6.44 GiB per tensor as f32. The α
-values are cached to `<pack>.oracle-alpha.json`, fingerprinted by pack size,
-mtime, reference npy directory and tensor set, so a rebuilt pack recomputes
-rather than silently reusing a stale scale.
+Cost at 2048 tokens is of order **10–35 s per path** on this host (reference and
+attention-only at the low end, the fp16 control and the two expert-executing
+paths at the high end); a run that also computes the oracle α from scratch adds
+roughly a minute, since it streams 19 GiB of reference weights. Exact per-path
+seconds for any given run are in the `seconds` field of each comparison in
+`block0-forward-metrics.json` — that file is authoritative and this paragraph
+deliberately does not restate the numbers, which shift with machine load on every
+regeneration.
+
+Peak RSS **4.98 GiB** — expert tensors are streamed one at a time and never
+materialized whole, against 6.44 GiB per tensor as f32.
+
+The α values are cached to `<pack>.oracle-alpha.json`, fingerprinted by the
+pack's **SHA-256** plus its size, the reference npy directory with each npy's size
+and mtime, and the tensor set. A rebuilt pack — or a re-exported reference npy —
+therefore recomputes rather than silently reusing a stale scale, which matters
+because a τ sweep rebuilds packs at the same paths.
 
 Machine-readable output: `block0-forward-metrics.json`,
 `block0-forward-tau-sweep.json`.
