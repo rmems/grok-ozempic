@@ -153,7 +153,7 @@ just --list   # discover recipes
 | `just bench` | Stable bench entry — currently exits non-zero (no harness yet; kernel benches → `myelin-accelerator`) |
 | `just ci` | Local pre-PR parity with GitHub Actions (fmt, all-features clippy/test/build/doc, Python, `bash -n`) |
 | `just experiment-smoke` | Release CLI `--help` smoke, then require local `CKPT` / `GROK_OZEMPIC_DISSECT_RUN` (fails loud if missing) |
-| `just doctor` | Env/tool/path diagnosis (`ok`/`warn`/`missing`); always exits 0 |
+| `just doctor` | Env/tool/path diagnosis (`ok`/`warn`/`missing`); designed for advisory exit 0 |
 
 `check`, `test`, `build`, `ci`, and `doctor` need **no** multi-GiB checkpoints. Docker image builds and real quant pilots stay out of default `ci`.
 

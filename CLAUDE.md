@@ -63,7 +63,7 @@ just --list
 just check              # fmt + clippy (cli) while iterating
 just test               # cargo test --features cli + Python unittests
 just ci                 # pre-PR parity with GitHub Actions
-just doctor             # env/path diagnosis (always exit 0)
+just doctor             # env/path diagnosis (ok/warn/missing; non-zero only if recipe broken)
 just experiment-smoke   # release CLI --help + local data probe
 ```
 
