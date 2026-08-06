@@ -4,6 +4,8 @@
     "agent": "Claude Code: Fable 5 (xhigh)",
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "pack": "block_000-attention_plus_expert.goz1",
+    "pack_sha256": "711ba726bf2838a7a7f37adb896c28279a430653148e9f39059ef5e2c8a5ac85",
+    "pack_bytes": 1230128448,
     "pack_metadata": {
       "grok1.architecture": "grok-1",
       "grok1.attention.head_count": 48,
@@ -17,6 +19,7 @@
       "oz.name": "grok-ozempic",
       "oz.quantization_version": 1
     },
+    "pack_metadata_caveat": "oz.gif_threshold is unreliable under per-tensor tau (records defaults||config only, see #66); derive the applied threshold from oracle_alpha[].sparsity",
     "npy_dir": "goz53-block000-attn",
     "embedding_shard": "embedding__slot_00__token_embedding.npy",
     "tokens": 2048,
@@ -118,12 +121,12 @@
     ],
     "attn_delta_over_stream": 0.876171414302045,
     "moe_delta_over_stream": 0.4827437027494788,
-    "seconds": 16.236870765686035
+    "seconds": 15.234857082366943
   },
   "comparisons": [
     {
       "label": "fp16_roundtrip",
-      "seconds": 28.257107257843018,
+      "seconds": 28.178629159927368,
       "attention_output_cosine": 0.9999999984424572,
       "attention_output_cosine_per_token": 0.9999999986030829,
       "residual_stream_cosine": 0.9999999831365632,
@@ -137,6 +140,8 @@
       "attn_delta_over_stream": 0.8760054853350859,
       "moe_delta_over_stream": 0.482784499720899,
       "router_top1_agreement": 0.9970703125,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.9990234375,
       "router_top2_set_agreement": 0.9990234375,
       "expert_load_reference": [
         0.131591796875,
@@ -217,7 +222,7 @@
     },
     {
       "label": "goz1_pack",
-      "seconds": 33.40004897117615,
+      "seconds": 87.63556838035583,
       "attention_output_cosine": 0.6940020562994945,
       "attention_output_cosine_per_token": 0.7152323961545908,
       "residual_stream_cosine": 0.8520368529920752,
@@ -231,6 +236,8 @@
       "attn_delta_over_stream": 0.9221869464012775,
       "moe_delta_over_stream": 0.6064982247591109,
       "router_top1_agreement": 0.55078125,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.3037109375,
       "router_top2_set_agreement": 0.3037109375,
       "expert_load_reference": [
         0.131591796875,
@@ -311,7 +318,7 @@
     },
     {
       "label": "goz1_attention_ternary_only",
-      "seconds": 13.589844465255737,
+      "seconds": 14.614993572235107,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -325,6 +332,8 @@
       "attn_delta_over_stream": 0.9222133116118338,
       "moe_delta_over_stream": 0.5459685107507056,
       "router_top1_agreement": 0.55126953125,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.30419921875,
       "router_top2_set_agreement": 0.30419921875,
       "expert_load_reference": [
         0.131591796875,
@@ -405,7 +414,7 @@
     },
     {
       "label": "goz1_expert_ternary_only",
-      "seconds": 32.757932901382446,
+      "seconds": 33.48438596725464,
       "attention_output_cosine": 1.0,
       "attention_output_cosine_per_token": 1.0,
       "residual_stream_cosine": 1.0000000000000002,
@@ -419,6 +428,8 @@
       "attn_delta_over_stream": 0.876171414302045,
       "moe_delta_over_stream": 0.5761949397414952,
       "router_top1_agreement": 1.0,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 1.0,
       "router_top2_set_agreement": 1.0,
       "expert_load_reference": [
         0.131591796875,

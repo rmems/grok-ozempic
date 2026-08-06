@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -49,6 +50,9 @@ from grok1_block_weights import (  # noqa: E402
 )
 
 EXPECT_BLOCK = "block_000"
+# Gaussian sparsity is only an approximation for real weights, so allow a wide
+# band: this catches a mislabelled pack, not a modest distributional deviation.
+_SPARSITY_TOLERANCE = 0.12
 _TAU_RE = re.compile(r"tau-([0-9]*\.?[0-9]+)\.goz1$")
 
 
@@ -73,6 +77,39 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def expected_sparsity(tau: float) -> float:
+    """Fraction of a standard normal within +/-tau: the sparsity tau implies.
+
+    GOZ1 sets tau = gif_threshold * rms, so for weights that are approximately
+    Gaussian the zeroed fraction is erf(tau / sqrt(2)). Used only to sanity-check
+    the tau parsed from a filename against what the pack actually contains.
+    """
+    return math.erf(tau / math.sqrt(2.0))
+
+
+def _require_tau_matches_pack(pack_path: Path, tau: float, sparsity: dict[str, float]) -> None:
+    """Reject a pack whose measured firing rate contradicts its filename tau.
+
+    The tau is parsed from the filename, so a pack rebuilt at a different
+    threshold under the same name would be reported under the wrong tau and
+    silently corrupt the sweep. ``oz.gif_threshold`` cannot be used for this (the
+    #51 trap: it records defaults||config, not the applied per-tensor value), so
+    the check is against measured sparsity. The tolerance is deliberately loose
+    because real weights are only approximately Gaussian -- it catches a
+    mislabelled pack, not a small distributional deviation.
+    """
+    if not sparsity:
+        return
+    observed = sum(sparsity.values()) / len(sparsity)
+    expected = expected_sparsity(tau)
+    if abs(observed - expected) > _SPARSITY_TOLERANCE:
+        raise ForwardError(
+            f"{pack_path.name}: filename says tau={tau} (expected sparsity "
+            f"~{expected:.3f}) but the pack fires at sparsity {observed:.3f}; "
+            "the pack was probably rebuilt at a different threshold"
+        )
+
+
 def _sparsity(pack: PackWeights) -> dict[str, float]:
     """Observed ternary sparsity per attention tensor -- the applied tau's fingerprint.
 
@@ -95,10 +132,13 @@ def _sweep_row(
     pack.require_preserved(PRESERVED_ROLES)
     mixed = MixedWeights(pack, reference, ATTENTION_ROLES, f"attn_tau_{tau}")
     trace = forward_block(h0, mixed, top_k=top_k)
+    sparsity = _sparsity(pack)
+    _require_tau_matches_pack(pack_path, tau, sparsity)
     row = {
         "tau": tau,
         "pack": pack_path.name,
-        "sparsity": _sparsity(pack),
+        "sparsity": sparsity,
+        "sparsity_expected_gaussian": expected_sparsity(tau),
         **compare(ref, trace),
     }
     print(

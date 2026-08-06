@@ -21,6 +21,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import sys
@@ -223,11 +224,20 @@ def _routing_agreement(ref: Trace, other: Trace) -> dict:
     top1 = float((other.expert_idx[:, 0] == ref.expert_idx[:, 0]).mean())
     ref_sets = [frozenset(r) for r in ref.expert_idx]
     other_sets = [frozenset(r) for r in other.expert_idx]
-    top2 = float(np.mean([a == b for a, b in zip(ref_sets, other_sets)]))
+    topk = float(np.mean([a == b for a, b in zip(ref_sets, other_sets)]))
     load_ref, load_other = expert_load(ref.expert_idx), expert_load(other.expert_idx)
+    selected = int(ref.expert_idx.shape[1])
+    agreement = {
+        "selected_experts": selected,
+        "router_topk_set_agreement": topk,
+    }
+    # Only publish the gate-named metric when k really is Grok-1's top-2, so a
+    # --top-k override cannot produce a number labelled "top-2" that is not.
+    if selected == NUM_SELECTED_EXPERTS:
+        agreement["router_top2_set_agreement"] = topk
     return {
         "router_top1_agreement": top1,
-        "router_top2_set_agreement": top2,
+        **agreement,
         "expert_load_reference": load_ref.tolist(),
         "expert_load_observed": load_other.tolist(),
         "expert_load_js_bits": js_divergence(load_ref, load_other),
@@ -318,13 +328,32 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _sha256(path: Path, chunk: int = 1 << 22) -> str:
+    """Streamed SHA-256, so a committed metric set names the exact pack bytes."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(chunk), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _provenance(args: argparse.Namespace, ids: np.ndarray, pack: PackWeights) -> dict:
     return {
         "issue": "GH #61 / Linear RM-249",
         "agent": "Claude Code: Fable 5 (xhigh)",
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
         "pack": pack.pack.name,
+        "pack_sha256": _sha256(pack.pack),
+        "pack_bytes": pack.pack.stat().st_size,
         "pack_metadata": {k: v for k, v in sorted(pack.metadata.items())},
+        # [15] pack_metadata is reproduced verbatim, and oz.gif_threshold in it is
+        # known-wrong under per-tensor tau (#51 / #66): it records defaults||config,
+        # not what was applied. Trust the measured sparsity in oracle_alpha instead.
+        "pack_metadata_caveat": (
+            "oz.gif_threshold is unreliable under per-tensor tau (records "
+            "defaults||config only, see #66); derive the applied threshold from "
+            "oracle_alpha[].sparsity"
+        ),
         "npy_dir": args.npy_dir.name,
         "embedding_shard": args.embedding_shard.name,
         "tokens": int(ids.size),

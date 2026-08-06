@@ -31,8 +31,9 @@
         "slot_05.attn_proj_i8.model_width": 0.08295186360677087,
         "slot_06.attn_proj_i8.narrow": 0.08370224634806311
       },
+      "sparsity_expected_gaussian": 0.07965567455405796,
       "label": "attn_tau_0.1",
-      "seconds": 15.032854795455933,
+      "seconds": 19.697099208831787,
       "attention_output_cosine": 0.6592071839720569,
       "attention_output_cosine_per_token": 0.6819371823399478,
       "residual_stream_cosine": 0.8296113150997796,
@@ -46,6 +47,8 @@
       "attn_delta_over_stream": 0.9076228306321326,
       "moe_delta_over_stream": 0.5432591995079622,
       "router_top1_agreement": 0.505859375,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.27783203125,
       "router_top2_set_agreement": 0.27783203125,
       "expert_load_reference": [
         0.131591796875,
@@ -133,8 +136,9 @@
         "slot_05.attn_proj_i8.model_width": 0.16496353679233122,
         "slot_06.attn_proj_i8.narrow": 0.1668229103088379
       },
+      "sparsity_expected_gaussian": 0.15851941887820603,
       "label": "attn_tau_0.2",
-      "seconds": 16.714763402938843,
+      "seconds": 17.435184717178345,
       "attention_output_cosine": 0.6683543560900498,
       "attention_output_cosine_per_token": 0.6908134593227351,
       "residual_stream_cosine": 0.8351077117589413,
@@ -148,6 +152,8 @@
       "attn_delta_over_stream": 0.9114832391851089,
       "moe_delta_over_stream": 0.5391463905028457,
       "router_top1_agreement": 0.5068359375,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.26953125,
       "router_top2_set_agreement": 0.26953125,
       "expert_load_reference": [
         0.131591796875,
@@ -235,8 +241,9 @@
         "slot_05.attn_proj_i8.model_width": 0.3221785757276747,
         "slot_06.attn_proj_i8.narrow": 0.32536681493123376
       },
+      "sparsity_expected_gaussian": 0.3108434832206483,
       "label": "attn_tau_0.4",
-      "seconds": 14.049867868423462,
+      "seconds": 17.18453550338745,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -250,6 +257,8 @@
       "attn_delta_over_stream": 0.9222133116118338,
       "moe_delta_over_stream": 0.5459685107507056,
       "router_top1_agreement": 0.55126953125,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.30419921875,
       "router_top2_set_agreement": 0.30419921875,
       "expert_load_reference": [
         0.131591796875,
@@ -337,8 +346,9 @@
         "slot_05.attn_proj_i8.model_width": 0.46593125661214196,
         "slot_06.attn_proj_i8.narrow": 0.4701056480407715
       },
+      "sparsity_expected_gaussian": 0.4514937644998528,
       "label": "attn_tau_0.6",
-      "seconds": 15.342870235443115,
+      "seconds": 15.169222593307495,
       "attention_output_cosine": 0.7303809213878721,
       "attention_output_cosine_per_token": 0.7494975691968067,
       "residual_stream_cosine": 0.8707542046193044,
@@ -352,6 +362,8 @@
       "attn_delta_over_stream": 0.9410632195333158,
       "moe_delta_over_stream": 0.5344879859982987,
       "router_top1_agreement": 0.56640625,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.30810546875,
       "router_top2_set_agreement": 0.30810546875,
       "expert_load_reference": [
         0.131591796875,
@@ -439,8 +451,9 @@
         "slot_05.attn_proj_i8.model_width": 0.5908790164523654,
         "slot_06.attn_proj_i8.narrow": 0.5950547854105632
       },
+      "sparsity_expected_gaussian": 0.5762892028332066,
       "label": "attn_tau_0.8",
-      "seconds": 13.883955240249634,
+      "seconds": 14.900448560714722,
       "attention_output_cosine": 0.7857555095684784,
       "attention_output_cosine_per_token": 0.8040123052723027,
       "residual_stream_cosine": 0.8949252265228429,
@@ -454,6 +467,8 @@
       "attn_delta_over_stream": 0.9696342512747983,
       "moe_delta_over_stream": 0.5183251049312805,
       "router_top1_agreement": 0.5244140625,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.27099609375,
       "router_top2_set_agreement": 0.27099609375,
       "expert_load_reference": [
         0.131591796875,
@@ -541,8 +556,9 @@
         "slot_05.attn_proj_i8.model_width": 0.6959578196207683,
         "slot_06.attn_proj_i8.narrow": 0.6992530822753906
       },
+      "sparsity_expected_gaussian": 0.6826894921370859,
       "label": "attn_tau_1.0",
-      "seconds": 13.792428493499756,
+      "seconds": 13.719822883605957,
       "attention_output_cosine": 0.8404000501766765,
       "attention_output_cosine_per_token": 0.8557574350816874,
       "residual_stream_cosine": 0.9215224333234749,
@@ -556,6 +572,8 @@
       "attn_delta_over_stream": 1.0123142884177008,
       "moe_delta_over_stream": 0.486945388995087,
       "router_top1_agreement": 0.4931640625,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.248046875,
       "router_top2_set_agreement": 0.248046875,
       "expert_load_reference": [
         0.131591796875,
@@ -643,8 +661,9 @@
         "slot_05.attn_proj_i8.model_width": 0.7794376744164361,
         "slot_06.attn_proj_i8.narrow": 0.7817619641621908
       },
+      "sparsity_expected_gaussian": 0.7698606595565834,
       "label": "attn_tau_1.2",
-      "seconds": 13.673894882202148,
+      "seconds": 13.721140623092651,
       "attention_output_cosine": 0.8899305670638377,
       "attention_output_cosine_per_token": 0.9025396321283661,
       "residual_stream_cosine": 0.939853972300652,
@@ -658,6 +677,8 @@
       "attn_delta_over_stream": 1.0354657202495288,
       "moe_delta_over_stream": 0.4663679433657316,
       "router_top1_agreement": 0.46630859375,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.17919921875,
       "router_top2_set_agreement": 0.17919921875,
       "expert_load_reference": [
         0.131591796875,
@@ -745,8 +766,9 @@
         "slot_05.attn_proj_i8.model_width": 0.8928340276082357,
         "slot_06.attn_proj_i8.narrow": 0.8933672904968262
       },
+      "sparsity_expected_gaussian": 0.890401416600884,
       "label": "attn_tau_1.6",
-      "seconds": 12.781331777572632,
+      "seconds": 12.819400548934937,
       "attention_output_cosine": 0.8994259975978504,
       "attention_output_cosine_per_token": 0.9121963470678534,
       "residual_stream_cosine": 0.9441519705581737,
@@ -760,6 +782,8 @@
       "attn_delta_over_stream": 1.0827295984481613,
       "moe_delta_over_stream": 0.3935953600801783,
       "router_top1_agreement": 0.4892578125,
+      "selected_experts": 2,
+      "router_topk_set_agreement": 0.1484375,
       "router_top2_set_agreement": 0.1484375,
       "expert_load_reference": [
         0.131591796875,

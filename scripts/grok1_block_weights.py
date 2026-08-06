@@ -37,7 +37,7 @@ from route_preservation_io import (  # noqa: E402
     TENSOR_TERNARY,
     MetricsError,
     load_pack_index,
-    read_f16,
+    read_f16_slice,
     read_trits,
 )
 
@@ -242,7 +242,21 @@ class PackWeights:
             "pack_mtime_ns": stat.st_mtime_ns,
             "npy_dir": str(self._npy_dir.resolve()),
             "tensors": sorted(self._index),
+            # alpha is derived from the reference magnitudes, so re-exporting an
+            # npy in place must invalidate the cache too -- the pack is unchanged
+            # in that case, so pack stat alone would happily reuse a stale scale.
+            "reference_npy": self._reference_stats(),
         }
+
+    def _reference_stats(self) -> dict[str, list[int]]:
+        """``{stem: [size, mtime_ns]}`` for each reference npy backing a tensor."""
+        stats: dict[str, list[int]] = {}
+        for name in sorted(self._index):
+            npy = self._npy_dir / f"{stem_of(name)}.npy"
+            if npy.exists():
+                st = npy.stat()
+                stats[npy.name] = [st.st_size, st.st_mtime_ns]
+        return stats
 
     def _load_cache(self) -> dict[str, TernaryScale]:
         """Load cached scales, discarding them if the inputs have changed."""
@@ -311,9 +325,10 @@ class PackWeights:
         entry = self._entry(role)
         kind = int(entry["tensor_type"])
         if kind == TENSOR_F16:
-            # Slice by flat range so a preserve-tier expert stays correct rather
-            # than silently reshaping the whole tensor into one expert's shape.
-            return read_f16(self.pack, entry).reshape(-1)[start : start + count].reshape(shape)
+            # Seek to the slice rather than decoding the whole tensor: a
+            # preserve-tier expert would otherwise cost 3.2 GiB to read one of
+            # eight slices.
+            return read_f16_slice(self.pack, entry, start, count).reshape(shape)
         if kind != TENSOR_TERNARY:
             raise MetricsError(f"{entry['name']}: unsupported tensor_type {kind}")
         alpha = np.float32(self.scale(entry["name"]).alpha)

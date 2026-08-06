@@ -25,6 +25,7 @@ __all__ = [
     "load_pack_index",
     "read_trits",
     "read_f16",
+    "read_f16_slice",
 ]
 
 # Trit code -> value, matching quantizer.rs encode_trit (0b00=0, 0b01=+1, 0b10=-1).
@@ -129,6 +130,25 @@ def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
             f"{entry['name']}: invalid 0b11 trit code near flat index {start} -- corrupt pack"
         )
     return _TRIT_LUT[buf].reshape(-1)[skip : skip + count]
+
+
+def read_f16_slice(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
+    """Read ``count`` fp16 values from flat index ``start``.
+
+    Seeks directly to the slice so a caller wanting one expert out of a
+    preserve-tier ``(8, 6144, 32768)`` tensor reads 400 MiB rather than decoding
+    all 3.2 GiB.
+    """
+    want = count * 2
+    with pack.open("rb") as f:
+        f.seek(entry["abs_offset"] + start * 2)
+        raw = f.read(want)
+    if len(raw) != want:
+        raise MetricsError(
+            f"{entry['name']}: truncated pack -- wanted {want} bytes for fp16 values "
+            f"[{start}, {start + count}), got {len(raw)}"
+        )
+    return np.frombuffer(raw, dtype="<f2").astype(np.float32)
 
 
 def read_f16(pack: Path, entry: dict) -> np.ndarray:
