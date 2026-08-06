@@ -433,6 +433,8 @@ def _reference_summary(ref_trace: Trace) -> dict:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.tokens < 1:
+        raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
     ids = token_ids(args.tokens, args.seed, vocab=131072)
     names = [stem_of_inverse(p) for p in sorted(args.npy_dir.glob("*.npy"))]
     reference = NpyWeights(args.npy_dir, names, expect_block=EXPECT_BLOCK)

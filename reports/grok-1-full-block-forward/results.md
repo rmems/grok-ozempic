@@ -71,7 +71,7 @@ residual-inclusive figures (90.65% / 96.97%) rested on the wrong ordering and
 should not be carried forward.
 
 Separately, **slot_05 is `query`**, whose output never reaches the router. PR
-#57's measurement of slot_05 through the router was never an architecturally
+\#57's measurement of slot_05 through the router was never an architecturally
 meaningful path.
 
 ### Exact kernel semantics recovered
@@ -219,8 +219,8 @@ better.
 ### Cosine is actively anti-correlated with routing at high τ
 
 Attention-output cosine rises monotonically with τ (0.659 → 0.899) while top-2
-agreement **falls** (0.278 → 0.148). The best-reconstructing setting is the
-worst-routing one.
+agreement rises initially (peaking at τ=0.6) before declining to end lower
+overall (0.278 → 0.148). The best-reconstructing setting is the worst-routing one.
 
 The metric that *does* track routing is the **normalized MoE-input cosine** —
 the router's actual input — which peaks and then falls in step with agreement.

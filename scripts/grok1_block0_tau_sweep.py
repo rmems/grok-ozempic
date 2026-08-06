@@ -51,7 +51,6 @@ from grok1_block_weights import (  # noqa: E402
     PackWeights,
     WeightSource,
     implementation_commit,
-    sha256_file,
 )
 
 EXPECT_BLOCK = "block_000"
@@ -147,7 +146,7 @@ def _sweep_row(
     row = {
         "tau": tau,
         "pack": pack_path.name,
-        "pack_sha256": sha256_file(pack_path),
+        "pack_sha256": pack.pack_sha256(),
         "pack_bytes": pack_path.stat().st_size,
         "sparsity": sparsity,
         "sparsity_expected_gaussian": expected_sparsity(tau),
@@ -200,6 +199,8 @@ def _payload(args: argparse.Namespace, reference, ref, ids: np.ndarray, rows: li
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.tokens < 1:
+        raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
     packs = sorted(args.pack_dir.glob("attn-tau-*.goz1"), key=tau_of)
     if not packs:
         raise ForwardError(f"{args.pack_dir}: no attn-tau-*.goz1 packs found")

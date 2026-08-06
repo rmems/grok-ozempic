@@ -345,6 +345,10 @@ class PackWeights(WeightSource):
             "reference_npy": self._reference_stats(),
         }
 
+    def pack_sha256(self) -> str:
+        """Return the cached pack SHA-256 hash from the fingerprint."""
+        return self._fingerprint()["pack_sha256"]
+
     def _reference_stats(self) -> dict[str, list[int]]:
         """``{stem: [size, mtime_ns]}`` for each reference npy backing a tensor."""
         stats: dict[str, list[int]] = {}
@@ -370,10 +374,24 @@ class PackWeights(WeightSource):
                 file=sys.stderr,
             )
             return {}
+        # Validate that the decoded payload is a dict before accessing keys.
+        # main() only catches (ForwardError, MetricsError, OSError, ValueError),
+        # so a raw AttributeError/TypeError here would surface as an uncaught
+        # traceback rather than a clean CLI error.
+        if not isinstance(raw, dict):
+            raise ForwardError(f"{self._cache_path.name}: cache payload is not a JSON object")
         # Legacy flat caches carry no fingerprint and cannot be validated.
         if raw.get("fingerprint") != self._fingerprint():
             return {}
-        return {n: TernaryScale(**v) for n, v in raw.get("scales", {}).items()}
+        scales_data = raw.get("scales", {})
+        if not isinstance(scales_data, dict):
+            raise ForwardError(f"{self._cache_path.name}: 'scales' field is not a JSON object")
+        try:
+            return {n: TernaryScale(**v) for n, v in scales_data.items()}
+        except TypeError as exc:
+            raise ForwardError(
+                f"{self._cache_path.name}: malformed scale entry ({exc})"
+            ) from exc
 
     def _save_cache(self) -> None:
         payload = {

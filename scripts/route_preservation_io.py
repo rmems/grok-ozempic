@@ -139,6 +139,11 @@ def read_f16_slice(pack: Path, entry: dict, start: int, count: int) -> np.ndarra
     preserve-tier ``(8, 6144, 32768)`` tensor reads 400 MiB rather than decoding
     all 3.2 GiB.
     """
+    numel = int(entry["numel"])
+    if start + count > numel:
+        raise MetricsError(
+            f"{entry['name']}: slice [{start}, {start + count}) exceeds tensor size {numel}"
+        )
     want = count * 2
     with pack.open("rb") as f:
         f.seek(entry["abs_offset"] + start * 2)
