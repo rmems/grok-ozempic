@@ -1,0 +1,19 @@
+scripts/test_grok1_block_weights.py
+  s_f430523a053518::t_27cfbeb4c1fa3d 31,148-149,151-154,157-158,160-162,164-165,168-169,171-173,178-180,200-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7151361f5750ac1e0b86d7953f4f1fd1a35b3fb6",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
