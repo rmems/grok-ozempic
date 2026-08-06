@@ -1,0 +1,30 @@
+.claude/rules/agent-workflow.md
+  s_f430523a053518::t_74df19a209351d 7
+  s_f430523a053518::t_199625f1f19e83 8
+  s_f430523a053518::t_1c7a6e74fcc461 6
+CLAUDE.md
+  s_f430523a053518::t_2b40b2f0760eaf 14
+  s_f430523a053518::t_042576b7e81e63 9-10,13,15-19
+  s_f430523a053518::t_1c7a6e74fcc461 12
+  s_f430523a053518::t_199625f1f19e83 29-35
+.gitignore
+  s_f430523a053518::t_af0590345da283 10
+  s_f430523a053518::t_27045c09bc060d 3,34
+  s_f430523a053518::t_1c7a6e74fcc461 4-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d08a7f66ec6f319d3baadbcb9332be19093141f0",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
