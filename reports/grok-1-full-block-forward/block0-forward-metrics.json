@@ -1,0 +1,494 @@
+{
+  "provenance": {
+    "issue": "GH #61 / Linear RM-249",
+    "agent": "Claude Code: Fable 5 (xhigh)",
+    "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+    "pack": "block_000-attention_plus_expert.goz1",
+    "pack_metadata": {
+      "grok1.architecture": "grok-1",
+      "grok1.attention.head_count": 48,
+      "grok1.attention.head_count_kv": 8,
+      "grok1.block_count": 64,
+      "grok1.context_length": 8192,
+      "grok1.embedding_length": 6144,
+      "grok1.expert_count": 8,
+      "grok1.feed_forward_length": 32768,
+      "oz.gif_threshold": "0.05",
+      "oz.name": "grok-ozempic",
+      "oz.quantization_version": 1
+    },
+    "npy_dir": "goz53-block000-attn",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
+    "tokens": 2048,
+    "token_seed": 20260806,
+    "token_id_first": 61,
+    "token_id_last": 130950,
+    "top_k": 2,
+    "numpy": "2.5.1",
+    "python": "3.14.6",
+    "oracle_alpha": {
+      "block_000.slot_00.moe_expert.gate": {
+        "alpha": 0.03446429262403113,
+        "sparsity": 0.652848777671655,
+        "fired": 559126180,
+        "total": 1610612736
+      },
+      "block_000.slot_01.moe_expert.down": {
+        "alpha": 0.022704254828049837,
+        "sparsity": 0.6372781544923782,
+        "fired": 584204424,
+        "total": 1610612736
+      },
+      "block_000.slot_02.moe_expert.up": {
+        "alpha": 0.034396705025337225,
+        "sparsity": 0.6443704627454281,
+        "fired": 572781462,
+        "total": 1610612736
+      },
+      "block_000.slot_03.attn_proj_i8.narrow": {
+        "alpha": 0.011270628247707765,
+        "sparsity": 0.33654117584228516,
+        "fired": 4174122,
+        "total": 6291456
+      },
+      "block_000.slot_04.attn_proj_i8.model_width": {
+        "alpha": 0.00769032174762091,
+        "sparsity": 0.3336911201477051,
+        "fired": 25152318,
+        "total": 37748736
+      },
+      "block_000.slot_05.attn_proj_i8.model_width": {
+        "alpha": 0.011285860723522544,
+        "sparsity": 0.3221785757276747,
+        "fired": 25586902,
+        "total": 37748736
+      },
+      "block_000.slot_06.attn_proj_i8.narrow": {
+        "alpha": 0.011283784705669356,
+        "sparsity": 0.32536681493123376,
+        "fired": 4244425,
+        "total": 6291456
+      }
+    },
+    "ternary_scale_note": "GOZ1 stores no per-tensor scale, so ternary weights are reconstructed with the least-squares optimal alpha derived from the original f32 weights. This is an oracle a real runtime does not have, so every number here is a best case."
+  },
+  "slot_roles": {
+    "attn_out": "block_000.slot_04.attn_proj_i8.model_width",
+    "expert_down": "block_000.slot_01.moe_expert.down",
+    "expert_gelu": "block_000.slot_00.moe_expert.gate",
+    "expert_value": "block_000.slot_02.moe_expert.up",
+    "key": "block_000.slot_03.attn_proj_i8.narrow",
+    "norm_post_attn": "block_000.slot_08.block_norm",
+    "norm_post_moe": "block_000.slot_10.block_norm",
+    "norm_pre_attn": "block_000.slot_07.block_norm",
+    "norm_pre_moe": "block_000.slot_09.block_norm",
+    "query": "block_000.slot_05.attn_proj_i8.model_width",
+    "router": "block_000.slot_11.router",
+    "value": "block_000.slot_06.attn_proj_i8.narrow"
+  },
+  "reference": {
+    "expert_load": [
+      0.131591796875,
+      0.102294921875,
+      0.166259765625,
+      0.125732421875,
+      0.114013671875,
+      0.127197265625,
+      0.12841796875,
+      0.1044921875
+    ],
+    "router_margin_mean": 0.030204767217204893,
+    "router_margin_median": 0.006170911132304002,
+    "experts_touched": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "attn_delta_over_stream": 0.876171414302045,
+    "moe_delta_over_stream": 0.4827437027494788,
+    "seconds": 16.7226459980011
+  },
+  "comparisons": [
+    {
+      "label": "fp16_roundtrip",
+      "seconds": 31.4331374168396,
+      "attention_output_cosine": 0.9999999984424572,
+      "attention_output_cosine_per_token": 0.9999999986030829,
+      "residual_stream_cosine": 0.9999999831365632,
+      "moe_input_normalized_cosine": 0.9999999606124855,
+      "router_logit_cosine": 0.9999999971511485,
+      "moe_output_cosine": 0.9999813002410165,
+      "block_output_cosine": 0.9999870040318545,
+      "block_output_cosine_per_token": 0.9999880581321908,
+      "residual_drift_relative_norm": 0.00021537234101925558,
+      "block_output_drift_relative_norm": 0.005098830221729304,
+      "attn_delta_over_stream": 0.8760054853350859,
+      "moe_delta_over_stream": 0.482784499720899,
+      "router_top1_agreement": 0.9970703125,
+      "router_top2_set_agreement": 0.9990234375,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.11376953125,
+        0.127685546875,
+        0.12841796875,
+        0.104248046875
+      ],
+      "expert_load_js_bits": 5.347430923457726e-07,
+      "expert_load_max_abs_delta": 0.00048828125,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.030207654444896787,
+      "router_margin_mean_delta": 2.8872276918900968e-06,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.0061808020273402264,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 6,
+          "top1_flip_rate": 0.005115089514066497
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "label": "goz1_pack",
+      "seconds": 33.4702582359314,
+      "attention_output_cosine": 0.6940020562994945,
+      "attention_output_cosine_per_token": 0.7152323961545908,
+      "residual_stream_cosine": 0.8520368529920752,
+      "moe_input_normalized_cosine": 0.9015387170318874,
+      "router_logit_cosine": 0.9919558242505194,
+      "moe_output_cosine": 0.5318363043404472,
+      "block_output_cosine": 0.7722995693811194,
+      "block_output_cosine_per_token": 0.7725224441728881,
+      "residual_drift_relative_norm": 0.5290353565880637,
+      "block_output_drift_relative_norm": 0.673047973331658,
+      "attn_delta_over_stream": 0.9221869464012775,
+      "moe_delta_over_stream": 0.6064982247591109,
+      "router_top1_agreement": 0.55078125,
+      "router_top2_set_agreement": 0.3037109375,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.21728515625,
+        0.21337890625,
+        0.0751953125,
+        0.087158203125,
+        0.002197265625,
+        0.05126953125,
+        0.21044921875,
+        0.14306640625
+      ],
+      "expert_load_js_bits": 0.10899600597624538,
+      "expert_load_max_abs_delta": 0.11181640625,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.047358727311470776,
+      "router_margin_mean_delta": 0.017153960094265886,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.010049757370186749,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 706,
+          "top1_flip_rate": 0.6018755328218244
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 153,
+          "top1_flip_rate": 0.345372460496614
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 58,
+          "top1_flip_rate": 0.1676300578034682
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 3,
+          "top1_flip_rate": 0.03488372093023256
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "label": "goz1_attention_ternary_only",
+      "seconds": 14.67780613899231,
+      "attention_output_cosine": 0.6940020873463366,
+      "attention_output_cosine_per_token": 0.7152333533468802,
+      "residual_stream_cosine": 0.8520638509820196,
+      "moe_input_normalized_cosine": 0.9015516802670659,
+      "router_logit_cosine": 0.9919571994722097,
+      "moe_output_cosine": 0.7447908827677504,
+      "block_output_cosine": 0.8064531098603722,
+      "block_output_cosine_per_token": 0.8063090968761824,
+      "residual_drift_relative_norm": 0.5289903859151668,
+      "block_output_drift_relative_norm": 0.6088791597007991,
+      "attn_delta_over_stream": 0.9222133116118338,
+      "moe_delta_over_stream": 0.5459685107507056,
+      "router_top1_agreement": 0.55126953125,
+      "router_top2_set_agreement": 0.30419921875,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.21728515625,
+        0.213134765625,
+        0.074951171875,
+        0.087158203125,
+        0.002197265625,
+        0.051513671875,
+        0.21044921875,
+        0.143310546875
+      ],
+      "expert_load_js_bits": 0.10895478710434198,
+      "expert_load_max_abs_delta": 0.11181640625,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.047350876892678,
+      "router_margin_mean_delta": 0.017146109675473108,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.010032188356574379,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 707,
+          "top1_flip_rate": 0.6027280477408354
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 152,
+          "top1_flip_rate": 0.3431151241534989
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 57,
+          "top1_flip_rate": 0.16473988439306358
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 3,
+          "top1_flip_rate": 0.03488372093023256
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "label": "goz1_expert_ternary_only",
+      "seconds": 34.13565754890442,
+      "attention_output_cosine": 1.0,
+      "attention_output_cosine_per_token": 1.0,
+      "residual_stream_cosine": 1.0000000000000002,
+      "moe_input_normalized_cosine": 1.0,
+      "router_logit_cosine": 1.0,
+      "moe_output_cosine": 0.7734826618659498,
+      "block_output_cosine": 0.9635717953874715,
+      "block_output_cosine_per_token": 0.9610040055361724,
+      "residual_drift_relative_norm": 0.0,
+      "block_output_drift_relative_norm": 0.2773508234849458,
+      "attn_delta_over_stream": 0.876171414302045,
+      "moe_delta_over_stream": 0.5761949397414952,
+      "router_top1_agreement": 1.0,
+      "router_top2_set_agreement": 1.0,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_js_bits": 0.0,
+      "expert_load_max_abs_delta": 0.0,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.030204767217204893,
+      "router_margin_mean_delta": 0.0,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.006170911132304002,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 0,
+          "top1_flip_rate": 0.0
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    }
+  ]
+}

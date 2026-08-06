@@ -1,0 +1,841 @@
+{
+  "provenance": {
+    "issue": "GH #61 / Linear RM-249",
+    "agent": "Claude Code: Fable 5 (xhigh)",
+    "design": "Attention tier only; experts held at the f32 reference because single-block routing is computed upstream of the experts.",
+    "tokens": 2048,
+    "token_seed": 20260806,
+    "top_k": 2,
+    "numpy": "2.5.1"
+  },
+  "reference": {
+    "expert_load": [
+      0.131591796875,
+      0.102294921875,
+      0.166259765625,
+      0.125732421875,
+      0.114013671875,
+      0.127197265625,
+      0.12841796875,
+      0.1044921875
+    ],
+    "router_margin_median": 0.006170911132304002
+  },
+  "sweep": [
+    {
+      "tau": 0.1,
+      "pack": "attn-tau-0.1.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.08666308720906579,
+        "slot_04.attn_proj_i8.model_width": 0.0859593550364176,
+        "slot_05.attn_proj_i8.model_width": 0.08295186360677087,
+        "slot_06.attn_proj_i8.narrow": 0.08370224634806311
+      },
+      "label": "attn_tau_0.1",
+      "seconds": 15.681739807128906,
+      "attention_output_cosine": 0.6592071839720569,
+      "attention_output_cosine_per_token": 0.6819371823399478,
+      "residual_stream_cosine": 0.8296113150997796,
+      "moe_input_normalized_cosine": 0.8701497686564467,
+      "router_logit_cosine": 0.9910102692791797,
+      "moe_output_cosine": 0.7262906253800726,
+      "block_output_cosine": 0.7908109967745105,
+      "block_output_cosine_per_token": 0.7897410389864343,
+      "residual_drift_relative_norm": 0.5648335159743757,
+      "block_output_drift_relative_norm": 0.631454652585991,
+      "attn_delta_over_stream": 0.9076228306321326,
+      "moe_delta_over_stream": 0.5432591995079622,
+      "router_top1_agreement": 0.505859375,
+      "router_top2_set_agreement": 0.27783203125,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.21923828125,
+        0.14013671875,
+        0.04833984375,
+        0.080078125,
+        0.001708984375,
+        0.095703125,
+        0.276123046875,
+        0.138671875
+      ],
+      "expert_load_js_bits": 0.11321887431573927,
+      "expert_load_max_abs_delta": 0.147705078125,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.04731407405325782,
+      "router_margin_mean_delta": 0.01710930683605292,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.011466065376517898,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 758,
+          "top1_flip_rate": 0.6462063086104007
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 169,
+          "top1_flip_rate": 0.38148984198645597
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 81,
+          "top1_flip_rate": 0.23410404624277456
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 4,
+          "top1_flip_rate": 0.046511627906976744
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 0.2,
+      "pack": "attn-tau-0.2.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.17252874374389648,
+        "slot_04.attn_proj_i8.model_width": 0.17079745398627388,
+        "slot_05.attn_proj_i8.model_width": 0.16496353679233122,
+        "slot_06.attn_proj_i8.narrow": 0.1668229103088379
+      },
+      "label": "attn_tau_0.2",
+      "seconds": 14.977640628814697,
+      "attention_output_cosine": 0.6683543560900498,
+      "attention_output_cosine_per_token": 0.6908134593227351,
+      "residual_stream_cosine": 0.8351077117589413,
+      "moe_input_normalized_cosine": 0.880618004650171,
+      "router_logit_cosine": 0.9913387435490705,
+      "moe_output_cosine": 0.7242597551903422,
+      "block_output_cosine": 0.7889423647470201,
+      "block_output_cosine_per_token": 0.7884315786191515,
+      "residual_drift_relative_norm": 0.5564888150464791,
+      "block_output_drift_relative_norm": 0.6355329066025824,
+      "attn_delta_over_stream": 0.9114832391851089,
+      "moe_delta_over_stream": 0.5391463905028457,
+      "router_top1_agreement": 0.5068359375,
+      "router_top2_set_agreement": 0.26953125,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.20556640625,
+        0.178955078125,
+        0.052734375,
+        0.0615234375,
+        0.001953125,
+        0.075439453125,
+        0.277099609375,
+        0.146728515625
+      ],
+      "expert_load_js_bits": 0.12229048968125684,
+      "expert_load_max_abs_delta": 0.148681640625,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.04259501709005715,
+      "router_margin_mean_delta": 0.012390249872852258,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.008820215377112667,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 732,
+          "top1_flip_rate": 0.6240409207161125
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 180,
+          "top1_flip_rate": 0.40632054176072235
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 93,
+          "top1_flip_rate": 0.26878612716763006
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 5,
+          "top1_flip_rate": 0.05813953488372093
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 0.4,
+      "pack": "attn-tau-0.4.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.33654117584228516,
+        "slot_04.attn_proj_i8.model_width": 0.3336911201477051,
+        "slot_05.attn_proj_i8.model_width": 0.3221785757276747,
+        "slot_06.attn_proj_i8.narrow": 0.32536681493123376
+      },
+      "label": "attn_tau_0.4",
+      "seconds": 13.570190191268921,
+      "attention_output_cosine": 0.6940020873463366,
+      "attention_output_cosine_per_token": 0.7152333533468802,
+      "residual_stream_cosine": 0.8520638509820196,
+      "moe_input_normalized_cosine": 0.9015516802670659,
+      "router_logit_cosine": 0.9919571994722097,
+      "moe_output_cosine": 0.7447908827677504,
+      "block_output_cosine": 0.8064531098603722,
+      "block_output_cosine_per_token": 0.8063090968761824,
+      "residual_drift_relative_norm": 0.5289903859151668,
+      "block_output_drift_relative_norm": 0.6088791597007991,
+      "attn_delta_over_stream": 0.9222133116118338,
+      "moe_delta_over_stream": 0.5459685107507056,
+      "router_top1_agreement": 0.55126953125,
+      "router_top2_set_agreement": 0.30419921875,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.21728515625,
+        0.213134765625,
+        0.074951171875,
+        0.087158203125,
+        0.002197265625,
+        0.051513671875,
+        0.21044921875,
+        0.143310546875
+      ],
+      "expert_load_js_bits": 0.10895478710434198,
+      "expert_load_max_abs_delta": 0.11181640625,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.047350876892678,
+      "router_margin_mean_delta": 0.017146109675473108,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.010032188356574379,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 707,
+          "top1_flip_rate": 0.6027280477408354
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 152,
+          "top1_flip_rate": 0.3431151241534989
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 57,
+          "top1_flip_rate": 0.16473988439306358
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 3,
+          "top1_flip_rate": 0.03488372093023256
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 0.6,
+      "pack": "attn-tau-0.6.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.4836085637410482,
+        "slot_04.attn_proj_i8.model_width": 0.4808473851945665,
+        "slot_05.attn_proj_i8.model_width": 0.46593125661214196,
+        "slot_06.attn_proj_i8.narrow": 0.4701056480407715
+      },
+      "label": "attn_tau_0.6",
+      "seconds": 14.184866189956665,
+      "attention_output_cosine": 0.7303809213878721,
+      "attention_output_cosine_per_token": 0.7494975691968067,
+      "residual_stream_cosine": 0.8707542046193044,
+      "moe_input_normalized_cosine": 0.9167546655076892,
+      "router_logit_cosine": 0.9926388576484938,
+      "moe_output_cosine": 0.7487476544614992,
+      "block_output_cosine": 0.8171827340785156,
+      "block_output_cosine_per_token": 0.8171785578101253,
+      "residual_drift_relative_norm": 0.49810852983866494,
+      "block_output_drift_relative_norm": 0.592825054938303,
+      "attn_delta_over_stream": 0.9410632195333158,
+      "moe_delta_over_stream": 0.5344879859982987,
+      "router_top1_agreement": 0.56640625,
+      "router_top2_set_agreement": 0.30810546875,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.173095703125,
+        0.176513671875,
+        0.13916015625,
+        0.083740234375,
+        0.00244140625,
+        0.044189453125,
+        0.293701171875,
+        0.087158203125
+      ],
+      "expert_load_js_bits": 0.10253433729001477,
+      "expert_load_max_abs_delta": 0.165283203125,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.03771292055867246,
+      "router_margin_mean_delta": 0.007508153341467563,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.008023267221204694,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 681,
+          "top1_flip_rate": 0.5805626598465473
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 157,
+          "top1_flip_rate": 0.3544018058690745
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 49,
+          "top1_flip_rate": 0.1416184971098266
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 1,
+          "top1_flip_rate": 0.011627906976744186
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 0.8,
+      "pack": "attn-tau-0.8.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.6090842882792156,
+        "slot_04.attn_proj_i8.model_width": 0.6084998713599311,
+        "slot_05.attn_proj_i8.model_width": 0.5908790164523654,
+        "slot_06.attn_proj_i8.narrow": 0.5950547854105632
+      },
+      "label": "attn_tau_0.8",
+      "seconds": 12.498293399810791,
+      "attention_output_cosine": 0.7857555095684784,
+      "attention_output_cosine_per_token": 0.8040123052723027,
+      "residual_stream_cosine": 0.8949252265228429,
+      "moe_input_normalized_cosine": 0.9039678392586037,
+      "router_logit_cosine": 0.9910881370589534,
+      "moe_output_cosine": 0.7132623794556953,
+      "block_output_cosine": 0.8496555243608246,
+      "block_output_cosine_per_token": 0.8495965609774461,
+      "residual_drift_relative_norm": 0.4551003151745244,
+      "block_output_drift_relative_norm": 0.5432037163497931,
+      "attn_delta_over_stream": 0.9696342512747983,
+      "moe_delta_over_stream": 0.5183251049312805,
+      "router_top1_agreement": 0.5244140625,
+      "router_top2_set_agreement": 0.27099609375,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.219970703125,
+        0.115478515625,
+        0.306884765625,
+        0.084716796875,
+        0.015625,
+        0.0087890625,
+        0.222900390625,
+        0.025634765625
+      ],
+      "expert_load_js_bits": 0.1292639683457248,
+      "expert_load_max_abs_delta": 0.140625,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.050668086719685666,
+      "router_margin_mean_delta": 0.020463319502480766,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.011216644730204256,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 745,
+          "top1_flip_rate": 0.6351236146632566
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 163,
+          "top1_flip_rate": 0.36794582392776526
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 64,
+          "top1_flip_rate": 0.18497109826589594
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 2,
+          "top1_flip_rate": 0.023255813953488372
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 1.0,
+      "pack": "attn-tau-1.0.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.7115236918131511,
+        "slot_04.attn_proj_i8.model_width": 0.7129982047610812,
+        "slot_05.attn_proj_i8.model_width": 0.6959578196207683,
+        "slot_06.attn_proj_i8.narrow": 0.6992530822753906
+      },
+      "label": "attn_tau_1.0",
+      "seconds": 13.261781692504883,
+      "attention_output_cosine": 0.8404000501766765,
+      "attention_output_cosine_per_token": 0.8557574350816874,
+      "residual_stream_cosine": 0.9215224333234749,
+      "moe_input_normalized_cosine": 0.8903112045145384,
+      "router_logit_cosine": 0.9911810370642574,
+      "moe_output_cosine": 0.7104573219135238,
+      "block_output_cosine": 0.8817757312824375,
+      "block_output_cosine_per_token": 0.8818429270015898,
+      "residual_drift_relative_norm": 0.4048631714970256,
+      "block_output_drift_relative_norm": 0.49260581488330935,
+      "attn_delta_over_stream": 1.0123142884177008,
+      "moe_delta_over_stream": 0.486945388995087,
+      "router_top1_agreement": 0.4931640625,
+      "router_top2_set_agreement": 0.248046875,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.199462890625,
+        0.048828125,
+        0.39794921875,
+        0.078125,
+        0.088134765625,
+        0.0068359375,
+        0.17578125,
+        0.0048828125
+      ],
+      "expert_load_js_bits": 0.14312771850709652,
+      "expert_load_max_abs_delta": 0.231689453125,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.04500786576335755,
+      "router_margin_mean_delta": 0.014803098546152646,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.0110036996935136,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 779,
+          "top1_flip_rate": 0.6641091219096334
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 178,
+          "top1_flip_rate": 0.4018058690744921
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 79,
+          "top1_flip_rate": 0.22832369942196531
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 2,
+          "top1_flip_rate": 0.023255813953488372
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 1.2,
+      "pack": "attn-tau-1.2.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.7905298868815104,
+        "slot_04.attn_proj_i8.model_width": 0.7951975928412544,
+        "slot_05.attn_proj_i8.model_width": 0.7794376744164361,
+        "slot_06.attn_proj_i8.narrow": 0.7817619641621908
+      },
+      "label": "attn_tau_1.2",
+      "seconds": 13.123982191085815,
+      "attention_output_cosine": 0.8899305670638377,
+      "attention_output_cosine_per_token": 0.9025396321283661,
+      "residual_stream_cosine": 0.939853972300652,
+      "moe_input_normalized_cosine": 0.8934750449678699,
+      "router_logit_cosine": 0.9911421846047301,
+      "moe_output_cosine": 0.7261434171257182,
+      "block_output_cosine": 0.8981005859278001,
+      "block_output_cosine_per_token": 0.8980830903951857,
+      "residual_drift_relative_norm": 0.369056578692353,
+      "block_output_drift_relative_norm": 0.4652164923285961,
+      "attn_delta_over_stream": 1.0354657202495288,
+      "moe_delta_over_stream": 0.4663679433657316,
+      "router_top1_agreement": 0.46630859375,
+      "router_top2_set_agreement": 0.17919921875,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.17919921875,
+        0.02783203125,
+        0.4208984375,
+        0.075927734375,
+        0.259521484375,
+        0.0009765625,
+        0.034912109375,
+        0.000732421875
+      ],
+      "expert_load_js_bits": 0.2155843225892316,
+      "expert_load_max_abs_delta": 0.254638671875,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 0,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.037113714734143,
+      "router_margin_mean_delta": 0.006908947516938103,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.010491938250514393,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 810,
+          "top1_flip_rate": 0.690537084398977
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 203,
+          "top1_flip_rate": 0.4582392776523702
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 76,
+          "top1_flip_rate": 0.21965317919075145
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 4,
+          "top1_flip_rate": 0.046511627906976744
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    {
+      "tau": 1.6,
+      "pack": "attn-tau-1.6.goz1",
+      "sparsity": {
+        "slot_03.attn_proj_i8.narrow": 0.8953730265299479,
+        "slot_04.attn_proj_i8.model_width": 0.9026632308959961,
+        "slot_05.attn_proj_i8.model_width": 0.8928340276082357,
+        "slot_06.attn_proj_i8.narrow": 0.8933672904968262
+      },
+      "label": "attn_tau_1.6",
+      "seconds": 11.752634048461914,
+      "attention_output_cosine": 0.8994259975978504,
+      "attention_output_cosine_per_token": 0.9121963470678534,
+      "residual_stream_cosine": 0.9441519705581737,
+      "moe_input_normalized_cosine": 0.8245691527710912,
+      "router_logit_cosine": 0.9902756417001566,
+      "moe_output_cosine": 0.7233418882079503,
+      "block_output_cosine": 0.9172670492125661,
+      "block_output_cosine_per_token": 0.9151671493797464,
+      "residual_drift_relative_norm": 0.414590671701332,
+      "block_output_drift_relative_norm": 0.46994708966231213,
+      "attn_delta_over_stream": 1.0827295984481613,
+      "moe_delta_over_stream": 0.3935953600801783,
+      "router_top1_agreement": 0.4892578125,
+      "router_top2_set_agreement": 0.1484375,
+      "expert_load_reference": [
+        0.131591796875,
+        0.102294921875,
+        0.166259765625,
+        0.125732421875,
+        0.114013671875,
+        0.127197265625,
+        0.12841796875,
+        0.1044921875
+      ],
+      "expert_load_observed": [
+        0.21435546875,
+        0.00048828125,
+        0.25341796875,
+        0.15673828125,
+        0.36376953125,
+        0.00341796875,
+        0.0078125,
+        0.0
+      ],
+      "expert_load_js_bits": 0.26635526685454985,
+      "expert_load_max_abs_delta": 0.249755859375,
+      "experts_unused_reference": 0,
+      "experts_unused_observed": 1,
+      "router_margin_mean_reference": 0.030204767217204893,
+      "router_margin_mean_observed": 0.04490342261482776,
+      "router_margin_mean_delta": 0.014698655397622861,
+      "router_margin_median_reference": 0.006170911132304002,
+      "router_margin_median_observed": 0.016901693357858183,
+      "flip_stratification_by_reference_margin": [
+        {
+          "margin_low": 0.0,
+          "margin_high": 0.01,
+          "tokens": 1173,
+          "top1_flips": 890,
+          "top1_flip_rate": 0.7587382779198636
+        },
+        {
+          "margin_low": 0.01,
+          "margin_high": 0.05,
+          "tokens": 443,
+          "top1_flips": 127,
+          "top1_flip_rate": 0.2866817155756208
+        },
+        {
+          "margin_low": 0.05,
+          "margin_high": 0.15,
+          "tokens": 346,
+          "top1_flips": 28,
+          "top1_flip_rate": 0.08092485549132948
+        },
+        {
+          "margin_low": 0.15,
+          "margin_high": 0.5,
+          "tokens": 86,
+          "top1_flips": 1,
+          "top1_flip_rate": 0.011627906976744186
+        },
+        {
+          "margin_low": 0.5,
+          "margin_high": 1.01,
+          "tokens": 0,
+          "top1_flips": 0,
+          "top1_flip_rate": null
+        }
+      ],
+      "experts_touched": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    }
+  ]
+}

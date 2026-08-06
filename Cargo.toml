@@ -1,6 +1,6 @@
 [package]
 name = "grok-ozempic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "SNN-logic quantization for Grok models — turning big model into spikes"
 repository = "https://github.com/rmems/grok-ozempic"
@@ -18,7 +18,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
 thiserror = "2.0"
-safetensors = "0.8"          # optional HF-style shards (JAX workflows often use .npy via npy module)
+safetensors = "0.8.0"          # optional HF-style shards (JAX workflows often use .npy via npy module)
 memmap2 = "0.9"              # zero-copy memory-mapped file I/O for out-of-core streaming
 half = "2.4"                 # FP16 (f16) type for mixed-precision router weights
 tokio = { version = "1.0", features = ["full"], optional = true }  # future async loading
