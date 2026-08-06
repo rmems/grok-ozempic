@@ -67,22 +67,34 @@ just doctor             # env/path diagnosis (always exit 0)
 just experiment-smoke   # release CLI --help + local data probe
 ```
 
-Equivalent cargo fallback if `just` is unavailable:
+If `just` is unavailable, mirror the recipes manually (include Python — do not cargo-only):
 
 ```bash
-# Unit + integration tests (CLI surface)
-cargo test --features cli --locked
-
-# Lint / format (match CI spirit)
+# just check
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 
-# CLI binary
+# just test (numpy required for several scripts/test_* modules)
+python3 -c 'import numpy; print(numpy.__version__)'
+cargo test --features cli --locked
+python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_select -v
+python3 -m unittest scripts.test_route_preservation_surface -v
+python3 -m unittest scripts.test_route_preservation_io -v
+
+# just ci (pre-PR parity; --locked is intentional and stricter than GHA)
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+cargo build --all-targets --all-features --locked
+cargo doc --no-deps --all-features --locked
+# + the five python3 -m unittest lines above
+for f in scripts/*.sh; do bash -n "$f"; done
+
+# CLI smoke
 cargo run --features cli -- --help
 cargo run --features cli -- quantize-goz1 --help
-
-# Full matrix (slower)
-cargo test --all-targets --all-features --locked
 ```
 
 Python 3 is only required for Grok-1 pickle → `.npy` export and host-side analysis:

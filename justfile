@@ -20,6 +20,12 @@ default:
 _python-tests:
     #!/usr/bin/env bash
     set -euo pipefail
+    if ! python3 -c 'import numpy' >/dev/null 2>&1; then
+      echo "error: numpy is required for Python script unittests" >&2
+      echo "       install: python3 -m pip install --user 'numpy>=1.26,<3'" >&2
+      echo "       (matches .github/workflows/python-scripts.yml)" >&2
+      exit 1
+    fi
     mods=(
       scripts.test_export_grok1_embedding_npy
       scripts.test_export_grok1_int8_npy
@@ -48,7 +54,8 @@ _bash-n-scripts:
 
 _optional-linters:
     #!/usr/bin/env bash
-    set -uo pipefail
+    # Fail-fast when an installed optional linter finds issues (just ci must not greenwash).
+    set -euo pipefail
     if command -v actionlint >/dev/null 2>&1; then
       echo "+ actionlint"
       actionlint
@@ -126,28 +133,61 @@ experiment-smoke:
     "${bin}" validate-ingest --help >/dev/null
     echo "ok: CLI help smoke passed"
 
-    CKPT="${CKPT:-${HOME}/.models/xai-grok-1/ckpt-0}"
-    DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN:-${HOME}/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN}"
-    RUN3="${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0"
+    # HOME may be unset under set -u; default paths only when present.
+    home="${HOME-}"
+    if [[ -n "${CKPT-}" ]]; then
+      CKPT="${CKPT}"
+    elif [[ -n "${home}" ]]; then
+      CKPT="${home}/.models/xai-grok-1/ckpt-0"
+    else
+      CKPT=""
+    fi
+
+    # GROK_OZEMPIC_DISSECT_RUN may be either:
+    #   (a) run root (.../LATEST_CORRECT_GROK1_RUN) — scripts/block_pilot_goz1.sh style, or
+    #   (b) already-resolved run3 dir (.../manifests/xai-grok-1-ckpt-0) — Rust test contract
+    #       in stream.rs (joins conversion-manifest.json directly).
+    if [[ -n "${GROK_OZEMPIC_DISSECT_RUN-}" ]]; then
+      DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN}"
+    elif [[ -n "${home}" ]]; then
+      DISSECT_RUN="${home}/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN"
+    else
+      DISSECT_RUN=""
+    fi
+    RUN3=""
+    if [[ -n "${DISSECT_RUN}" ]]; then
+      if [[ -f "${DISSECT_RUN}/conversion-manifest.json" ]]; then
+        RUN3="${DISSECT_RUN}"
+      elif [[ -f "${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0/conversion-manifest.json" ]]; then
+        RUN3="${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0"
+      fi
+    fi
     missing=0
 
-    if [[ ! -d "${CKPT}" ]]; then
-      echo "error: missing checkpoint directory: ${CKPT}" >&2
+    if [[ -z "${CKPT}" || ! -d "${CKPT}" ]]; then
+      echo "error: missing checkpoint directory: ${CKPT:-'(unset; set CKPT or HOME)'}" >&2
       echo "       set CKPT to your xai-grok-1 ckpt-0 path" >&2
       missing=1
     else
       echo "ok: CKPT=${CKPT}"
     fi
 
-    for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
-      if [[ ! -f "${RUN3}/${required}" ]]; then
-        echo "error: missing run3 ${required} under ${RUN3}" >&2
-        echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root" >&2
-        missing=1
-      fi
-    done
+    if [[ -z "${RUN3}" ]]; then
+      echo "error: could not resolve run3 manifests from GROK_OZEMPIC_DISSECT_RUN=${DISSECT_RUN:-'(unset)'}" >&2
+      echo "       set GROK_OZEMPIC_DISSECT_RUN to either the xai-dissect run root or the" >&2
+      echo "       .../manifests/xai-grok-1-ckpt-0 directory (must contain conversion-manifest.json)" >&2
+      missing=1
+    else
+      for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
+        if [[ ! -f "${RUN3}/${required}" ]]; then
+          echo "error: missing run3 ${required} under ${RUN3}" >&2
+          missing=1
+        fi
+      done
+    fi
     if [[ ${missing} -eq 0 ]]; then
       echo "ok: GROK_OZEMPIC_DISSECT_RUN=${DISSECT_RUN}"
+      echo "ok: run3 manifests=${RUN3}"
       echo "ok: experiment data present (not running full pilot; use scripts/block_pilot_goz1.sh)"
     else
       exit 1
@@ -225,26 +265,55 @@ doctor:
     fi
 
     echo "=== local experiment data (optional) ==="
-    CKPT="${CKPT:-${HOME}/.models/xai-grok-1/ckpt-0}"
-    DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN:-${HOME}/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN}"
-    RUN3="${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0"
-    if [[ -d "${CKPT}" ]]; then
+    home="${HOME-}"
+    if [[ -n "${CKPT-}" ]]; then
+      CKPT="${CKPT}"
+    elif [[ -n "${home}" ]]; then
+      CKPT="${home}/.models/xai-grok-1/ckpt-0"
+    else
+      CKPT=""
+    fi
+    if [[ -n "${GROK_OZEMPIC_DISSECT_RUN-}" ]]; then
+      DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN}"
+    elif [[ -n "${home}" ]]; then
+      DISSECT_RUN="${home}/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN"
+    else
+      DISSECT_RUN=""
+    fi
+    # Accept run root or already-resolved manifests dir (see experiment-smoke).
+    RUN3=""
+    if [[ -n "${DISSECT_RUN}" ]]; then
+      if [[ -f "${DISSECT_RUN}/conversion-manifest.json" ]]; then
+        RUN3="${DISSECT_RUN}"
+      elif [[ -f "${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0/conversion-manifest.json" ]]; then
+        RUN3="${DISSECT_RUN}/manifests/xai-grok-1-ckpt-0"
+      fi
+    fi
+    if [[ -z "${home}" && -z "${CKPT-}" ]]; then
+      status warn "HOME unset and CKPT unset — cannot form default checkpoint path"
+    elif [[ -n "${CKPT}" && -d "${CKPT}" ]]; then
       status ok "CKPT=${CKPT}"
     else
-      status missing "CKPT=${CKPT} (set CKPT for experiments)"
+      status missing "CKPT=${CKPT:-'(unset)'} (set CKPT for experiments)"
     fi
-    if [[ -d "${DISSECT_RUN}" ]]; then
+    if [[ -z "${home}" && -z "${GROK_OZEMPIC_DISSECT_RUN-}" ]]; then
+      status warn "HOME unset and GROK_OZEMPIC_DISSECT_RUN unset — cannot form default run3 path"
+    elif [[ -n "${DISSECT_RUN}" && -d "${DISSECT_RUN}" ]]; then
       status ok "GROK_OZEMPIC_DISSECT_RUN=${DISSECT_RUN}"
     else
-      status missing "GROK_OZEMPIC_DISSECT_RUN=${DISSECT_RUN}"
+      status missing "GROK_OZEMPIC_DISSECT_RUN=${DISSECT_RUN:-'(unset)'}"
     fi
-    for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
-      if [[ -f "${RUN3}/${required}" ]]; then
-        status ok "run3 ${required}"
-      else
-        status missing "run3 ${RUN3}/${required}"
-      fi
-    done
+    if [[ -z "${RUN3}" ]]; then
+      status missing "run3 manifests (conversion-manifest.json not found under DISSECT_RUN)"
+    else
+      for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
+        if [[ -f "${RUN3}/${required}" ]]; then
+          status ok "run3 ${required}"
+        else
+          status missing "run3 ${RUN3}/${required}"
+        fi
+      done
+    fi
 
     echo "=== GPU / CUDA (informational) ==="
     if command -v nvidia-smi >/dev/null 2>&1; then

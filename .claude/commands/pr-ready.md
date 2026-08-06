@@ -8,7 +8,8 @@ Prefer the root `justfile` (#62 / RM-250):
 just ci
 ```
 
-Canonical matrix fallback (same steps as `.github/workflows/rust.yml`, with `--locked`) if `just` is unavailable:
+Canonical matrix fallback if `just` is unavailable (`--locked` is intentional and
+stricter than GHA; include Python + `bash -n` so the fallback matches `just ci`):
 
 ```bash
 cargo fmt --all -- --check
@@ -16,6 +17,13 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
+python3 -c 'import numpy; print(numpy.__version__)'
+python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_select -v
+python3 -m unittest scripts.test_route_preservation_surface -v
+python3 -m unittest scripts.test_route_preservation_io -v
+for f in scripts/*.sh; do bash -n "$f"; done
 ```
 
 Fast smoke while iterating on CLI-only edits (not sufficient alone before merge):
@@ -23,9 +31,16 @@ Fast smoke while iterating on CLI-only edits (not sufficient alone before merge)
 ```bash
 just check
 just test
-# or without just:
+# or without just (mirrors just check + just test):
+cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
+python3 -c 'import numpy; print(numpy.__version__)'
+python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_select -v
+python3 -m unittest scripts.test_route_preservation_surface -v
+python3 -m unittest scripts.test_route_preservation_io -v
 ```
 
 Path-scoped extras (only when those paths change; not part of `just ci`):

@@ -157,7 +157,9 @@ just --list   # discover recipes
 
 `check`, `test`, `build`, `ci`, and `doctor` need **no** multi-GiB checkpoints. Docker image builds and real quant pilots stay out of default `ci`.
 
-Without `just`, use the equivalent cargo/python lines in `CLAUDE.md` / `.claude/commands/pr-ready.md`.
+Without `just`, use the full cargo **and** Python unittest fallback blocks in
+`CLAUDE.md` / `.claude/commands/pr-ready.md` (not cargo-only — those blocks list
+all five `scripts.test_*` modules and `bash -n` for shell scripts).
 
 ## CUDA kernel ownership
 
