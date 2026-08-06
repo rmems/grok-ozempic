@@ -50,13 +50,33 @@ class SelectionTests(unittest.TestCase):
             self.assertIn("router", got, mode)
             self.assertIn("block_norm", got, mode)
 
-    def test_no_mode_selects_the_deferred_embedding(self) -> None:
+    def test_token_embedding_is_in_no_mode(self) -> None:
+        """The deferred tier must not appear in any mode's kind set.
+
+        Asserted directly on ``MODES`` so it holds independently of how the
+        selector filters — the block filter would otherwise mask a regression
+        here, since the embedding carries ``block: None``.
+        """
+        for mode, kinds in exp.MODES.items():
+            self.assertNotIn("token_embedding", kinds, mode)
+
+    def test_selecting_the_embedding_block_is_rejected(self) -> None:
+        """`block=None` makes the embedding the only block-matching candidate.
+
+        So this exercises the *kind* filter rather than the block filter: if
+        `token_embedding` were ever admitted to a mode, the call would succeed
+        instead of raising, and the deferred tier would be silently packable.
+        """
+        block_none = [t for t in self.TENSORS if t["block"] is None]
+        self.assertEqual(
+            [t["structural_name"] for t in block_none],
+            ["embedding.slot_00.token_embedding"],
+            "fixture precondition: the embedding is the sole block=None tensor",
+        )
         for mode in exp.MODES:
-            got = {
-                t["structural_name"]
-                for t in exp.select_tensors(self.TENSORS, block=0, mode=mode, names=[])
-            }
-            self.assertNotIn("embedding.slot_00.token_embedding", got)
+            with self.assertRaises(exp.ExportError, msg=mode) as ctx:
+                exp.select_tensors(self.TENSORS, block=None, mode=mode, names=[])
+            self.assertIn("no tensors for block None", str(ctx.exception))
 
     def test_block_filter_is_exact(self) -> None:
         got = exp.select_tensors(self.TENSORS, block=1, mode="preserve_only", names=[])
