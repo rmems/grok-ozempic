@@ -11,7 +11,7 @@ expert forward. All weights come from the real `ckpt-0` checkpoint; routers and
 all four norms are preserved in every pack.
 
 **Conclusion: option 3 — attention should move to a higher-precision tier.**
-Scoped precisely: *only* attention. See [Decision](#decision).
+Scoped precisely: *only* attention. See [§8 Decision](#8-decision).
 
 ---
 

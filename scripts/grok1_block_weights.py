@@ -197,14 +197,40 @@ class PackWeights:
     def shapes(self) -> dict[str, tuple[int, ...]]:
         return dict(self._shapes)
 
+    def _fingerprint(self) -> dict:
+        """Identify the exact inputs an oracle alpha was derived from.
+
+        The cache path defaults to the pack filename, so rebuilding a pack at the
+        same path -- exactly what a tau sweep does -- would otherwise silently
+        reuse a scale computed for different trits. Alpha also depends on the
+        reference npy directory, since that supplies the magnitudes.
+        """
+        stat = self.pack.stat()
+        return {
+            "pack_size": stat.st_size,
+            "pack_mtime_ns": stat.st_mtime_ns,
+            "npy_dir": str(self._npy_dir.resolve()),
+            "tensors": sorted(self._index),
+        }
+
     def _load_cache(self) -> dict[str, TernaryScale]:
+        """Load cached scales, discarding them if the inputs have changed."""
         if not self._cache_path.exists():
             return {}
-        raw = json.loads(self._cache_path.read_text())
-        return {n: TernaryScale(**v) for n, v in raw.items()}
+        try:
+            raw = json.loads(self._cache_path.read_text())
+        except json.JSONDecodeError:
+            return {}
+        # Legacy flat caches carry no fingerprint and cannot be validated.
+        if raw.get("fingerprint") != self._fingerprint():
+            return {}
+        return {n: TernaryScale(**v) for n, v in raw.get("scales", {}).items()}
 
     def _save_cache(self) -> None:
-        payload = {n: vars(s) for n, s in sorted(self._scales.items())}
+        payload = {
+            "fingerprint": self._fingerprint(),
+            "scales": {n: vars(s) for n, s in sorted(self._scales.items())},
+        }
         self._cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     def scale(self, name: str) -> TernaryScale:

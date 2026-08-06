@@ -111,12 +111,12 @@
     ],
     "attn_delta_over_stream": 0.876171414302045,
     "moe_delta_over_stream": 0.4827437027494788,
-    "seconds": 16.7226459980011
+    "seconds": 14.488927602767944
   },
   "comparisons": [
     {
       "label": "fp16_roundtrip",
-      "seconds": 31.4331374168396,
+      "seconds": 29.072958946228027,
       "attention_output_cosine": 0.9999999984424572,
       "attention_output_cosine_per_token": 0.9999999986030829,
       "residual_stream_cosine": 0.9999999831365632,
@@ -210,7 +210,7 @@
     },
     {
       "label": "goz1_pack",
-      "seconds": 33.4702582359314,
+      "seconds": 72.35125637054443,
       "attention_output_cosine": 0.6940020562994945,
       "attention_output_cosine_per_token": 0.7152323961545908,
       "residual_stream_cosine": 0.8520368529920752,
@@ -304,7 +304,7 @@
     },
     {
       "label": "goz1_attention_ternary_only",
-      "seconds": 14.67780613899231,
+      "seconds": 16.258882999420166,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -398,7 +398,7 @@
     },
     {
       "label": "goz1_expert_ternary_only",
-      "seconds": 34.13565754890442,
+      "seconds": 34.296231508255005,
       "attention_output_cosine": 1.0,
       "attention_output_cosine_per_token": 1.0,
       "residual_stream_cosine": 1.0000000000000002,

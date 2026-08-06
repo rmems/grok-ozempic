@@ -342,7 +342,14 @@ def top_k_experts(
     raw probabilities as combination weights -- they are deliberately *not*
     renormalized over the selected subset, so the gates sum to less than one.
     Softmax is monotone, so selection by probability equals selection by logit.
+
+    ``k`` is validated: ``k <= 0`` yields an empty routing dimension and ``k``
+    above the expert count silently routes every token to every expert, either of
+    which would produce meaningless agreement metrics rather than an error.
     """
+    experts = logits.shape[-1]
+    if not 1 <= k <= experts:
+        raise ForwardError(f"top_k must be in 1..{experts} for {experts} experts, got {k}")
     probs = _softmax_fp32(np.asarray(logits, dtype=np.float32))
     # Negate for a descending sort; argpartition alone does not order the top-k.
     idx = np.argsort(-probs, axis=-1, kind="stable")[:, :k]

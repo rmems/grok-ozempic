@@ -313,6 +313,24 @@ class RoutingTests(unittest.TestCase):
         top = logits.argmax(axis=1)
         np.testing.assert_array_equal(idx[:, 0], top)
 
+    def test_top_k_below_one_is_rejected(self):
+        """k=0 would yield an empty routing dimension, not an error."""
+        logits = np.zeros((4, NUM_EXPERTS), dtype=np.float32)
+        for bad in (0, -1):
+            with self.assertRaisesRegex(ForwardError, "top_k must be in"):
+                top_k_experts(logits, k=bad)
+
+    def test_top_k_above_expert_count_is_rejected(self):
+        """k>experts would silently route every token to every expert."""
+        logits = np.zeros((4, NUM_EXPERTS), dtype=np.float32)
+        with self.assertRaisesRegex(ForwardError, "top_k must be in"):
+            top_k_experts(logits, k=NUM_EXPERTS + 1)
+
+    def test_top_k_equal_to_expert_count_is_allowed(self):
+        logits = np.zeros((4, NUM_EXPERTS), dtype=np.float32)
+        idx, _ = top_k_experts(logits, k=NUM_EXPERTS)
+        self.assertEqual(idx.shape, (4, NUM_EXPERTS))
+
     def test_selection_by_probability_equals_selection_by_logit(self):
         rng = np.random.default_rng(22)
         logits = rng.standard_normal((64, NUM_EXPERTS)).astype(np.float32)
