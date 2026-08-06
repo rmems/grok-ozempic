@@ -195,6 +195,35 @@ class ReadTritsTests(unittest.TestCase):
         finally:
             td.cleanup()
 
+    def test_out_of_range_ranges_are_rejected(self) -> None:
+        """Both bounds matter, and neither is caught by the truncation check.
+
+        A negative start makes ``divmod`` yield a negative byte offset
+        (``divmod(-8, 4) == (-2, 0)``), so the seek lands in the *preceding*
+        tensor. An over-long end reads on into the *following* tensor. The
+        truncation check only fires at end-of-file, so in a multi-tensor pack
+        both return plausible trits from the wrong weights instead of erroring.
+        """
+        codes = [1, 2, 0, 1, 2, 0, 1, 2]
+        td, p, entry = self._one(codes)
+        try:
+            for start, count in [(-8, 4), (-1, 2), (0, -4), (0, len(codes) + 1), (len(codes) - 2, 8)]:
+                with self.assertRaises(rio.MetricsError, msg=f"{start},{count}") as ctx:
+                    rio.read_trits(p, entry, start, count)
+                self.assertIn("not within", str(ctx.exception))
+        finally:
+            td.cleanup()
+
+    def test_exact_full_range_is_allowed(self) -> None:
+        """The guard must not reject a legitimate whole-tensor read."""
+        codes = [1, 2, 0, 1, 2, 0, 1, 2]
+        td, p, entry = self._one(codes)
+        try:
+            self.assertEqual(rio.read_trits(p, entry, 0, len(codes)).size, len(codes))
+            self.assertEqual(rio.read_trits(p, entry, len(codes), 0).size, 0)
+        finally:
+            td.cleanup()
+
     def test_invalid_code_raises(self) -> None:
         """0b11 is not a valid trit; counting it as zero would inflate sparsity."""
         td, p, entry = self._one([1, 2, 3, 0])
