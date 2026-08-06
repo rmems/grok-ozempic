@@ -10,6 +10,20 @@
 # Env: CLAUDE_COAUTHOR overrides the identity; CLAUDE_COAUTHOR=0 disables.
 set -u
 
+# Key the state by session *and* repository. Keying on session alone lets one
+# session that touches several repos compare repo A's recorded HEAD against repo
+# B's current HEAD -- they always differ, so a no-op commit in B would look like a
+# new commit and B's unrelated HEAD would be amended.
+# The session id reaches us from a JSON payload, so it is sanitized rather than
+# interpolated into a path directly.
+state_key() {
+  _sess=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-64)
+  [ -n "$_sess" ] || _sess=nosession
+  _repo=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo norepo)
+  _repo=$(printf '%s' "$_repo" | cksum | cut -d' ' -f1)
+  printf '%s-%s' "$_sess" "$_repo"
+}
+
 TRAILER_NAME='Co-Authored-By'
 COAUTHOR="${CLAUDE_COAUTHOR-Claude <noreply@anthropic.com>}"
 case "$COAUTHOR" in 0 | "") exit 0 ;; esac
@@ -32,17 +46,16 @@ head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0
 # what the PreToolUse companion recorded before the command ran. A `git commit`
 # variant that succeeds without committing leaves HEAD unchanged, and is skipped
 # here rather than having its pre-existing HEAD retroactively stamped.
-session=$(printf '%s' "$payload" | jq -r '.session_id // "nosession"' 2>/dev/null || echo nosession)
-state="${TMPDIR:-/tmp}/claude-coauthor/$session.head"
-if [ -r "$state" ]; then
-  [ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
-else
-  # No recorded state (first run after a config change, or the PreToolUse hook
-  # did not fire). Fall back to a recency bound so a commit made earlier in the
-  # session is still never rewritten.
-  committed=$(git log -1 --format=%ct 2>/dev/null || echo 0)
-  [ $(($(date +%s) - committed)) -gt 120 ] && exit 0
-fi
+session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
+state="${TMPDIR:-/tmp}/claude-coauthor/$(state_key "$session").head"
+# No recorded state means we cannot prove this call created the commit, so do
+# nothing. A timestamp fallback was tried and is unsafe: it amends any commit
+# made within the window, including an unrelated one in a different repository
+# the same session happened to touch. This is a convenience backstop --
+# attribution.commit in settings.json is the primary mechanism -- so skipping is
+# strictly better than guessing.
+[ -r "$state" ] || exit 0
+[ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
 
 # A merge commit is detected by parent count, not MERGE_HEAD: git removes
 # MERGE_HEAD as part of a successful commit, so post-commit it is always gone.

@@ -37,20 +37,26 @@ from grok1_block_weights import (  # noqa: E402
 
 
 class _StubSource:
-    """Minimal stand-in for a weight source: just a label and a role mapping."""
+    """Stand-in weight source that reports *which* source answered.
 
-    def __init__(self, roles: dict[str, str], label: str = "stub") -> None:
+    Every accessor returns the source's own ``tag``, so a routing assertion can
+    check that MixedWeights consulted the intended side rather than merely that
+    it constructed.
+    """
+
+    def __init__(self, roles: dict[str, str], label: str = "stub", tag: float = 1.0) -> None:
         self.roles = dict(roles)
         self.label = label
+        self.tag = tag
 
     def vector(self, role: str) -> np.ndarray:
-        return np.full(4, float(len(self.roles[role])), dtype=np.float32)
+        return np.full(4, self.tag, dtype=np.float32)
 
     def matrix(self, role: str) -> np.ndarray:
-        return np.full((2, 2), float(len(self.roles[role])), dtype=np.float32)
+        return np.full((2, 2), self.tag, dtype=np.float32)
 
     def expert(self, role: str, index: int) -> np.ndarray:
-        return np.full((2, 2), float(index), dtype=np.float32)
+        return np.full((2, 2), self.tag + index, dtype=np.float32)
 
 
 def _roles(names: list[str]) -> dict[str, str]:
@@ -62,13 +68,26 @@ ALL_ROLES = sorted(ATTENTION_ROLES | EXPERT_ROLES | PRESERVED_ROLES)
 
 class MixedWeightsValidationTests(unittest.TestCase):
     def test_routes_assigned_roles_to_primary_and_rest_to_fallback(self) -> None:
-        primary = _StubSource(_roles(ALL_ROLES), "primary")
-        fallback = _StubSource(_roles(ALL_ROLES), "fallback")
+        """Assert the actual routing, not just that the object constructed.
+
+        Each stub reports a distinct tag, so a swapped or ignored ``roles`` set
+        shows up as the wrong source answering -- which a label/keys check alone
+        would not catch.
+        """
+        primary = _StubSource(_roles(ALL_ROLES), "primary", tag=10.0)
+        fallback = _StubSource(_roles(ALL_ROLES), "fallback", tag=20.0)
         mixed = MixedWeights(primary, fallback, frozenset(ATTENTION_ROLES), "mix")
-        # _pick is internal, so assert through the public surface instead: the
-        # stub encodes which source answered via a distinguishable value.
+
         self.assertEqual(mixed.label, "mix")
         self.assertEqual(set(mixed.roles), set(ALL_ROLES))
+        # Assigned roles come from the primary ...
+        for role in sorted(ATTENTION_ROLES):
+            self.assertEqual(mixed.matrix(role)[0][0], 10.0, msg=role)
+        # ... everything else from the fallback.
+        for role in sorted(PRESERVED_ROLES):
+            self.assertEqual(mixed.vector(role)[0], 20.0, msg=role)
+        for role in sorted(EXPERT_ROLES):
+            self.assertEqual(mixed.expert(role, 0)[0][0], 20.0, msg=role)
 
     def test_primary_missing_an_assigned_role_is_rejected(self) -> None:
         primary = _StubSource(_roles([r for r in ALL_ROLES if r != "query"]))
@@ -102,7 +121,8 @@ class MixedWeightsValidationTests(unittest.TestCase):
         primary = _StubSource(_roles(ALL_ROLES))
         fallback = _StubSource(_roles(ALL_ROLES))
         mixed = MixedWeights(primary, fallback, frozenset(EXPERT_ROLES), "expert-only")
-        self.assertEqual(mixed.expert("expert_down", 3).tolist(), [[3.0, 3.0], [3.0, 3.0]])
+        # Expert tier now routes to the primary; tag 1.0 + index 3.
+        self.assertEqual(mixed.expert("expert_down", 3)[0][0], 4.0)
 
 
 class TernaryScaleTests(unittest.TestCase):
