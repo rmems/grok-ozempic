@@ -52,6 +52,7 @@ from grok1_block_weights import (  # noqa: E402
     MixedWeights,
     NpyWeights,
     PackWeights,
+    WeightSource,
     implementation_commit,
     sha256_file,
 )
@@ -141,7 +142,7 @@ def expert_load(idx: np.ndarray) -> np.ndarray:
 
 # --- Forward pass -----------------------------------------------------------
 def _moe_forward(
-    hn: np.ndarray, source, top_k: int
+    hn: np.ndarray, source: WeightSource, top_k: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]]:
     """Router + streamed top-k expert forward. Loads one expert at a time.
 
@@ -165,7 +166,9 @@ def _moe_forward(
     return logits, idx, gates, moe_out, touched
 
 
-def forward_block(h0: np.ndarray, source, *, top_k: int = NUM_SELECTED_EXPERTS) -> Trace:
+def forward_block(
+    h0: np.ndarray, source: WeightSource, *, top_k: int = NUM_SELECTED_EXPERTS
+) -> Trace:
     """Run the real block-0 body and capture every intermediate #61 measures."""
     started = time.time()
     hn_attn = rmsnorm(h0, source.vector("norm_pre_attn"))

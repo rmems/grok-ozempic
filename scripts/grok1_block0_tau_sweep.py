@@ -32,6 +32,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from grok1_block0_experiment import (  # noqa: E402
+    Trace,
     compare,
     embedding_rows,
     expert_load,
@@ -48,6 +49,7 @@ from grok1_block_weights import (  # noqa: E402
     MixedWeights,
     NpyWeights,
     PackWeights,
+    WeightSource,
     implementation_commit,
     sha256_file,
 )
@@ -127,7 +129,12 @@ def _sparsity(pack: PackWeights) -> dict[str, float]:
 
 
 def _sweep_row(
-    pack_path: Path, attn_npy_dir: Path, reference, ref, h0: np.ndarray, top_k: int
+    pack_path: Path,
+    attn_npy_dir: Path,
+    reference: WeightSource,
+    ref: Trace,
+    h0: np.ndarray,
+    top_k: int,
 ) -> dict:
     """Measure one tau pack: attention from the pack, experts from the reference."""
     tau = tau_of(pack_path)

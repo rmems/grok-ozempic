@@ -29,6 +29,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 
@@ -46,6 +47,7 @@ from route_preservation_io import (  # noqa: E402
 
 __all__ = [
     "ALPHA_CACHE_SUFFIX",
+    "WeightSource",
     "PRESERVED_ROLES",
     "ATTENTION_ROLES",
     "EXPERT_ROLES",
@@ -71,6 +73,37 @@ EXPERT_ROLES = frozenset({"expert_gelu", "expert_value", "expert_down"})
 ALPHA_CACHE_SUFFIX = ".oracle-alpha.json"
 # 64 Mi elements per streaming step: 256 MiB of f32 plus 64 MiB of trits.
 _ALPHA_CHUNK = 1 << 26
+
+
+class WeightSource(Protocol):
+    """One block's weights, however they are backed.
+
+    :class:`NpyWeights`, :class:`F16Weights`, :class:`PackWeights` and
+    :class:`MixedWeights` are structurally interchangeable; declaring the shape
+    explicitly is what lets a reader (or a type checker) see that
+    ``forward_block`` works against any of them, rather than inferring it from
+    call sites.
+    """
+
+    label: str
+    roles: dict[str, str]
+
+    # The concrete classes below list this Protocol as a base explicitly. That is
+    # not required for structural typing, but it states the contract at the class
+    # and gives checkers/IDEs a nominal edge to follow rather than re-deriving the
+    # shape from every call site.
+
+    def vector(self, role: str) -> np.ndarray:
+        """A norm gain or the router matrix."""
+        ...
+
+    def matrix(self, role: str) -> np.ndarray:
+        """An attention projection."""
+        ...
+
+    def expert(self, role: str, index: int) -> np.ndarray:
+        """One expert's slice of a stacked expert tensor."""
+        ...
 
 
 def sha256_file(path: Path, chunk: int = 1 << 22) -> str:
@@ -191,7 +224,7 @@ def alpha_for(npy_path: Path, pack: Path, entry: dict) -> TernaryScale:
     )
 
 
-class NpyWeights:
+class NpyWeights(WeightSource):
     """The dequantized f32 reference block, read via ``memmap``."""
 
     label = "fp32_reference"
@@ -252,7 +285,7 @@ class F16Weights(NpyWeights):
         return self._cast(super().expert(role, index))
 
 
-class PackWeights:
+class PackWeights(WeightSource):
     """A block reconstructed from a GOZ1 pack, using oracle ternary scales."""
 
     label = "goz1_pack"
@@ -424,7 +457,7 @@ class PackWeights:
         return self._read(role, index * per, per, (rows, cols))
 
 
-def _require_agreeing_mapping(primary, fallback) -> None:
+def _require_agreeing_mapping(primary: WeightSource, fallback: WeightSource) -> None:
     """Both sources must agree on what each shared role's tensor is called."""
     shared = set(primary.roles) & set(fallback.roles)
     disagree = sorted(r for r in shared if primary.roles[r] != fallback.roles[r])
@@ -432,14 +465,16 @@ def _require_agreeing_mapping(primary, fallback) -> None:
         raise ForwardError(f"mixed sources disagree on slot/role mapping for {disagree}")
 
 
-def _require_primary_covers(primary, roles: frozenset[str]) -> None:
+def _require_primary_covers(primary: WeightSource, roles: frozenset[str]) -> None:
     """The primary must supply every role it has been assigned."""
     uncovered = sorted(roles - set(primary.roles))
     if uncovered:
         raise ForwardError(f"primary source lacks assigned roles {uncovered}")
 
 
-def _require_all_served(primary, fallback, roles: frozenset[str]) -> None:
+def _require_all_served(
+    primary: WeightSource, fallback: WeightSource, roles: frozenset[str]
+) -> None:
     """Every claimed role must be served by whichever source ``_pick`` routes to.
 
     A role claimed by the primary but *outside* ``roles`` goes to the fallback, so
@@ -456,14 +491,14 @@ def _require_all_served(primary, fallback, roles: frozenset[str]) -> None:
         raise ForwardError(f"no source serves roles {unserved}")
 
 
-def _validate_mix(primary, fallback, roles: frozenset[str]) -> None:
+def _validate_mix(primary: WeightSource, fallback: WeightSource, roles: frozenset[str]) -> None:
     """Reject a mix that would fail later, or silently measure the wrong tensor."""
     _require_agreeing_mapping(primary, fallback)
     _require_primary_covers(primary, roles)
     _require_all_served(primary, fallback, roles)
 
 
-class MixedWeights:
+class MixedWeights(WeightSource):
     """Draw some roles from one source and the rest from another.
 
     Used to attribute damage: routing within a single block is computed from
@@ -472,7 +507,13 @@ class MixedWeights:
     exactly. Running that as a baseline turns the argument into a measurement.
     """
 
-    def __init__(self, primary, fallback, roles: frozenset[str], label: str) -> None:
+    def __init__(
+        self,
+        primary: WeightSource,
+        fallback: WeightSource,
+        roles: frozenset[str],
+        label: str,
+    ) -> None:
         _validate_mix(primary, fallback, roles)
         self._primary = primary
         self._fallback = fallback
