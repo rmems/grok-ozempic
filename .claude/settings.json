@@ -1,5 +1,23 @@
 {
+  "includeCoAuthoredBy": true,
+  "attribution": {
+    "commit": "Co-Authored-By: Claude <noreply@anthropic.com>",
+    "pr": "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+  },
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/coauthor-commit.sh\" 2>/dev/null || true",
+            "statusMessage": "Adding Claude co-author trailer"
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "matcher": "",
