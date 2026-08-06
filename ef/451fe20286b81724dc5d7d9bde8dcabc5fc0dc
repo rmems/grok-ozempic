@@ -1,0 +1,21 @@
+reports/grok-1-full-block-forward/block0-forward-tau-sweep.json
+  s_f430523a053518::t_b9aa3f9cf35c1f 6,63,170,277,384,491,598,705,812
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_b9aa3f9cf35c1f 6-7,128,133,229,325,421
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ef451fe20286b81724dc5d7d9bde8dcabc5fc0dc",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
