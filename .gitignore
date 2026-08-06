@@ -1,13 +1,20 @@
 /target
 
-# Beads / Dolt files (added by bd init)
+# Beads / Dolt
+# issues.jsonl IS tracked on purpose: agents read it to recover project context
+# with no network access and no API tokens. GitHub + Linear stay canonical for
+# status and handoff; the JSONL is a committed cache of that state.
+# interactions.jsonl is NOT tracked -- a short log with little context value, so
+# committing it is pure per-commit churn. Everything else here is machine-local.
 .dolt/
-*.db
+.beads/*.db
 .beads-credential-key
 
 # Agent / Editor directories
 .kilo/
 .vscode/
+.idea/
+.opencode/
 
 # Generated docs and dependencies (ignore for Codacy analysis)
 target/
@@ -16,9 +23,12 @@ node_modules/
 .codacy/
 __pycache__/
 
-# Beads exports (local only; GH+Linear are SoT)
-.beads/issues.jsonl
+# Beads machine-local runtime state (issues.jsonl is tracked; see above)
 .beads/interactions.jsonl
 .beads/export-state.json
 .beads/last_pull
 .beads/last-touched
+.beads/.linear-sync.lock
+.beads/backup/
+.beads/embeddeddolt/
+.beads/events.jsonl

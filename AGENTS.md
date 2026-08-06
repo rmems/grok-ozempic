@@ -47,6 +47,19 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Issue tracking
+
+GitHub issues + Linear twins (`RM-*`) are canonical. `.beads/issues.jsonl` is a
+committed offline mirror so agents can work without network access.
+
+**See [CLAUDE.md → Issue tracking](CLAUDE.md#issue-tracking-source-of-truth) for
+the full policy** -- what is tracked, how to resolve a JSONL conflict, and the
+board/sync scoping. It is documented there once rather than restated here, so the
+two files cannot drift apart.
+
+The section below is **generated and owned by `bd`** -- edit it via `bd`, not by
+hand, or the next injection will overwrite your changes.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
