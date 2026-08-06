@@ -2,7 +2,13 @@
 
 ## 1. Quality gates (match CI)
 
-Canonical matrix (same steps as `.github/workflows/rust.yml`, with `--locked`):
+Prefer the root `justfile` (#62 / RM-250):
+
+```bash
+just ci
+```
+
+Canonical matrix fallback (same steps as `.github/workflows/rust.yml`, with `--locked`) if `just` is unavailable:
 
 ```bash
 cargo fmt --all -- --check
@@ -15,11 +21,14 @@ cargo doc --no-deps --all-features --locked
 Fast smoke while iterating on CLI-only edits (not sufficient alone before merge):
 
 ```bash
+just check
+just test
+# or without just:
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
 ```
 
-Path-scoped extras (only when those paths change; command matches the path):
+Path-scoped extras (only when those paths change; not part of `just ci`):
 
 ```bash
 # scripts/export_grok1_embedding_npy.py or scripts/test_export_grok1_embedding_npy.py

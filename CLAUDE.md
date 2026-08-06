@@ -56,6 +56,19 @@ bd close <id>         # Complete work
 
 Rust edition 2024 crate. CLI binary is feature-gated.
 
+Prefer the root `justfile` (#62 / RM-250):
+
+```bash
+just --list
+just check              # fmt + clippy (cli) while iterating
+just test               # cargo test --features cli + Python unittests
+just ci                 # pre-PR parity with GitHub Actions
+just doctor             # env/path diagnosis (always exit 0)
+just experiment-smoke   # release CLI --help + local data probe
+```
+
+Equivalent cargo fallback if `just` is unavailable:
+
 ```bash
 # Unit + integration tests (CLI surface)
 cargo test --features cli --locked
