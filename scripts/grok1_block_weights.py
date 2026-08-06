@@ -21,7 +21,9 @@ badly chosen scale.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess  # nosec B404
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -52,6 +54,8 @@ __all__ = [
     "PackWeights",
     "TernaryScale",
     "alpha_for",
+    "implementation_commit",
+    "sha256_file",
     "stem_of",
 ]
 
@@ -66,6 +70,45 @@ EXPERT_ROLES = frozenset({"expert_gelu", "expert_value", "expert_down"})
 ALPHA_CACHE_SUFFIX = ".oracle-alpha.json"
 # 64 Mi elements per streaming step: 256 MiB of f32 plus 64 MiB of trits.
 _ALPHA_CHUNK = 1 << 26
+
+
+def sha256_file(path: Path, chunk: int = 1 << 22) -> str:
+    """Streamed SHA-256 of a file, for identifying exact bytes in provenance."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(chunk), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool | None]:
+    """Record the commit these results were produced by, per RM-249 provenance.
+
+    Returns ``{"commit": <sha or None>, "dirty": <bool or None>}``, where
+    ``dirty`` covers the *implementation* (``scripts/``, ``src/``) and not the
+    report tree. Writing an artifact necessarily modifies ``reports/``, so a
+    whole-tree check would report every run as dirty and the flag would carry no
+    information about whether the producing code was modified.
+
+    Never raises: provenance is best-effort, and a run outside a git checkout
+    must still write its metrics rather than abort.
+    """
+    root = repo_root or Path(__file__).resolve().parent.parent
+    try:
+        sha = subprocess.run(  # noqa: S603
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        status = subprocess.run(  # noqa: S603
+            [
+                "git", "-C", str(root), "status", "--porcelain",
+                "--untracked-files=no", "--", "scripts", "src",
+            ],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return {"commit": None, "dirty": None}
+    return {"commit": sha, "dirty": bool(status)}
 
 
 def stem_of(structural_name: str) -> str:
@@ -223,6 +266,7 @@ class PackWeights:
             self._shapes, require_complete=not partial, expect_block=expect_block
         )
         self._cache_path = alpha_cache or pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
+        self._fp: dict | None = None
         self._scales: dict[str, TernaryScale] = self._load_cache()
 
     def shapes(self) -> dict[str, tuple[int, ...]]:
@@ -235,11 +279,20 @@ class PackWeights:
         same path -- exactly what a tau sweep does -- would otherwise silently
         reuse a scale computed for different trits. Alpha also depends on the
         reference npy directory, since that supplies the magnitudes.
+
+        The pack is identified by content hash rather than mtime: a rebuild that
+        happens to preserve size and timestamp, or a restored-from-backup file,
+        would defeat a stat-only discriminator. Computed once per instance.
         """
+        if self._fp is None:
+            self._fp = self._compute_fingerprint()
+        return self._fp
+
+    def _compute_fingerprint(self) -> dict:
         stat = self.pack.stat()
         return {
             "pack_size": stat.st_size,
-            "pack_mtime_ns": stat.st_mtime_ns,
+            "pack_sha256": sha256_file(self.pack),
             "npy_dir": str(self._npy_dir.resolve()),
             "tensors": sorted(self._index),
             # alpha is derived from the reference magnitudes, so re-exporting an
@@ -264,7 +317,14 @@ class PackWeights:
             return {}
         try:
             raw = json.loads(self._cache_path.read_text())
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            # A cache is derived data, so recomputing is the right recovery --
+            # but do it loudly, since a corrupt file may point at a real problem.
+            print(
+                f"warning: {self._cache_path.name} is unreadable ({exc}); "
+                "recomputing oracle alphas",
+                file=sys.stderr,
+            )
             return {}
         # Legacy flat caches carry no fingerprint and cannot be validated.
         if raw.get("fingerprint") != self._fingerprint():

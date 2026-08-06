@@ -21,7 +21,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import platform
 import sys
@@ -53,6 +52,8 @@ from grok1_block_weights import (  # noqa: E402
     MixedWeights,
     NpyWeights,
     PackWeights,
+    implementation_commit,
+    sha256_file,
 )
 from route_preservation_io import MetricsError  # noqa: E402
 from route_preservation_measure import js_divergence  # noqa: E402
@@ -139,8 +140,13 @@ def expert_load(idx: np.ndarray) -> np.ndarray:
 
 
 # --- Forward pass -----------------------------------------------------------
-def _moe_forward(hn: np.ndarray, source, top_k: int) -> tuple[np.ndarray, ...]:
-    """Router + streamed top-k expert forward. Loads one expert at a time."""
+def _moe_forward(
+    hn: np.ndarray, source, top_k: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[int]]:
+    """Router + streamed top-k expert forward. Loads one expert at a time.
+
+    Returns ``(logits, expert_idx, gates, moe_out, experts_touched)``.
+    """
     logits = router_logits(hn, source.vector("router"))
     idx, gates = top_k_experts(logits, k=top_k)
     outputs: dict[int, np.ndarray] = {}
@@ -328,22 +334,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _sha256(path: Path, chunk: int = 1 << 22) -> str:
-    """Streamed SHA-256, so a committed metric set names the exact pack bytes."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(chunk), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _provenance(args: argparse.Namespace, ids: np.ndarray, pack: PackWeights) -> dict:
     return {
         "issue": "GH #61 / Linear RM-249",
         "agent": "Claude Code: Fable 5 (xhigh)",
+        "implementation": implementation_commit(),
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
         "pack": pack.pack.name,
-        "pack_sha256": _sha256(pack.pack),
+        "pack_sha256": sha256_file(pack.pack),
         "pack_bytes": pack.pack.stat().st_size,
         "pack_metadata": {k: v for k, v in sorted(pack.metadata.items())},
         # [15] pack_metadata is reproduced verbatim, and oz.gif_threshold in it is

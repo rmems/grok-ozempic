@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import platform
 import re
 import sys
 from pathlib import Path
@@ -47,6 +48,8 @@ from grok1_block_weights import (  # noqa: E402
     MixedWeights,
     NpyWeights,
     PackWeights,
+    implementation_commit,
+    sha256_file,
 )
 
 EXPECT_BLOCK = "block_000"
@@ -137,6 +140,8 @@ def _sweep_row(
     row = {
         "tau": tau,
         "pack": pack_path.name,
+        "pack_sha256": sha256_file(pack_path),
+        "pack_bytes": pack_path.stat().st_size,
         "sparsity": sparsity,
         "sparsity_expected_gaussian": expected_sparsity(tau),
         **compare(ref, trace),
@@ -149,6 +154,42 @@ def _sweep_row(
         flush=True,
     )
     return row
+
+
+def _payload(args: argparse.Namespace, reference, ref, ids: np.ndarray, rows: list[dict]) -> dict:
+    """Assemble the machine-readable sweep artifact with full provenance."""
+    return {
+        "provenance": {
+            "issue": "GH #61 / Linear RM-249",
+            "agent": "Claude Code: Fable 5 (xhigh)",
+            "implementation": implementation_commit(),
+            "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+            "npy_dir": args.npy_dir.name,
+            "attn_npy_dir": args.attn_npy_dir.name,
+            "embedding_shard": args.embedding_shard.name,
+            "expect_block": EXPECT_BLOCK,
+            "python": platform.python_version(),
+            "tau_source": (
+                "parsed from each pack filename and cross-checked against measured "
+                "sparsity vs erf(tau/sqrt2); oz.gif_threshold is unreliable under "
+                "per-tensor tau (see #66)"
+            ),
+            "design": (
+                "Attention tier only; experts held at the f32 reference because "
+                "single-block routing is computed upstream of the experts."
+            ),
+            "tokens": int(ids.size),
+            "token_seed": int(args.seed),
+            "top_k": int(args.top_k),
+            "numpy": np.__version__,
+        },
+        "slot_roles": dict(sorted(reference.roles.items())),
+        "reference": {
+            "expert_load": expert_load(ref.expert_idx).tolist(),
+            "router_margin_median": float(np.median(router_margins(ref.logits))),
+        },
+        "sweep": rows,
+    }
 
 
 def run(args: argparse.Namespace) -> int:
@@ -166,25 +207,7 @@ def run(args: argparse.Namespace) -> int:
         _sweep_row(p, args.attn_npy_dir, reference, ref, h0, args.top_k) for p in packs
     ]
 
-    payload = {
-        "provenance": {
-            "issue": "GH #61 / Linear RM-249",
-            "agent": "Claude Code: Fable 5 (xhigh)",
-            "design": (
-                "Attention tier only; experts held at the f32 reference because "
-                "single-block routing is computed upstream of the experts."
-            ),
-            "tokens": int(ids.size),
-            "token_seed": int(args.seed),
-            "top_k": int(args.top_k),
-            "numpy": np.__version__,
-        },
-        "reference": {
-            "expert_load": expert_load(ref.expert_idx).tolist(),
-            "router_margin_median": float(np.median(router_margins(ref.logits))),
-        },
-        "sweep": rows,
-    }
+    payload = _payload(args, reference, ref, ids, rows)
     args.out.mkdir(parents=True, exist_ok=True)
     dest = args.out / "block0-forward-tau-sweep.json"
     dest.write_text(json.dumps(payload, indent=2) + "\n")

@@ -2,11 +2,36 @@
   "provenance": {
     "issue": "GH #61 / Linear RM-249",
     "agent": "Claude Code: Fable 5 (xhigh)",
+    "implementation": {
+      "commit": "63eabf9396d4d256803e44efc01ac799583fa1fa",
+      "dirty": true
+    },
+    "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+    "npy_dir": "goz53-block000-attn",
+    "attn_npy_dir": "goz61-block000-attn-only",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
+    "expect_block": "block_000",
+    "python": "3.14.6",
+    "tau_source": "parsed from each pack filename and cross-checked against measured sparsity vs erf(tau/sqrt2); oz.gif_threshold is unreliable under per-tensor tau (see #66)",
     "design": "Attention tier only; experts held at the f32 reference because single-block routing is computed upstream of the experts.",
     "tokens": 2048,
     "token_seed": 20260806,
     "top_k": 2,
     "numpy": "2.5.1"
+  },
+  "slot_roles": {
+    "attn_out": "block_000.slot_04.attn_proj_i8.model_width",
+    "expert_down": "block_000.slot_01.moe_expert.down",
+    "expert_gelu": "block_000.slot_00.moe_expert.gate",
+    "expert_value": "block_000.slot_02.moe_expert.up",
+    "key": "block_000.slot_03.attn_proj_i8.narrow",
+    "norm_post_attn": "block_000.slot_08.block_norm",
+    "norm_post_moe": "block_000.slot_10.block_norm",
+    "norm_pre_attn": "block_000.slot_07.block_norm",
+    "norm_pre_moe": "block_000.slot_09.block_norm",
+    "query": "block_000.slot_05.attn_proj_i8.model_width",
+    "router": "block_000.slot_11.router",
+    "value": "block_000.slot_06.attn_proj_i8.narrow"
   },
   "reference": {
     "expert_load": [
@@ -25,6 +50,8 @@
     {
       "tau": 0.1,
       "pack": "attn-tau-0.1.goz1",
+      "pack_sha256": "a71e4be1b697d846cf9391b5238e9a93c9efb114103e8c2d6002c14d54b32e12",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.08666308720906579,
         "slot_04.attn_proj_i8.model_width": 0.0859593550364176,
@@ -33,7 +60,7 @@
       },
       "sparsity_expected_gaussian": 0.07965567455405796,
       "label": "attn_tau_0.1",
-      "seconds": 19.697099208831787,
+      "seconds": 11.747129678726196,
       "attention_output_cosine": 0.6592071839720569,
       "attention_output_cosine_per_token": 0.6819371823399478,
       "residual_stream_cosine": 0.8296113150997796,
@@ -130,6 +157,8 @@
     {
       "tau": 0.2,
       "pack": "attn-tau-0.2.goz1",
+      "pack_sha256": "80c28edd4c5a9e6724e056e26cc513ecae0f42eedb6ac003f9a7d79fef74dc81",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.17252874374389648,
         "slot_04.attn_proj_i8.model_width": 0.17079745398627388,
@@ -138,7 +167,7 @@
       },
       "sparsity_expected_gaussian": 0.15851941887820603,
       "label": "attn_tau_0.2",
-      "seconds": 17.435184717178345,
+      "seconds": 12.48167371749878,
       "attention_output_cosine": 0.6683543560900498,
       "attention_output_cosine_per_token": 0.6908134593227351,
       "residual_stream_cosine": 0.8351077117589413,
@@ -235,6 +264,8 @@
     {
       "tau": 0.4,
       "pack": "attn-tau-0.4.goz1",
+      "pack_sha256": "7d8ebe81fa30413518de08d41e69eb9cb797bc37d626bf559b73efef30be6418",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.33654117584228516,
         "slot_04.attn_proj_i8.model_width": 0.3336911201477051,
@@ -243,7 +274,7 @@
       },
       "sparsity_expected_gaussian": 0.3108434832206483,
       "label": "attn_tau_0.4",
-      "seconds": 17.18453550338745,
+      "seconds": 13.018877506256104,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -340,6 +371,8 @@
     {
       "tau": 0.6,
       "pack": "attn-tau-0.6.goz1",
+      "pack_sha256": "becb4978c97fff46fa8237d89ba2d2dfb2f8c577d0cd8dfb25663f14018713fa",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.4836085637410482,
         "slot_04.attn_proj_i8.model_width": 0.4808473851945665,
@@ -348,7 +381,7 @@
       },
       "sparsity_expected_gaussian": 0.4514937644998528,
       "label": "attn_tau_0.6",
-      "seconds": 15.169222593307495,
+      "seconds": 12.98551082611084,
       "attention_output_cosine": 0.7303809213878721,
       "attention_output_cosine_per_token": 0.7494975691968067,
       "residual_stream_cosine": 0.8707542046193044,
@@ -445,6 +478,8 @@
     {
       "tau": 0.8,
       "pack": "attn-tau-0.8.goz1",
+      "pack_sha256": "8096043b1a0b083362c8f169a8348e4b0c468dce0ab36af7880f9d7c2defc162",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.6090842882792156,
         "slot_04.attn_proj_i8.model_width": 0.6084998713599311,
@@ -453,7 +488,7 @@
       },
       "sparsity_expected_gaussian": 0.5762892028332066,
       "label": "attn_tau_0.8",
-      "seconds": 14.900448560714722,
+      "seconds": 12.682803630828857,
       "attention_output_cosine": 0.7857555095684784,
       "attention_output_cosine_per_token": 0.8040123052723027,
       "residual_stream_cosine": 0.8949252265228429,
@@ -550,6 +585,8 @@
     {
       "tau": 1.0,
       "pack": "attn-tau-1.0.goz1",
+      "pack_sha256": "a7e6bfa986e2014ac939ff7ce52753ef6e241f7b099558808850c6b47e71b1d4",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.7115236918131511,
         "slot_04.attn_proj_i8.model_width": 0.7129982047610812,
@@ -558,7 +595,7 @@
       },
       "sparsity_expected_gaussian": 0.6826894921370859,
       "label": "attn_tau_1.0",
-      "seconds": 13.719822883605957,
+      "seconds": 12.732035875320435,
       "attention_output_cosine": 0.8404000501766765,
       "attention_output_cosine_per_token": 0.8557574350816874,
       "residual_stream_cosine": 0.9215224333234749,
@@ -655,6 +692,8 @@
     {
       "tau": 1.2,
       "pack": "attn-tau-1.2.goz1",
+      "pack_sha256": "395ccb62422c78beb2a9eb028f2d386660ba5e6e93fa206b3fa6faf625dffeb4",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.7905298868815104,
         "slot_04.attn_proj_i8.model_width": 0.7951975928412544,
@@ -663,7 +702,7 @@
       },
       "sparsity_expected_gaussian": 0.7698606595565834,
       "label": "attn_tau_1.2",
-      "seconds": 13.721140623092651,
+      "seconds": 12.591371059417725,
       "attention_output_cosine": 0.8899305670638377,
       "attention_output_cosine_per_token": 0.9025396321283661,
       "residual_stream_cosine": 0.939853972300652,
@@ -760,6 +799,8 @@
     {
       "tau": 1.6,
       "pack": "attn-tau-1.6.goz1",
+      "pack_sha256": "00c5fef1c23692c1b7f8d43a14473aa47f31bb23f15ead7d81c48a25b0d9a8d6",
+      "pack_bytes": 22168640,
       "sparsity": {
         "slot_03.attn_proj_i8.narrow": 0.8953730265299479,
         "slot_04.attn_proj_i8.model_width": 0.9026632308959961,
@@ -768,7 +809,7 @@
       },
       "sparsity_expected_gaussian": 0.890401416600884,
       "label": "attn_tau_1.6",
-      "seconds": 12.819400548934937,
+      "seconds": 12.241688251495361,
       "attention_output_cosine": 0.8994259975978504,
       "attention_output_cosine_per_token": 0.9121963470678534,
       "residual_stream_cosine": 0.9441519705581737,
