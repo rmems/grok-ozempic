@@ -184,10 +184,6 @@ class ReportGatesTests(unittest.TestCase):
         self.assertEqual(code, 3)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CertificationTests(unittest.TestCase):
     """A run that cannot prove its inventory must not emit a gate verdict.
 
@@ -249,3 +245,58 @@ class CertificationTests(unittest.TestCase):
         summary = rps.build_summary(weights, routing, certified=False)
         top1 = next(m for m in summary if m["name"] == "router_top1_agreement")
         self.assertEqual(top1["observed"], 1.0)
+
+
+class ManifestShapeValidationTests(unittest.TestCase):
+    """A certified run must not depend on an unvalidated manifest shape.
+
+    A missing `shape` used to drop the tensor from the shape map, silently
+    skipping the preserve-tier cross-check on a *certified* run; a non-integer
+    dimension raised ValueError outside the CLI's error boundary.
+    """
+
+    def _load(self, entry):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_text(json.dumps({"tensors": [entry]}))
+            return rpm._load_manifest_tensors(p)
+
+    def _entry(self, **overrides):
+        base = {
+            "structural_name": "block_000.slot_11.router",
+            "kind": "router",
+            "block": 0,
+            "shape": [6144, 8],
+        }
+        base.update(overrides)
+        return base
+
+    def test_missing_shape_rejected(self) -> None:
+        entry = self._entry()
+        del entry["shape"]
+        with self.assertRaises(rpm.MetricsError) as ctx:
+            self._load(entry)
+        self.assertIn("shape", str(ctx.exception))
+
+    def test_non_integer_dimension_rejected(self) -> None:
+        with self.assertRaises(rpm.MetricsError) as ctx:
+            self._load(self._entry(shape=["x", 8]))
+        self.assertIn("not a list of ints", str(ctx.exception))
+
+    def test_non_list_shape_rejected(self) -> None:
+        with self.assertRaises(rpm.MetricsError):
+            self._load(self._entry(shape="6144"))
+
+    def test_valid_shape_reaches_the_shape_map(self) -> None:
+        tensors = self._load(self._entry())
+        self.assertEqual(
+            rpm._manifest_shapes(tensors),
+            {"block_000.slot_11.router": (6144, 8)},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

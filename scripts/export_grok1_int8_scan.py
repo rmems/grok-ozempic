@@ -246,10 +246,18 @@ class _HeaderState:
         return out
 
     def snapshot(self) -> tuple:
-        """Copy all mutable state so a grown-window retry restarts cleanly."""
+        """Copy all mutable state so a grown-window retry restarts cleanly.
+
+        ``stack`` and ``memo`` share one ``seen`` map: a memoized container is
+        routinely reachable from both, and cloning them independently would
+        restore it as two distinct objects, so a later ``BINGET`` would mutate a
+        different object than the stack holds and the retry would model a pickle
+        state the shard never had.
+        """
+        seen: dict[int, object] = {}
         return (
-            self._clone(self.stack),
-            self._clone(self.memo),
+            self._clone(self.stack, seen),
+            self._clone(self.memo, seen),
             self.memo_next,
             list(self.ints),
             self.shape,
@@ -267,8 +275,12 @@ class _HeaderState:
             self.descr,
             self.fortran,
         ) = snap
-        self.stack = self._clone(stack)  # type: ignore[assignment]
-        self.memo = self._clone(memo)  # type: ignore[assignment]
+        # One shared map, for the same reason as `snapshot`: the copy handed back
+        # must preserve aliasing between stack and memo, and must not hand the
+        # caller's snapshot objects back (a second retry would mutate them).
+        seen: dict[int, object] = {}
+        self.stack = self._clone(stack, seen)  # type: ignore[assignment]
+        self.memo = self._clone(memo, seen)  # type: ignore[assignment]
         self.ints = list(ints)
 
     def _push(self, value: object) -> None:
@@ -621,7 +633,16 @@ def _scan_one(mm, base: int, size: int, name: str, state: _HeaderState):
     window = _SCAN_WINDOW
     while True:
         end = min(size, base + window)
-        snap = state.snapshot()
+        # A deeply nested (not merely cyclic) shard can exhaust the interpreter
+        # stack while copying parser state. That is still a malformed shard, so
+        # report it on the ExportError path rather than as a bare traceback.
+        try:
+            snap = state.snapshot()
+        except RecursionError as exc:
+            raise ExportError(
+                f"{name}: pickle state nests too deeply to copy for a window retry; "
+                "refusing to continue on a malformed shard"
+            ) from exc
         try:
             spec = _scan_window(mm[base:end], base, name, state)
             exc = None

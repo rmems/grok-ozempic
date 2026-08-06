@@ -438,10 +438,6 @@ class HeaderStateTests(unittest.TestCase):
         self.assertIsInstance(state.stack[0], exp._Unknown)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HeaderStateCloneTests(unittest.TestCase):
     """`snapshot`/`restore` must survive shared and self-referential containers.
 
@@ -492,3 +488,40 @@ class ShardFactoryGuardTests(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 _sf.write_quantized_string_dtype(Path(td) / "s", w, s, descr="x" * 256)
             self.assertIn("too long", str(ctx.exception))
+
+
+class CloneAliasingAcrossRootsTests(unittest.TestCase):
+    """Stack and memo must be cloned with one shared identity map.
+
+    A memoized container is routinely reachable from both. Cloning them
+    independently restores it as two distinct objects, so a later BINGET would
+    mutate a different object than the stack holds and the retry would model a
+    pickle state the shard never had.
+    """
+
+    def _state(self):
+        import export_grok1_int8_scan as scan
+
+        return scan._HeaderState()
+
+    def test_alias_between_stack_and_memo_survives_round_trip(self) -> None:
+        st = self._state()
+        shared: list = [1, 2]
+        st.stack = [shared]
+        st.memo = {0: shared}
+        st.restore(st.snapshot())
+        self.assertIs(st.stack[0], st.memo[0])
+
+    def test_round_trip_does_not_alias_back_to_the_snapshot(self) -> None:
+        """A second retry must not mutate the objects held by the first snapshot."""
+        st = self._state()
+        original: list = [1]
+        st.stack = [original]
+        snap = st.snapshot()
+        st.restore(snap)
+        st.stack[0].append(99)
+        self.assertEqual(original, [1], "restore handed back the caller's object")
+
+
+if __name__ == "__main__":
+    unittest.main()

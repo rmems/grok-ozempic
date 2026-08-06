@@ -129,16 +129,57 @@ def _validate_entry(path: Path, i: int, t: object, seen: set[str]) -> None:
 
 
 def _validate_block(path: Path, i: int, t: dict) -> None:
-    """`block` must be an int (block tensor) or null (model-level, e.g. embedding)."""
+    """`block` must agree with the structural name, or be null for model-level ones.
+
+    Type alone is not enough. Selection matches on ``block == --block``, so a
+    ``block_000.*`` entry carrying ``block: null`` (or the wrong number) is simply
+    never picked: the export silently comes out short instead of failing. The
+    structural name already encodes the block, so require the two to agree.
+    """
     if "block" not in t:
         raise ExportError(f"{path}: tensors[{i}] missing required key: block")
     block = t["block"]
+    name = t["structural_name"]
+    from_name = _block_from_name(name)
     if block is None:
+        if from_name is not None:
+            raise ExportError(
+                f"{path}: tensors[{i}] {name!r} names block {from_name} but block is null; "
+                "selection matches on block, so this tensor would be silently skipped"
+            )
         return
+    _require_block_matches_name(path, i, name, block, from_name)
+
+
+def _require_block_matches_name(
+    path: Path, i: int, name: str, block: object, from_name: int | None
+) -> None:
+    """A non-null `block` must be a non-negative int agreeing with the name."""
     if not isinstance(block, _BLOCK_TYPES) or isinstance(block, bool):
         raise ExportError(
             f"{path}: tensors[{i}].block is {type(block).__name__}, expected int or null"
         )
+    if block < 0:
+        raise ExportError(f"{path}: tensors[{i}].block is {block}, expected >= 0 or null")
+    if from_name is None:
+        raise ExportError(
+            f"{path}: tensors[{i}] {name!r} is not block-scoped but block is {block}; "
+            "expected null for model-level tensors"
+        )
+    if from_name != block:
+        raise ExportError(
+            f"{path}: tensors[{i}] {name!r} names block {from_name} but block is {block}"
+        )
+
+
+def _block_from_name(name: str) -> int | None:
+    """`block_000.slot_04.…` -> 0; `embedding.slot_00.…` -> None."""
+    head = name.split(".", 1)[0]
+    prefix = "block_"
+    if not head.startswith(prefix):
+        return None
+    digits = head[len(prefix) :]
+    return int(digits) if digits.isdigit() else None
 
 
 def _require_keys(path: Path, i: int, t: dict) -> None:

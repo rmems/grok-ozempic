@@ -233,6 +233,30 @@ def _validate_manifest_entry(path: Path, i: int, t: object) -> None:
     for key in ("structural_name", "kind"):
         _require_str_field(path, i, t, key)
     _require_block_field(path, i, t)
+    _require_shape_field(path, i, t)
+
+
+def _require_shape_field(path: Path, i: int, t: dict) -> None:
+    """`shape` must be a list of real ints.
+
+    Without this, a missing `shape` drops the tensor from the manifest-shape map
+    and the preserve-tier cross-check silently passes on a *certified* run, while
+    a non-integer dimension raised ValueError from `_manifest_shapes` outside the
+    CLI's error boundary.
+    """
+    if "shape" not in t:
+        raise MetricsError(f"{path}: tensors[{i}] missing required key: shape")
+    shape = t["shape"]
+    if not isinstance(shape, (list, tuple)):
+        raise MetricsError(
+            f"{path}: tensors[{i}].shape is {type(shape).__name__}, expected a list of ints"
+        )
+    bad = [d for d in shape if not isinstance(d, int) or isinstance(d, bool)]
+    if bad:
+        raise MetricsError(
+            f"{path}: tensors[{i}].shape {shape!r} is not a list of ints "
+            f"(offending value {bad[0]!r})"
+        )
 
 
 def _require_str_field(path: Path, i: int, t: dict, key: str) -> None:
@@ -405,10 +429,10 @@ def _manifest_shapes(manifest_tensors: list[dict] | None) -> dict[str, tuple[int
     """`structural_name` -> declared shape, for cross-checking measured tensors."""
     if manifest_tensors is None:
         return None
+    # `shape` is validated by `_require_shape_field` before this runs, so every
+    # entry has a list of real ints here.
     return {
-        t["structural_name"]: tuple(int(d) for d in t["shape"])
-        for t in manifest_tensors
-        if isinstance(t.get("shape"), (list, tuple))
+        t["structural_name"]: tuple(int(d) for d in t["shape"]) for t in manifest_tensors
     }
 
 

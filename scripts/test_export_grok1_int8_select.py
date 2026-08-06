@@ -268,3 +268,69 @@ class RunExportsTests(unittest.TestCase):
             with self.assertRaises(exp.ExportError) as ctx:
                 exp.run_exports(picked, Path(td), chunk_mib=1, dry_run=False)
             self.assertIn("duplicate output stem", str(ctx.exception).lower())
+
+
+class BlockNameConsistencyTests(unittest.TestCase):
+    """`block` must agree with the structural name.
+
+    Selection matches on `block == --block`, so a mismatch is not a loud failure
+    — the tensor is simply never picked and the export comes out short.
+    """
+
+    def _manifest(self, **overrides):
+        base = {
+            "structural_name": "block_000.slot_00.moe_expert.gate",
+            "source_shard_path": "s",
+            "shape": [1],
+            "kind": "moe_expert.gate",
+            "block": 0,
+        }
+        base.update(overrides)
+        return json.dumps({"tensors": [base]}).encode("utf-8")
+
+    def _load(self, **overrides):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "m.json"
+            p.write_bytes(self._manifest(**overrides))
+            return exp.load_manifest(p)
+
+    def test_block_scoped_name_with_null_block_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError) as ctx:
+            self._load(block=None)
+        self.assertIn("silently skipped", str(ctx.exception))
+
+    def test_block_number_must_match_the_name(self) -> None:
+        with self.assertRaises(exp.ExportError) as ctx:
+            self._load(block=7)
+        self.assertIn("names block 0 but block is 7", str(ctx.exception))
+
+    def test_negative_block_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError) as ctx:
+            self._load(structural_name="block_001.slot_00.moe_expert.gate", block=-1)
+        self.assertIn("expected >= 0", str(ctx.exception))
+
+    def test_model_level_name_with_a_block_number_rejected(self) -> None:
+        with self.assertRaises(exp.ExportError) as ctx:
+            self._load(
+                structural_name="embedding.slot_00.token_embedding",
+                kind="token_embedding",
+                block=0,
+            )
+        self.assertIn("not block-scoped", str(ctx.exception))
+
+    def test_matching_pairs_accepted(self) -> None:
+        self.assertEqual(len(self._load()), 1)
+        self.assertEqual(
+            len(
+                self._load(
+                    structural_name="embedding.slot_00.token_embedding",
+                    kind="token_embedding",
+                    block=None,
+                )
+            ),
+            1,
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

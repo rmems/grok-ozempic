@@ -217,10 +217,6 @@ class ReadF16Tests(unittest.TestCase):
         np.testing.assert_array_equal(got, vals.astype(np.float32))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PreserveShapeAgreementTests(unittest.TestCase):
     """Every shape source must agree exactly before the fp16 subtraction.
 
@@ -281,3 +277,7 @@ class PreserveShapeAgreementTests(unittest.TestCase):
         self.rpm._require_matching_shapes(
             "block_000.slot_07.block_norm", ref, got, self._entry((6144,)), {}
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
