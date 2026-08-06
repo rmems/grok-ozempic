@@ -1,0 +1,27 @@
+scripts/export_grok1_int8_scan.py
+  s_f430523a053518::t_2bd8220e354629 230-235
+scripts/test_export_grok1_int8_npy.py
+  s_f430523a053518::t_ec6eaabfa8aa40 27-40,45,49,55,60,65,70,248,254,260,264,269
+scripts/export_grok1_int8_select.py
+  s_f430523a053518::t_0c151b447f34de 175-180,182-187,193-203
+.github/workflows/grok-pr-review.yml
+  s_f430523a053518::t_0834b8ad31d03e 123-126,133-152
+  s_f430523a053518::t_8e7e2bdbd06947 50,56-64,66-67
+  s_f430523a053518::t_646207fd930d7a 79-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "df285ff3531814fc9fff0ff062f1b601b372430b",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
