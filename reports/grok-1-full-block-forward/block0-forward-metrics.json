@@ -3,8 +3,8 @@
     "issue": "GH #61 / Linear RM-249",
     "agent": "Claude Code: Fable 5 (xhigh)",
     "implementation": {
-      "commit": "45484ac58d1ac98d1fd84b21ba1873ad4d56b470",
-      "dirty": true
+      "commit": "4b670626213b566052d0320b24b4d1164260f47d",
+      "dirty": false
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "pack": "block_000-attention_plus_expert.goz1",
@@ -125,12 +125,12 @@
     ],
     "attn_delta_over_stream": 0.876171414302045,
     "moe_delta_over_stream": 0.4827437027494788,
-    "seconds": 13.359997034072876
+    "seconds": 12.008689641952515
   },
   "comparisons": [
     {
       "label": "fp16_roundtrip",
-      "seconds": 27.14612126350403,
+      "seconds": 25.793269157409668,
       "attention_output_cosine": 0.9999999984424572,
       "attention_output_cosine_per_token": 0.9999999986030829,
       "residual_stream_cosine": 0.9999999831365632,
@@ -226,7 +226,7 @@
     },
     {
       "label": "goz1_pack",
-      "seconds": 32.79136800765991,
+      "seconds": 32.15159821510315,
       "attention_output_cosine": 0.6940020562994945,
       "attention_output_cosine_per_token": 0.7152323961545908,
       "residual_stream_cosine": 0.8520368529920752,
@@ -322,7 +322,7 @@
     },
     {
       "label": "goz1_attention_ternary_only",
-      "seconds": 12.762728691101074,
+      "seconds": 11.897947549819946,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -418,7 +418,7 @@
     },
     {
       "label": "goz1_expert_ternary_only",
-      "seconds": 33.848666191101074,
+      "seconds": 31.710299491882324,
       "attention_output_cosine": 1.0,
       "attention_output_cosine_per_token": 1.0,
       "residual_stream_cosine": 1.0000000000000002,
