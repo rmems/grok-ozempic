@@ -1,0 +1,22 @@
+AGENTS.md
+  s_f430523a053518::t_2b40b2f0760eaf 95
+  s_f430523a053518::t_a662d1897ee556 16-17,19-22,24,26-27
+CLAUDE.md
+  s_f430523a053518::t_2b40b2f0760eaf 21,74-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "031b00f48370c4dff06703c12eebe6b4f1ec8f19",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
