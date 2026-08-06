@@ -1,0 +1,21 @@
+reports/grok-1-full-block-forward/results.md
+  s_f430523a053518::t_44599971a79394 314-330
+scripts/route_preservation_io.py
+  s_f430523a053518::t_dad9d94495c246 143-147,149-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c01a98acce8969850474f4119ad75bca0884ec72",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
