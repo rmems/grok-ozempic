@@ -26,15 +26,23 @@ case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac
 
-git rev-parse --verify HEAD >/dev/null 2>&1 || exit 0
+head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0
 
-# Only touch a commit this tool call plausibly created. Without this, any
-# succeeding `git commit …` variant that leaves HEAD untouched would still
-# rewrite it. 120s is generous for a slow pre-commit hook while still excluding
-# a commit made earlier in the session or by someone else.
-now=$(date +%s)
-committed=$(git log -1 --format=%ct 2>/dev/null || echo 0)
-[ $((now - committed)) -gt 120 ] && exit 0
+# Authoritative check that this call actually created a commit: compare HEAD with
+# what the PreToolUse companion recorded before the command ran. A `git commit`
+# variant that succeeds without committing leaves HEAD unchanged, and is skipped
+# here rather than having its pre-existing HEAD retroactively stamped.
+session=$(printf '%s' "$payload" | jq -r '.session_id // "nosession"' 2>/dev/null || echo nosession)
+state="${TMPDIR:-/tmp}/claude-coauthor/$session.head"
+if [ -r "$state" ]; then
+  [ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
+else
+  # No recorded state (first run after a config change, or the PreToolUse hook
+  # did not fire). Fall back to a recency bound so a commit made earlier in the
+  # session is still never rewritten.
+  committed=$(git log -1 --format=%ct 2>/dev/null || echo 0)
+  [ $(($(date +%s) - committed)) -gt 120 ] && exit 0
+fi
 
 # A merge commit is detected by parent count, not MERGE_HEAD: git removes
 # MERGE_HEAD as part of a successful commit, so post-commit it is always gone.

@@ -246,6 +246,47 @@ class ReadF16Tests(unittest.TestCase):
         np.testing.assert_array_equal(got, vals.astype(np.float32))
 
 
+class ReadF16SliceTests(unittest.TestCase):
+    """Same bounds contract as read_trits; both readers must agree."""
+
+    def _one(self, values: list[float]):
+        td = tempfile.TemporaryDirectory()
+        raw = np.asarray(values, dtype="<f2").tobytes()
+        p = build_pack(Path(td.name) / "p.goz1", [("t", [len(values)], TENSOR_F16, raw)])
+        _meta, index = rio.load_pack_index(p)
+        return td, p, index["t"]
+
+    def test_slices_the_requested_range(self) -> None:
+        td, p, entry = self._one([1.0, 2.0, 3.0, 4.0, 5.0])
+        try:
+            np.testing.assert_allclose(rio.read_f16_slice(p, entry, 1, 3), [2.0, 3.0, 4.0])
+            np.testing.assert_allclose(rio.read_f16_slice(p, entry, 0, 5), [1, 2, 3, 4, 5])
+        finally:
+            td.cleanup()
+
+    def test_zero_length_and_end_offset_are_allowed(self) -> None:
+        """Edge offsets are legitimate: a caller may chunk down to nothing."""
+        td, p, entry = self._one([1.0, 2.0, 3.0])
+        try:
+            self.assertEqual(rio.read_f16_slice(p, entry, 3, 0).size, 0)
+            self.assertEqual(rio.read_f16_slice(p, entry, 0, 0).size, 0)
+        finally:
+            td.cleanup()
+
+    def test_out_of_range_is_rejected(self) -> None:
+        """A negative start seeks into the preceding tensor; an over-long end
+        reads into the following one. Neither is caught by a truncation check."""
+        td, p, entry = self._one([1.0, 2.0, 3.0, 4.0])
+        try:
+            for start, count in [(-4, 2), (-1, 1), (0, -2), (0, 5), (3, 2)]:
+                with self.subTest(start=start, count=count):
+                    with self.assertRaises(rio.MetricsError) as ctx:
+                        rio.read_f16_slice(p, entry, start, count)
+                    self.assertIn("not within", str(ctx.exception))
+        finally:
+            td.cleanup()
+
+
 class PreserveShapeAgreementTests(unittest.TestCase):
     """Every shape source must agree exactly before the fp16 subtraction.
 
