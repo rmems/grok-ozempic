@@ -2,9 +2,11 @@
 
 ## Tracking
 
-- **bd is required** for task tracking whenever `bd` is installed (`bd ready`, `bd show`, `bd update --claim`, `bd close`, `bd remember` for durable notes). Markdown under `.claude/` is acceptance/scope, not the tracker.
-- Every local `bd close` / `bd update` that should be shared **must** be followed by `bd dolt push` (git push does not sync Dolt beads).
-- **Exception — Claude Code cloud / hosts without bd or Dolt:** GH issues + Linear (`RM-*`) for status and handoff only. SessionStart does not install bd. Do not invent MEMORY.md.
+- **Canonical SoT = GitHub issues + Linear (`RM-*`).** Create/update/close there for anything that must survive machines or agents. Markdown under `.claude/` is acceptance/scope, not the tracker.
+- **`.beads/issues.jsonl` is a committed offline mirror** so agents can recover project context with no network access or API tokens. It is a *cache* of GitHub + Linear, never where a decision is made -- if they disagree, GitHub/Linear wins and the export is refreshed. `.beads/interactions.jsonl` and the other `.beads/` runtime files stay gitignored.
+- The export regenerates on commit, so churn is expected. **Never hand-merge a `.beads/issues.jsonl` conflict** -- take either side and re-export (`bd export`, or just commit and let the hook do it).
+- **Board scope:** GitHub Project [Grok Quantization](https://github.com/users/rmems/projects/6) and Linear project **Grok Quantization** (team `rmems`) track the same work. Beads' Linear sync is pinned to that project via `linear.project_id`, with `github.org=rmems` / `github.repo=grok-ozempic`. Do not widen it to the whole team; an unscoped sync pulled 261 issues into a ~67-issue repo. File new issues onto the project or they fall out of sync scope.
+- No Dolt beads remote is configured; `bd dolt push` is not required.
 
 ## Quality gates before done
 
