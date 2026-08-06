@@ -1,0 +1,23 @@
+scripts/route_preservation_io.py
+  s_f430523a053518::t_02055c1ddc501a 113-126,128-133
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_fbbd77111f2de7 6-7,128,133,229,325,421
+scripts/test_route_preservation_io.py
+  s_f430523a053518::t_b714a4d44af274 198-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e78bd2168d9ace4a13eb11dac1998c2822132d0e",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
