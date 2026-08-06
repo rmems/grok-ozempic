@@ -1,0 +1,25 @@
+AGENTS.md
+  s_f430523a053518::t_1c7a6e74fcc461 14,97
+.claude/rules/agent-workflow.md
+  s_f430523a053518::t_1c7a6e74fcc461 6,37
+.gitignore
+  s_f430523a053518::t_1c7a6e74fcc461 4-8,12
+CLAUDE.md
+  s_f430523a053518::t_1c7a6e74fcc461 18,30-31,75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "54ac848486fc086c6411d9c9b8611da7fe36681f",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
