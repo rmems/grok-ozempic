@@ -117,7 +117,7 @@ def contribution_ratio(sublayer: np.ndarray, stream: np.ndarray) -> float:
 def _softmax(logits: np.ndarray) -> np.ndarray:
     shifted = np.asarray(logits, np.float64) - np.max(logits, axis=-1, keepdims=True)
     exp = np.exp(shifted)
-    return exp / exp.sum(axis=-1, keepdims=True)
+    return exp / np.sum(exp, axis=-1, keepdims=True)
 
 
 def router_margins(logits: np.ndarray) -> np.ndarray:

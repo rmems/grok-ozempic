@@ -193,9 +193,9 @@ def _naive_attention(hn, wq, wk, wv, wo, n_q, n_kv, hd):
         logits = (q[:, qh, :] @ k[:, kvh, :].T) * ATTN_OUTPUT_MULTIPLIER
         logits = MAX_ATTN_VAL * np.tanh(logits / MAX_ATTN_VAL)
         logits = np.where(causal_mask(tokens), logits, -1e30)
-        logits -= logits.max(axis=-1, keepdims=True)
+        logits -= np.max(logits, axis=-1, keepdims=True)
         w = np.exp(logits)
-        w /= w.sum(axis=-1, keepdims=True)
+        w /= np.sum(w, axis=-1, keepdims=True)
         ctx[:, qh, :] = w @ v[:, kvh, :]
     return ctx.reshape(tokens, n_q * hd) @ wo
 

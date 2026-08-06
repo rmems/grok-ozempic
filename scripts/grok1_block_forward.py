@@ -261,9 +261,9 @@ def causal_mask(tokens: int) -> np.ndarray:
 
 def _softmax_fp32(logits: np.ndarray) -> np.ndarray:
     """Softmax over the last axis in float32, as upstream always does."""
-    shifted = logits - logits.max(axis=-1, keepdims=True)
+    shifted = logits - np.max(logits, axis=-1, keepdims=True)
     exp = np.exp(shifted, dtype=np.float32)
-    return exp / exp.sum(axis=-1, keepdims=True, dtype=np.float32)
+    return exp / np.sum(exp, axis=-1, keepdims=True, dtype=np.float32)
 
 
 def attention(
