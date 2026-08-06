@@ -1,0 +1,23 @@
+scripts/grok1_block0_experiment.py
+  s_f430523a053518::t_3a1b84e1a02806 120
+scripts/test_grok1_block_forward.py
+  s_f430523a053518::t_3a1b84e1a02806 196,198
+scripts/grok1_block_forward.py
+  s_f430523a053518::t_3a1b84e1a02806 264,266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d50b3c78fff0085f36b730ff6eab9e550a831845",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
