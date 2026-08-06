@@ -116,13 +116,22 @@ class MixedWeightsValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ForwardError, "disagree on slot/role mapping"):
             MixedWeights(primary, fallback, frozenset(ATTENTION_ROLES), "mix")
 
-    def test_expert_tier_mix_is_valid(self) -> None:
-        """The attribution baseline used by the experiment must construct."""
-        primary = _StubSource(_roles(ALL_ROLES))
-        fallback = _StubSource(_roles(ALL_ROLES))
+    def test_expert_tier_mix_routes_experts_to_primary(self) -> None:
+        """The `goz1_expert_ternary_only` baseline: experts from the pack, rest reference.
+
+        Distinct tags are load-bearing. With both stubs on the default tag the
+        expected value is identical whichever source answers, so the assertion
+        holds even with routing inverted -- a vacuous test.
+        """
+        primary = _StubSource(_roles(ALL_ROLES), "pack", tag=10.0)
+        fallback = _StubSource(_roles(ALL_ROLES), "reference", tag=20.0)
         mixed = MixedWeights(primary, fallback, frozenset(EXPERT_ROLES), "expert-only")
-        # Expert tier now routes to the primary; tag 1.0 + index 3.
-        self.assertEqual(mixed.expert("expert_down", 3)[0][0], 4.0)
+
+        # Experts come from the primary: tag 10.0 + index 3.
+        self.assertEqual(mixed.expert("expert_down", 3)[0][0], 13.0)
+        # Attention and the preserved tier come from the fallback.
+        self.assertEqual(mixed.matrix("attn_out")[0][0], 20.0)
+        self.assertEqual(mixed.vector("router")[0], 20.0)
 
 
 class TernaryScaleTests(unittest.TestCase):
