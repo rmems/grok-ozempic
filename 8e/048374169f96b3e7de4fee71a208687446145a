@@ -1,0 +1,29 @@
+scripts/grok1_block0_tau_sweep.py
+  s_f430523a053518::t_ec91acbe1badff 24,53-55,80-112,135-136,140-141
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_ec91acbe1badff 7-8,22,124,129,143-144,225,239-240,321,335-336,417,431-432
+scripts/grok1_block0_experiment.py
+  s_f430523a053518::t_ec91acbe1badff 24,227,229-237,240,331-339,346-347,349-356
+scripts/route_preservation_io.py
+  s_f430523a053518::t_ec91acbe1badff 28,135-151
+reports/grok-1-full-block-forward/block0-forward-tau-sweep.json
+  s_f430523a053518::t_ec91acbe1badff 34,36,50-51,139,141,155-156,244,246,260-261,349,351,365-366,454,456,470-471,559,561,575-576,664,666,680-681,769,771,785-786
+scripts/grok1_block_weights.py
+  s_f430523a053518::t_ec91acbe1badff 40,245-248,251-260,328-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8e048374169f96b3e7de4fee71a208687446145a",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
