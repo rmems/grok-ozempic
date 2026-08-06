@@ -1,0 +1,29 @@
+scripts/grok1_block_weights.py
+  s_f430523a053518::t_596d10a4530bb7 32
+  s_f430523a053518::t_06049016a75cd5 91-95,227,288,501
+  s_f430523a053518::t_5ad87a6cdf24ef 460,468,475-477,494,510-516
+  s_f430523a053518::t_248065e720c900 50,78-90,96-106
+scripts/grok1_block0_tau_sweep.py
+  s_f430523a053518::t_b8de21eee45911 35
+  s_f430523a053518::t_5ad87a6cdf24ef 52,132-137
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_7fb0b0da4a2ae5 6-7,128,133,229,325,421
+scripts/grok1_block0_experiment.py
+  s_f430523a053518::t_5ad87a6cdf24ef 55,145,169-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0abe63c29cff5b6b08898df4c3fe719405c68e50",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
