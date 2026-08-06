@@ -101,13 +101,15 @@ def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool
     # Both argv lists are fully literal apart from ``root``, which derives from
     # ``__file__`` and never from user input, and ``git`` is resolved to an
     # absolute path above. No shell is involved (shell=False is the default).
-    # Hence nosec B603 / noqa S603: both tools flag every subprocess call, and
-    # each annotation names only its own tool's rule.
+    # Every scanner flags any subprocess call, so each annotation below names one
+    # tool's own rule: nosec for Bandit, noqa for ruff, nosemgrep for Semgrep.
     try:
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
         sha = subprocess.run(  # nosec B603  # noqa: S603
             [git, "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=30, check=True,
         ).stdout.strip()
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
         status = subprocess.run(  # nosec B603  # noqa: S603
             [
                 git, "-C", str(root), "status", "--porcelain",
