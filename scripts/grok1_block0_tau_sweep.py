@@ -39,13 +39,16 @@ from grok1_block0_experiment import (  # noqa: E402
     token_ids,
 )
 from grok1_block_forward import NUM_SELECTED_EXPERTS, ForwardError  # noqa: E402
+from route_preservation_io import MetricsError  # noqa: E402
 from grok1_block_weights import (  # noqa: E402
     ATTENTION_ROLES,
+    PRESERVED_ROLES,
     MixedWeights,
     NpyWeights,
     PackWeights,
 )
 
+EXPECT_BLOCK = "block_000"
 _TAU_RE = re.compile(r"tau-([0-9]*\.?[0-9]+)\.goz1$")
 
 
@@ -88,7 +91,8 @@ def _sweep_row(
 ) -> dict:
     """Measure one tau pack: attention from the pack, experts from the reference."""
     tau = tau_of(pack_path)
-    pack = PackWeights(pack_path, attn_npy_dir, partial=True)
+    pack = PackWeights(pack_path, attn_npy_dir, partial=True, expect_block=EXPECT_BLOCK)
+    pack.require_preserved(PRESERVED_ROLES)
     mixed = MixedWeights(pack, reference, ATTENTION_ROLES, f"attn_tau_{tau}")
     trace = forward_block(h0, mixed, top_k=top_k)
     row = {
@@ -112,7 +116,7 @@ def run(args: argparse.Namespace) -> int:
     if not packs:
         raise ForwardError(f"{args.pack_dir}: no attn-tau-*.goz1 packs found")
     names = [stem_of_inverse(p) for p in sorted(args.npy_dir.glob("*.npy"))]
-    reference = NpyWeights(args.npy_dir, names)
+    reference = NpyWeights(args.npy_dir, names, expect_block=EXPECT_BLOCK)
     ids = token_ids(args.tokens, args.seed, vocab=131072)
     h0 = embedding_rows(args.embedding_shard, ids)
 
@@ -152,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)
-    except (ForwardError, OSError) as exc:
+    except (ForwardError, MetricsError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

@@ -141,6 +141,22 @@ Reference: all 8 experts used; expert load
 | max per-expert load delta | 0.000488 | 0.000000 | 0.111816 | 0.111816 |
 | residual drift (rel. norm) | 0.000215 | 0.000000 | 0.528990 | 0.529035 |
 
+### Premise checks (fail-closed)
+
+Two assumptions the whole result rests on are asserted rather than trusted:
+
+- **Routers and all four norms are preserved.** `PackWeights.require_preserved`
+  reads each tensor's GOZ1 type from the pack itself and aborts if any of the
+  five is ternary — otherwise its drift would be misattributed to the attention
+  or expert tier. Verified to fire: a deliberately mis-built pack (9 ternary, 0
+  preserve) is rejected. Note the Rust V2 manifest already refuses to *build*
+  such a pack (the #40 fail-closed guard), so this is defence in depth for the
+  V1 path, where defaults fallthrough is permitted.
+- **The tensors really are block 0.** The slot→role map is block-agnostic, so a
+  `block_001` tensor set would resolve cleanly and then be measured against
+  token-embedding rows that are only the residual stream for block 0.
+  `resolve_roles(..., expect_block="block_000")` pins it.
+
 ### The FP16 control validates the harness
 
 top-1 **99.71%**, top-2 **99.90%**, all cosines ≥ 0.99998. The control **passes**
@@ -250,7 +266,16 @@ runtime picking a scale without the original weights would do no better.
 
 Also confirmed: `oz.gif_threshold` in pack metadata reads `0.05` for a pack built
 with per-tensor τ of 0.4/0.9 — the #51 trap. Applied τ was verified from measured
-sparsity instead (0.329 ≈ τ0.4, 0.601 ≈ τ0.8 for a Gaussian).
+sparsity instead: the attention tensors fire at **0.322–0.337** sparsity
+(consistent with τ=0.4) and the expert tensors at **0.637–0.653** (consistent with
+τ=0.9), against a metadata value of 0.05 that matches neither tier.
+
+A second integrity check comes free from the oracle α. Because α is computed as
+`Σ(w·t)/count(fired)` — the true least-squares numerator rather than `Σ|w|` — a
+pack whose trits disagreed in sign with the reference weights would show a
+nonzero `sign_mismatches`. All 7 ternary tensors report **0**, so the trit signs
+are exactly consistent with the source weights and the reported α really is the
+optimum.
 
 Follow-ups worth filing: persist a per-tensor scale in the GOZ1 header, and fix
 or drop `oz.gif_threshold`.
@@ -285,10 +310,14 @@ python3 scripts/grok1_block0_tau_sweep.py \
 python3 -m unittest scripts.test_grok1_block_forward
 ```
 
-Cost: reference 9 s, fp16 control 28 s, pack 33 s, tier attribution 50 s at 2048
-tokens; peak RSS **4.98 GiB** (expert tensors are streamed one at a time, never
-materialized whole). Oracle-alpha computation is a one-time ~50 s per pack,
-cached to `<pack>.oracle-alpha.json`.
+Cost at 2048 tokens, as recorded in `block0-forward-metrics.json`: reference
+18.1 s, fp16 control 30.9 s, full pack 89.2 s (this run included the one-time
+oracle-α computation over 19 GiB of reference weights), attention-only 13.4 s,
+expert-only 32.9 s. Peak RSS **4.98 GiB** — expert tensors are streamed one at a
+time and never materialized whole, against 6.44 GiB per tensor as f32. The α
+values are cached to `<pack>.oracle-alpha.json`, fingerprinted by pack size,
+mtime, reference npy directory and tensor set, so a rebuilt pack recomputes
+rather than silently reusing a stale scale.
 
 Machine-readable output: `block0-forward-metrics.json`,
 `block0-forward-tau-sweep.json`.

@@ -47,14 +47,19 @@ from grok1_block_forward import (  # noqa: E402
 from grok1_block_weights import (  # noqa: E402
     ATTENTION_ROLES,
     EXPERT_ROLES,
+    PRESERVED_ROLES,
     F16Weights,
     MixedWeights,
     NpyWeights,
     PackWeights,
 )
+from route_preservation_io import MetricsError  # noqa: E402
 from route_preservation_measure import js_divergence  # noqa: E402
 
 EXIT_GATE_FAILURE = 3
+# Block-0 activations are the token-embedding rows; for any other block those
+# rows are not the residual stream, so the block identity is pinned.
+EXPECT_BLOCK = "block_000"
 # Router-margin bands for the flip stratification (fraction of top-1 probability).
 _MARGIN_BANDS = ((0.0, 0.01), (0.01, 0.05), (0.05, 0.15), (0.15, 0.5), (0.5, 1.01))
 
@@ -330,7 +335,15 @@ def _provenance(args: argparse.Namespace, ids: np.ndarray, pack: PackWeights) ->
         "numpy": np.__version__,
         "python": platform.python_version(),
         "oracle_alpha": {
-            name: {"alpha": s.alpha, "sparsity": s.sparsity, "fired": s.fired, "total": s.total}
+            name: {
+                "alpha": s.alpha,
+                "sparsity": s.sparsity,
+                "fired": s.fired,
+                "total": s.total,
+                # Nonzero would mean the pack's trits disagree in sign with the
+                # reference weights, invalidating the "best case" claim.
+                "sign_mismatches": s.sign_mismatches,
+            }
             for name, s in sorted(pack.scales().items())
         },
         "ternary_scale_note": (
@@ -392,14 +405,17 @@ def _reference_summary(ref_trace: Trace) -> dict:
 def run(args: argparse.Namespace) -> int:
     ids = token_ids(args.tokens, args.seed, vocab=131072)
     names = [stem_of_inverse(p) for p in sorted(args.npy_dir.glob("*.npy"))]
-    reference = NpyWeights(args.npy_dir, names)
+    reference = NpyWeights(args.npy_dir, names, expect_block=EXPECT_BLOCK)
     h0 = embedding_rows(args.embedding_shard, ids)
 
     print(f"reference forward over {ids.size} tokens ...", flush=True)
     ref_trace = forward_block(h0, reference, top_k=args.top_k)
     print(f"  {ref_trace.seconds:.1f}s, experts touched {ref_trace.experts_touched}", flush=True)
 
-    pack = PackWeights(args.pack, args.npy_dir)
+    pack = PackWeights(args.pack, args.npy_dir, expect_block=EXPECT_BLOCK)
+    # Premise of the whole experiment: the router and all four norms are
+    # preserved, so any drift is attributable to the ternary tiers.
+    pack.require_preserved(PRESERVED_ROLES)
     results = _baselines(h0, ref_trace, reference, pack, args, names)
 
     payload = {
@@ -424,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)
-    except (ForwardError, OSError) as exc:
+    except (ForwardError, MetricsError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

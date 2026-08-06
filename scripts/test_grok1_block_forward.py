@@ -98,13 +98,52 @@ class SlotRoleTests(unittest.TestCase):
         with self.assertRaisesRegex(ForwardError, "unknown slot"):
             resolve_roles(shapes)
 
-    def test_name_without_slot_component_is_rejected(self):
-        with self.assertRaisesRegex(ForwardError, "no slot_NN component"):
+    def test_name_without_block_component_is_rejected(self):
+        """A model-level tensor is not a decoder-block tensor."""
+        with self.assertRaisesRegex(ForwardError, "no block_NNN component"):
             resolve_roles({"embedding.token_embedding": (MODEL_SIZE,)})
 
-    def test_duplicate_role_is_rejected(self):
+    def test_name_without_slot_component_is_rejected(self):
+        with self.assertRaisesRegex(ForwardError, "no slot_NN component"):
+            resolve_roles({"block_000.router": (MODEL_SIZE, NUM_EXPERTS)})
+
+    def test_tensors_spanning_two_blocks_are_rejected(self):
+        """Otherwise duplicate-role detection is the only accidental guard."""
         shapes = _block_shapes()
         shapes["block_001.slot_11.router"] = (MODEL_SIZE, NUM_EXPERTS)
+        with self.assertRaisesRegex(ForwardError, "multiple blocks"):
+            resolve_roles(shapes)
+
+    def test_wrong_block_is_rejected_when_pinned(self):
+        """block_001 tensors resolve cleanly but must not be measured as block 0.
+
+        Block-0 activations are the token-embedding rows; for any other block
+        those rows are not the residual stream, so every metric would be wrong.
+        """
+        shapes = {n.replace("block_000", "block_001"): v for n, v in _block_shapes().items()}
+        resolve_roles(shapes)  # self-consistent, so it resolves on its own
+        with self.assertRaisesRegex(ForwardError, "expected block_000"):
+            resolve_roles(shapes, expect_block="block_000")
+
+    def test_pinned_block_accepts_the_matching_block(self):
+        self.assertIn("router", resolve_roles(_block_shapes(), expect_block="block_000"))
+
+    def test_partial_tier_resolves_without_completeness(self):
+        """An attention-only pack is valid when another source supplies the rest."""
+        attn = {
+            n: v for n, v in _block_shapes().items()
+            if "attn_proj" in n or "block_norm" in n or "router" in n
+        }
+        roles = resolve_roles(attn, require_complete=False)
+        self.assertEqual(roles["query"], "block_000.slot_05.attn_proj_i8.model_width")
+        self.assertNotIn("expert_gelu", roles)
+        with self.assertRaisesRegex(ForwardError, "missing required tensors"):
+            resolve_roles(attn)
+
+    def test_duplicate_role_within_one_block_is_rejected(self):
+        """Two names in the same block mapping to one slot is ambiguous."""
+        shapes = _block_shapes()
+        shapes["block_000.slot_11.router_alt"] = (MODEL_SIZE, NUM_EXPERTS)
         with self.assertRaisesRegex(ForwardError, "claimed by both"):
             resolve_roles(shapes)
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,7 @@ from route_preservation_io import (  # noqa: E402
 
 __all__ = [
     "ALPHA_CACHE_SUFFIX",
+    "PRESERVED_ROLES",
     "ATTENTION_ROLES",
     "EXPERT_ROLES",
     "F16Weights",
@@ -55,6 +57,10 @@ __all__ = [
 
 # The two ternary tiers, for attributing damage to one or the other.
 ATTENTION_ROLES = frozenset({"query", "key", "value", "attn_out"})
+# Must never be quantized: the router and all four block norms.
+PRESERVED_ROLES = frozenset(
+    {"router", "norm_pre_attn", "norm_post_attn", "norm_pre_moe", "norm_post_moe"}
+)
 EXPERT_ROLES = frozenset({"expert_gelu", "expert_value", "expert_down"})
 
 ALPHA_CACHE_SUFFIX = ".oracle-alpha.json"
@@ -74,40 +80,60 @@ class TernaryScale:
     alpha: float
     fired: int
     total: int
+    # Fired positions where sign(trit) != sign(w). Zero for a correctly built
+    # pack, since the quantizer assigns +1 above +tau and -1 below -tau.
+    sign_mismatches: int = 0
 
     @property
     def sparsity(self) -> float:
         return 1.0 - (self.fired / self.total) if self.total else 0.0
 
 
-def _accumulate_alpha(flat_npy: np.ndarray, pack: Path, entry: dict) -> tuple[float, int]:
-    """Stream ``(sum|w| over fired, fired count)`` for one ternary tensor."""
+def _accumulate_alpha(flat_npy: np.ndarray, pack: Path, entry: dict) -> tuple[float, int, int]:
+    """Stream ``(sum(w*t) over fired, fired count, sign mismatches)``.
+
+    The signed product is the actual least-squares numerator (see
+    :func:`alpha_for`); summing ``|w|`` instead would silently paper over a
+    sign disagreement between the pack and the reference weights.
+    """
     total = int(entry["numel"])
-    s1f, fired = 0.0, 0
+    swt, fired, mismatched = 0.0, 0, 0
     for start in range(0, total, _ALPHA_CHUNK):
         count = min(_ALPHA_CHUNK, total - start)
         trits = read_trits(pack, entry, start, count)
         block = np.asarray(flat_npy[start : start + count], dtype=np.float32)
         mask = trits != 0
-        s1f += float(np.abs(block[mask], dtype=np.float32).sum(dtype=np.float64))
+        products = block[mask] * trits[mask].astype(np.float32)
+        swt += float(products.sum(dtype=np.float64))
         fired += int(mask.sum())
-    return s1f, fired
+        mismatched += int((products < 0).sum())
+    return swt, fired, mismatched
 
 
 def alpha_for(npy_path: Path, pack: Path, entry: dict) -> TernaryScale:
-    """Least-squares optimal ``alpha = sum(|w| fired) / count(fired)``.
+    """Least-squares optimal ``alpha = sum(w*t) / count(fired)``.
 
-    Minimizes ``||w - alpha*t||^2`` for the pack's own trit pattern, so it is the
-    best scale a runtime could possibly use for this tensor.
+    Minimizes ``||w - alpha*t||^2`` over ``alpha`` for the pack's own trit
+    pattern (``sum(t^2) == count(fired)`` because every trit is 0 or +/-1), so it
+    is the best scale a runtime could possibly use for this tensor.
+
+    Equals ``sum(|w|)/count(fired)`` exactly when ``sign(t) == sign(w)``
+    everywhere, which holds for a correctly built pack. Using the signed product
+    means a pack whose trits disagree in sign yields a *smaller* alpha and a
+    nonzero ``sign_mismatches`` instead of an inflated scale that would quietly
+    falsify this module's "best case" claim.
     """
     flat = np.load(npy_path, mmap_mode="r").reshape(-1)
     if flat.size != int(entry["numel"]):
         raise ForwardError(
             f"{entry['name']}: npy has {flat.size} elements, pack expects {entry['numel']}"
         )
-    s1f, fired = _accumulate_alpha(flat, pack, entry)
+    swt, fired, mismatched = _accumulate_alpha(flat, pack, entry)
     return TernaryScale(
-        alpha=(s1f / fired) if fired else 0.0, fired=fired, total=int(entry["numel"])
+        alpha=(swt / fired) if fired else 0.0,
+        fired=fired,
+        total=int(entry["numel"]),
+        sign_mismatches=mismatched,
     )
 
 
@@ -116,7 +142,9 @@ class NpyWeights:
 
     label = "fp32_reference"
 
-    def __init__(self, npy_dir: Path, names: list[str]) -> None:
+    def __init__(
+        self, npy_dir: Path, names: list[str], *, expect_block: str | None = None
+    ) -> None:
         self._paths = {n: npy_dir / f"{stem_of(n)}.npy" for n in names}
         missing = sorted(n for n, p in self._paths.items() if not p.exists())
         if missing:
@@ -125,7 +153,7 @@ class NpyWeights:
             n: tuple(int(d) for d in np.load(p, mmap_mode="r").shape)
             for n, p in self._paths.items()
         }
-        self.roles = resolve_roles(self._shapes)
+        self.roles = resolve_roles(self._shapes, expect_block=expect_block)
 
     def shapes(self) -> dict[str, tuple[int, ...]]:
         return dict(self._shapes)
@@ -182,6 +210,7 @@ class PackWeights:
         *,
         alpha_cache: Path | None = None,
         partial: bool = False,
+        expect_block: str | None = None,
     ) -> None:
         self.pack = pack
         self._npy_dir = npy_dir
@@ -190,7 +219,9 @@ class PackWeights:
         self._shapes = {n: tuple(int(d) for d in e["shape"]) for n, e in self._index.items()}
         # A tier-limited pack (attention only, say) is valid when the caller
         # supplies the remaining roles from a reference source via MixedWeights.
-        self.roles = resolve_roles(self._shapes, require_complete=not partial)
+        self.roles = resolve_roles(
+            self._shapes, require_complete=not partial, expect_block=expect_block
+        )
         self._cache_path = alpha_cache or pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
         self._scales: dict[str, TernaryScale] = self._load_cache()
 
@@ -252,6 +283,29 @@ class PackWeights:
     def _entry(self, role: str) -> dict:
         return self._index[self.roles[role]]
 
+    def tensor_type(self, role: str) -> int:
+        """GOZ1 tensor type for a role (``TENSOR_F16`` or ``TENSOR_TERNARY``)."""
+        return int(self._entry(role)["tensor_type"])
+
+    def require_preserved(self, roles: Iterable[str]) -> None:
+        """Fail closed unless every named role is stored at preserve precision.
+
+        The entire experiment rests on the router and all four norms being
+        preserved: if a pack ternarized one of them, the resulting drift would be
+        misattributed to the attention or expert tier. Asserting it against the
+        pack itself is cheap and turns a silent misattribution into an error.
+        """
+        quantized = sorted(
+            f"{role} ({self.roles[role]})"
+            for role in roles
+            if role in self.roles and self.tensor_type(role) != TENSOR_F16
+        )
+        if quantized:
+            raise ForwardError(
+                f"{self.pack.name}: these must be preserved but are quantized in the "
+                f"pack: {quantized}. Routing drift would be misattributed."
+            )
+
     def _read(self, role: str, start: int, count: int, shape: tuple[int, ...]) -> np.ndarray:
         """Reconstruct ``alpha * trits`` (ternary) or read fp16, for one slice."""
         entry = self._entry(role)
@@ -284,6 +338,45 @@ class PackWeights:
         return self._read(role, index * per, per, (rows, cols))
 
 
+def _require_agreeing_mapping(primary, fallback) -> None:
+    """Both sources must agree on what each shared role's tensor is called."""
+    shared = set(primary.roles) & set(fallback.roles)
+    disagree = sorted(r for r in shared if primary.roles[r] != fallback.roles[r])
+    if disagree:
+        raise ForwardError(f"mixed sources disagree on slot/role mapping for {disagree}")
+
+
+def _require_primary_covers(primary, roles: frozenset[str]) -> None:
+    """The primary must supply every role it has been assigned."""
+    uncovered = sorted(roles - set(primary.roles))
+    if uncovered:
+        raise ForwardError(f"primary source lacks assigned roles {uncovered}")
+
+
+def _require_all_served(primary, fallback, roles: frozenset[str]) -> None:
+    """Every claimed role must be served by whichever source ``_pick`` routes to.
+
+    A role claimed by the primary but *outside* ``roles`` goes to the fallback, so
+    if the fallback lacks it nothing serves it -- previously that surfaced as a
+    bare KeyError deep inside forward_block, after the expensive reference pass
+    had already run.
+    """
+    unserved = sorted(
+        role
+        for role in set(primary.roles) | set(fallback.roles)
+        if role not in (primary.roles if role in roles else fallback.roles)
+    )
+    if unserved:
+        raise ForwardError(f"no source serves roles {unserved}")
+
+
+def _validate_mix(primary, fallback, roles: frozenset[str]) -> None:
+    """Reject a mix that would fail later, or silently measure the wrong tensor."""
+    _require_agreeing_mapping(primary, fallback)
+    _require_primary_covers(primary, roles)
+    _require_all_served(primary, fallback, roles)
+
+
 class MixedWeights:
     """Draw some roles from one source and the rest from another.
 
@@ -294,16 +387,7 @@ class MixedWeights:
     """
 
     def __init__(self, primary, fallback, roles: frozenset[str], label: str) -> None:
-        shared = set(primary.roles) & set(fallback.roles)
-        disagree = sorted(r for r in shared if primary.roles[r] != fallback.roles[r])
-        if disagree:
-            raise ForwardError(f"mixed sources disagree on slot/role mapping for {disagree}")
-        uncovered = sorted(roles - set(primary.roles))
-        if uncovered:
-            raise ForwardError(f"primary source lacks assigned roles {uncovered}")
-        unresolved = sorted(set(fallback.roles) - set(primary.roles) - (set(fallback.roles) - roles))
-        if unresolved:
-            raise ForwardError(f"no source for roles {unresolved}")
+        _validate_mix(primary, fallback, roles)
         self._primary = primary
         self._fallback = fallback
         self._roles = roles

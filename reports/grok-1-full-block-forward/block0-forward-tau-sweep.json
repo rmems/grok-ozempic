@@ -32,7 +32,7 @@
         "slot_06.attn_proj_i8.narrow": 0.08370224634806311
       },
       "label": "attn_tau_0.1",
-      "seconds": 15.681739807128906,
+      "seconds": 15.032854795455933,
       "attention_output_cosine": 0.6592071839720569,
       "attention_output_cosine_per_token": 0.6819371823399478,
       "residual_stream_cosine": 0.8296113150997796,
@@ -134,7 +134,7 @@
         "slot_06.attn_proj_i8.narrow": 0.1668229103088379
       },
       "label": "attn_tau_0.2",
-      "seconds": 14.977640628814697,
+      "seconds": 16.714763402938843,
       "attention_output_cosine": 0.6683543560900498,
       "attention_output_cosine_per_token": 0.6908134593227351,
       "residual_stream_cosine": 0.8351077117589413,
@@ -236,7 +236,7 @@
         "slot_06.attn_proj_i8.narrow": 0.32536681493123376
       },
       "label": "attn_tau_0.4",
-      "seconds": 13.570190191268921,
+      "seconds": 14.049867868423462,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -338,7 +338,7 @@
         "slot_06.attn_proj_i8.narrow": 0.4701056480407715
       },
       "label": "attn_tau_0.6",
-      "seconds": 14.184866189956665,
+      "seconds": 15.342870235443115,
       "attention_output_cosine": 0.7303809213878721,
       "attention_output_cosine_per_token": 0.7494975691968067,
       "residual_stream_cosine": 0.8707542046193044,
@@ -440,7 +440,7 @@
         "slot_06.attn_proj_i8.narrow": 0.5950547854105632
       },
       "label": "attn_tau_0.8",
-      "seconds": 12.498293399810791,
+      "seconds": 13.883955240249634,
       "attention_output_cosine": 0.7857555095684784,
       "attention_output_cosine_per_token": 0.8040123052723027,
       "residual_stream_cosine": 0.8949252265228429,
@@ -542,7 +542,7 @@
         "slot_06.attn_proj_i8.narrow": 0.6992530822753906
       },
       "label": "attn_tau_1.0",
-      "seconds": 13.261781692504883,
+      "seconds": 13.792428493499756,
       "attention_output_cosine": 0.8404000501766765,
       "attention_output_cosine_per_token": 0.8557574350816874,
       "residual_stream_cosine": 0.9215224333234749,
@@ -644,7 +644,7 @@
         "slot_06.attn_proj_i8.narrow": 0.7817619641621908
       },
       "label": "attn_tau_1.2",
-      "seconds": 13.123982191085815,
+      "seconds": 13.673894882202148,
       "attention_output_cosine": 0.8899305670638377,
       "attention_output_cosine_per_token": 0.9025396321283661,
       "residual_stream_cosine": 0.939853972300652,
@@ -746,7 +746,7 @@
         "slot_06.attn_proj_i8.narrow": 0.8933672904968262
       },
       "label": "attn_tau_1.6",
-      "seconds": 11.752634048461914,
+      "seconds": 12.781331777572632,
       "attention_output_cosine": 0.8994259975978504,
       "attention_output_cosine_per_token": 0.9121963470678534,
       "residual_stream_cosine": 0.9441519705581737,

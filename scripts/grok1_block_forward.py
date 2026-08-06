@@ -181,8 +181,56 @@ def _slot_of(structural_name: str) -> str:
     raise ForwardError(f"{structural_name}: no slot_NN component in structural name")
 
 
+def _block_of(structural_name: str) -> str:
+    """Extract the ``block_NNN`` component of a structural tensor name."""
+    for part in structural_name.split("."):
+        if part.startswith("block_"):
+            return part
+    raise ForwardError(
+        f"{structural_name}: no block_NNN component; only decoder-block tensors "
+        "can be resolved to block roles"
+    )
+
+
+def _require_single_block(names: list[str], expect_block: str | None) -> str:
+    """All tensors must belong to one block, and to ``expect_block`` if given.
+
+    The slot->role map is block-agnostic, so without this a set of ``block_001``
+    tensors resolves cleanly and is then measured as though it were block 0. That
+    matters because block-0 activations are the token-embedding rows; for any
+    other block the same rows are not the residual stream, so every downstream
+    metric would be quietly wrong.
+    """
+    blocks = sorted({_block_of(n) for n in names})
+    if len(blocks) != 1:
+        raise ForwardError(f"tensors span multiple blocks {blocks}; resolve one block at a time")
+    if expect_block is not None and blocks[0] != expect_block:
+        raise ForwardError(f"expected {expect_block} tensors, got {blocks[0]}")
+    return blocks[0]
+
+
+def _assign_role(by_role: dict[str, str], name: str, shape: tuple[int, ...]) -> None:
+    """Resolve one tensor to its role in ``by_role``, verifying slot and shape."""
+    slot = _slot_of(name)
+    role = SLOT_ROLES.get(slot)
+    if role is None:
+        raise ForwardError(f"{name}: unknown slot {slot!r} for a Grok-1 block")
+    if role in by_role:
+        raise ForwardError(f"{role}: claimed by both {by_role[role]} and {name}")
+    expected = _ROLE_SHAPES[role]
+    if tuple(int(d) for d in shape) != expected:
+        raise ForwardError(
+            f"{name}: role {role} expects shape {expected}, got {tuple(shape)} -- "
+            "slot/role mapping or checkpoint layout has changed"
+        )
+    by_role[role] = name
+
+
 def resolve_roles(
-    shapes: dict[str, tuple[int, ...]], *, require_complete: bool = True
+    shapes: dict[str, tuple[int, ...]],
+    *,
+    require_complete: bool = True,
+    expect_block: str | None = None,
 ) -> dict[str, str]:
     """Map structural tensor names to architectural roles, verifying shapes.
 
@@ -193,22 +241,13 @@ def resolve_roles(
 
     ``require_complete=False`` permits a partial tier (an attention-only pack, for
     example), for callers that supply the remaining roles from another source.
+    ``expect_block`` pins the resolution to one block (e.g. ``"block_000"``).
     """
+    if shapes:
+        _require_single_block(sorted(shapes), expect_block)
     by_role: dict[str, str] = {}
     for name, shape in shapes.items():
-        slot = _slot_of(name)
-        role = SLOT_ROLES.get(slot)
-        if role is None:
-            raise ForwardError(f"{name}: unknown slot {slot!r} for a Grok-1 block")
-        if role in by_role:
-            raise ForwardError(f"{role}: claimed by both {by_role[role]} and {name}")
-        expected = _ROLE_SHAPES[role]
-        if tuple(int(d) for d in shape) != expected:
-            raise ForwardError(
-                f"{name}: role {role} expects shape {expected}, got {tuple(shape)} -- "
-                "slot/role mapping or checkpoint layout has changed"
-            )
-        by_role[role] = name
+        _assign_role(by_role, name, shape)
     missing = sorted(set(_ROLE_SHAPES) - set(by_role))
     if missing and require_complete:
         raise ForwardError(f"block is missing required tensors for roles: {missing}")

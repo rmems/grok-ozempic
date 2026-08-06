@@ -31,43 +31,50 @@
         "alpha": 0.03446429262403113,
         "sparsity": 0.652848777671655,
         "fired": 559126180,
-        "total": 1610612736
+        "total": 1610612736,
+        "sign_mismatches": 0
       },
       "block_000.slot_01.moe_expert.down": {
         "alpha": 0.022704254828049837,
         "sparsity": 0.6372781544923782,
         "fired": 584204424,
-        "total": 1610612736
+        "total": 1610612736,
+        "sign_mismatches": 0
       },
       "block_000.slot_02.moe_expert.up": {
         "alpha": 0.034396705025337225,
         "sparsity": 0.6443704627454281,
         "fired": 572781462,
-        "total": 1610612736
+        "total": 1610612736,
+        "sign_mismatches": 0
       },
       "block_000.slot_03.attn_proj_i8.narrow": {
         "alpha": 0.011270628247707765,
         "sparsity": 0.33654117584228516,
         "fired": 4174122,
-        "total": 6291456
+        "total": 6291456,
+        "sign_mismatches": 0
       },
       "block_000.slot_04.attn_proj_i8.model_width": {
         "alpha": 0.00769032174762091,
         "sparsity": 0.3336911201477051,
         "fired": 25152318,
-        "total": 37748736
+        "total": 37748736,
+        "sign_mismatches": 0
       },
       "block_000.slot_05.attn_proj_i8.model_width": {
         "alpha": 0.011285860723522544,
         "sparsity": 0.3221785757276747,
         "fired": 25586902,
-        "total": 37748736
+        "total": 37748736,
+        "sign_mismatches": 0
       },
       "block_000.slot_06.attn_proj_i8.narrow": {
         "alpha": 0.011283784705669356,
         "sparsity": 0.32536681493123376,
         "fired": 4244425,
-        "total": 6291456
+        "total": 6291456,
+        "sign_mismatches": 0
       }
     },
     "ternary_scale_note": "GOZ1 stores no per-tensor scale, so ternary weights are reconstructed with the least-squares optimal alpha derived from the original f32 weights. This is an oracle a real runtime does not have, so every number here is a best case."
@@ -111,12 +118,12 @@
     ],
     "attn_delta_over_stream": 0.876171414302045,
     "moe_delta_over_stream": 0.4827437027494788,
-    "seconds": 14.488927602767944
+    "seconds": 16.236870765686035
   },
   "comparisons": [
     {
       "label": "fp16_roundtrip",
-      "seconds": 29.072958946228027,
+      "seconds": 28.257107257843018,
       "attention_output_cosine": 0.9999999984424572,
       "attention_output_cosine_per_token": 0.9999999986030829,
       "residual_stream_cosine": 0.9999999831365632,
@@ -210,7 +217,7 @@
     },
     {
       "label": "goz1_pack",
-      "seconds": 72.35125637054443,
+      "seconds": 33.40004897117615,
       "attention_output_cosine": 0.6940020562994945,
       "attention_output_cosine_per_token": 0.7152323961545908,
       "residual_stream_cosine": 0.8520368529920752,
@@ -304,7 +311,7 @@
     },
     {
       "label": "goz1_attention_ternary_only",
-      "seconds": 16.258882999420166,
+      "seconds": 13.589844465255737,
       "attention_output_cosine": 0.6940020873463366,
       "attention_output_cosine_per_token": 0.7152333533468802,
       "residual_stream_cosine": 0.8520638509820196,
@@ -398,7 +405,7 @@
     },
     {
       "label": "goz1_expert_ternary_only",
-      "seconds": 34.296231508255005,
+      "seconds": 32.757932901382446,
       "attention_output_cosine": 1.0,
       "attention_output_cosine_per_token": 1.0,
       "residual_stream_cosine": 1.0000000000000002,
