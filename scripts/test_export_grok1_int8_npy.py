@@ -24,43 +24,50 @@ _write_shard = _sf.write_shard
 _write_quantized = _sf.write_quantized
 
 
+def _array_spec(shape: tuple[int, ...], descr: str) -> "exp.ArraySpec":
+    """An ArraySpec with a self-consistent nbytes for `shape`/`descr`.
+
+    Shared by the classes below. Argument order matches ArraySpec's own fields;
+    the two class-local copies this replaces took (shape, descr) and
+    (descr, shape) respectively, which was a standing footgun.
+    """
+    itemsize = {"i1": 1, "bfloat16": 2, "f4": 4}[descr]
+    numel = 1
+    for d in shape:
+        numel *= d
+    return exp.ArraySpec(shape, descr, 0, numel * itemsize)
+
+
 class SplitQuantizedTests(unittest.TestCase):
     """`split_quantized` is the last gate before a pack input is accepted."""
 
-    def _spec(self, descr: str, shape=(4, 4)):
-        item = {"i1": 1, "bfloat16": 2, "f4": 4}[descr]
-        n = 1
-        for d in shape:
-            n *= d
-        return exp.ArraySpec(shape, descr, 0, n * item)
-
     def test_int8_then_bf16_accepted(self) -> None:
-        w, s = exp.split_quantized([self._spec("i1"), self._spec("bfloat16", (1, 4))])
+        w, s = exp.split_quantized([_array_spec((4, 4), "i1"), _array_spec((1, 4), "bfloat16")])
         self.assertEqual((w.descr, s.descr), ("i1", "bfloat16"))
 
     def test_lone_f32_is_passthrough(self) -> None:
-        w, s = exp.split_quantized([self._spec("f4")])
+        w, s = exp.split_quantized([_array_spec((4, 4), "f4")])
         self.assertIsNone(s)
 
     def test_lone_int8_rejected(self) -> None:
         """A quantized weight with no scales cannot be dequantized."""
         with self.assertRaises(exp.ExportError):
-            exp.split_quantized([self._spec("i1")])
+            exp.split_quantized([_array_spec((4, 4), "i1")])
 
     def test_reversed_order_rejected(self) -> None:
         """bf16-then-int8 would treat the scales as the weight."""
         with self.assertRaises(exp.ExportError):
-            exp.split_quantized([self._spec("bfloat16", (1, 4)), self._spec("i1")])
+            exp.split_quantized([_array_spec((1, 4), "bfloat16"), _array_spec((4, 4), "i1")])
 
     def test_three_arrays_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
             exp.split_quantized(
-                [self._spec("i1"), self._spec("bfloat16", (1, 4)), self._spec("f4")]
+                [_array_spec((4, 4), "i1"), _array_spec((1, 4), "bfloat16"), _array_spec((4, 4), "f4")]
             )
 
     def test_f32_pair_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
-            exp.split_quantized([self._spec("f4"), self._spec("f4")])
+            exp.split_quantized([_array_spec((4, 4), "f4"), _array_spec((4, 4), "f4")])
 
     def test_empty_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
@@ -236,37 +243,30 @@ class ScanShardTests(unittest.TestCase):
 
 
 class GroupingTests(unittest.TestCase):
-    def _spec(self, shape, descr):
-        item = {"i1": 1, "bfloat16": 2, "f4": 4}[descr]
-        n = 1
-        for d in shape:
-            n *= d
-        return exp.ArraySpec(shape, descr, 0, n * item)
-
     def test_ungrouped(self) -> None:
         lead, k, n, g = exp.grouping(
-            self._spec((6144, 1024), "i1"), self._spec((1, 1024), "bfloat16")
+            _array_spec((6144, 1024), "i1"), _array_spec((1, 1024), "bfloat16")
         )
         self.assertEqual((lead, k, n, g), ((), 6144, 1024, 1))
 
     def test_grouped_with_lead(self) -> None:
         lead, k, n, g = exp.grouping(
-            self._spec((8, 32768, 6144), "i1"), self._spec((8, 8, 6144), "bfloat16")
+            _array_spec((8, 32768, 6144), "i1"), _array_spec((8, 8, 6144), "bfloat16")
         )
         self.assertEqual((lead, k, n, g), ((8,), 32768, 6144, 8))
 
     def test_indivisible_groups_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
-            exp.grouping(self._spec((10, 4), "i1"), self._spec((3, 4), "bfloat16"))
+            exp.grouping(_array_spec((10, 4), "i1"), _array_spec((3, 4), "bfloat16"))
 
     def test_output_dim_mismatch_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
-            exp.grouping(self._spec((8, 4), "i1"), self._spec((1, 5), "bfloat16"))
+            exp.grouping(_array_spec((8, 4), "i1"), _array_spec((1, 5), "bfloat16"))
 
     def test_lead_mismatch_rejected(self) -> None:
         with self.assertRaises(exp.ExportError):
             exp.grouping(
-                self._spec((2, 8, 4), "i1"), self._spec((3, 1, 4), "bfloat16")
+                _array_spec((2, 8, 4), "i1"), _array_spec((3, 1, 4), "bfloat16")
             )
 
 

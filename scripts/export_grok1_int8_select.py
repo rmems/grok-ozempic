@@ -172,14 +172,35 @@ def _require_block_matches_name(
         )
 
 
+# Grok-1 has 64 blocks; the field is 3 digits (`block_063`). Cap the suffix well
+# above that but far below CPython's 4300-digit int() limit, which would otherwise
+# raise ValueError outside the ExportError path.
+_MAX_BLOCK_DIGITS = 9
+
+
 def _block_from_name(name: str) -> int | None:
-    """`block_000.slot_04.…` -> 0; `embedding.slot_00.…` -> None."""
+    """`block_000.slot_04.…` -> 0; `embedding.slot_00.…` -> None.
+
+    A `block_` prefix with a non-numeric suffix is an error, not a model-level
+    tensor: returning None there would let `block_abc.…` with `block: null` pass
+    as model-level and then never be selected, silently under-exporting.
+    """
     head = name.split(".", 1)[0]
     prefix = "block_"
     if not head.startswith(prefix):
         return None
     digits = head[len(prefix) :]
-    return int(digits) if digits.isdigit() else None
+    if not digits.isdigit():
+        raise ExportError(
+            f"structural name {name!r} has a 'block_' prefix with non-numeric "
+            f"suffix {digits!r}; cannot tell which block it belongs to"
+        )
+    if len(digits) > _MAX_BLOCK_DIGITS:
+        raise ExportError(
+            f"structural name {name!r} has an implausible block number "
+            f"({len(digits)} digits, max {_MAX_BLOCK_DIGITS})"
+        )
+    return int(digits)
 
 
 def _require_keys(path: Path, i: int, t: dict) -> None:

@@ -227,7 +227,12 @@ class _HeaderState:
         if isinstance(value, dict):
             return _HeaderState._clone_dict(value, seen, key)
         if isinstance(value, set):
-            return set(value)
+            # Registered like the other containers so a set reachable from both
+            # stack and memo restores as one object. No cycle risk inside (set
+            # members are hashable, hence immutable), but the set itself aliases.
+            out_s = set(value)
+            seen[key] = out_s
+            return out_s
         return value
 
     @staticmethod
