@@ -2,7 +2,7 @@
 name = "grok-ozempic"
 version = "0.2.0"
 edition = "2024"
-description = "SNN-logic quantization for Grok models — turning fat into spikes"
+description = "SNN-logic quantization for Grok models — turning big model into spikes"
 repository = "https://github.com/rmems/grok-ozempic"
 license = "Apache-2.0 OR MIT"
 keywords = ["snn", "spiking", "quantization", "moe", "grok"]
@@ -16,9 +16,9 @@ readme = "README.md"
 # myelin-accelerator = { git = "https://github.com/rmems/myelin-accelerator", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
-thiserror = "1.0"
-safetensors = "0.4"          # optional HF-style shards (JAX workflows often use .npy via npy module)
+sha2 = "0.11.0"
+thiserror = "2.0"
+safetensors = "0.8"          # optional HF-style shards (JAX workflows often use .npy via npy module)
 memmap2 = "0.9"              # zero-copy memory-mapped file I/O for out-of-core streaming
 half = "2.4"                 # FP16 (f16) type for mixed-precision router weights
 tokio = { version = "1.0", features = ["full"], optional = true }  # future async loading

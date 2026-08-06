@@ -327,7 +327,24 @@ fn sha256_file(path: &Path) -> Result<String> {
         }
         hasher.update(&buf[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex_lower(&hasher.finalize()))
+}
+
+/// Lowercase hex for a digest.
+///
+/// `sha2` 0.11 returns `hybrid_array::Array`, which does not implement
+/// `LowerHex`, so the old `format!("{:x}", …)` no longer compiles. Formatting the
+/// bytes directly keeps the output byte-for-byte identical to what 0.10 produced,
+/// which matters because these strings are written into GOZ1 artifact indexes and
+/// compared against previously recorded checksums.
+fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        // Infallible for String; the Result exists only to satisfy the trait.
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 fn normalize_checksum(value: &str) -> String {
@@ -616,7 +633,7 @@ fn planned_checksum(name: &str, byte_len: u64, policy: &str) -> String {
     hasher.update(name.as_bytes());
     hasher.update(byte_len.to_le_bytes());
     hasher.update(policy.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex_lower(&hasher.finalize()))
 }
 
 fn build_index(
@@ -1449,6 +1466,28 @@ mod tests {
         let path = dir.join("manifest.json");
         fs::write(&path, GROK1_BASELINE_JSON).expect("manifest write");
         path
+    }
+
+    #[test]
+    fn hex_lower_matches_known_sha256_vectors() {
+        // Guards the sha2 0.10 -> 0.11 migration: `{:x}` on the digest no longer
+        // compiles, and these strings land in GOZ1 artifact indexes that get
+        // compared against previously recorded checksums, so the encoding must
+        // stay byte-identical.
+        let mut h = Sha256::new();
+        h.update(b"");
+        assert_eq!(
+            hex_lower(&h.finalize()),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        let mut h = Sha256::new();
+        h.update(b"abc");
+        assert_eq!(
+            hex_lower(&h.finalize()),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // Leading zero must be preserved as "0f", not truncated to "f".
+        assert_eq!(hex_lower(&[0x0f, 0x00, 0xff]), "0f00ff");
     }
 
     #[test]

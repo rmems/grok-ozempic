@@ -18,7 +18,7 @@ pub struct OzempicMoE {
 }
 
 impl OzempicMoE {
-    /// Create a new `OzempicMoE` with zero-initialised gate weights (uniform routing
+    /// Create a new `OzempicMoE` with zero-initialized gate weights (uniform routing
     /// until you call [`Self::load_gates_from_fp16_stacked_experts`] with real
     /// router / gate tensors).
     pub fn new(num_experts: usize, top_k: usize, embedding_dim: usize) -> Self {
@@ -89,7 +89,7 @@ impl OzempicMoE {
 
     /// Route `embedding` through the MoE gate and return `(selected_experts, expert_weights)`.
     ///
-    /// Uses a simple dot-product gate followed by top-k selection and softmax normalisation.
+    /// Uses a simple dot-product gate followed by top-k selection and softmax normalization.
     pub fn route(&self, embedding: &[f32]) -> Result<(Vec<usize>, Vec<f32>)> {
         if embedding.len() != self.embedding_dim {
             return Err(GrokOzempicError::DimensionMismatch {
