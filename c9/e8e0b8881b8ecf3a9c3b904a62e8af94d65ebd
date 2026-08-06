@@ -1,0 +1,25 @@
+src/artifact.rs
+  s_f430523a053518::t_c9da46094cf2ff 636
+  s_f430523a053518::t_31eb6b011b1fef 1472-1492
+  s_f430523a053518::t_29b85f2c5e3de3 330-347
+Cargo.toml
+  s_f430523a053518::t_b7e448fc6cd82f 5,19-21
+Cargo.lock
+  ai_agent 6-10,75,77,79,125,140-145,148,150,163,165,167,172,174,177,181-186,198-211,213,215-217,247-259,266-274,293-298,334-339,393-398,408-420,423,425,427-428,431,467,485,487,537-560,563,565,572,574,578,606,665
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c9e8e0b8881b8ecf3a9c3b904a62e8af94d65ebd",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
