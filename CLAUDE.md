@@ -20,9 +20,13 @@ two disagree, GitHub/Linear wins and the export is refreshed.
   conflict in it, **re-export instead of merging by hand** (`bd export`, or just
   commit and let the hook do it). Hand-edit only if the export is corrupt and
   `bd` cannot rewrite it.
-- Everything else under `.beads/` (`*.db`, `export-state.json`, `last_pull`,
-  `.linear-sync.lock`, `backup/`, `embeddeddolt/`, `events.jsonl`) is
-  machine-local and gitignored.
+- Also tracked, as beads scaffolding rather than data: `.beads/config.yaml`,
+  `metadata.json`, `README.md`, `.gitignore`, and `hooks/`. Editing those changes
+  behaviour for every clone, so treat them as project config, not local state.
+- Machine-local and gitignored: `*.db`, `export-state.json`, `last_pull`,
+  `last-touched`, `.linear-sync.lock`, `backup/`, `embeddeddolt/`,
+  `events.jsonl`. Beads maintains its own `.beads/.gitignore` covering most of
+  these, so the root `.gitignore` only adds what that file misses.
 
 **Board scope — keep both sides aligned.** The same work is tracked as GitHub
 Project [Grok Quantization](https://github.com/users/rmems/projects/6) and the

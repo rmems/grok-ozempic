@@ -37,6 +37,7 @@ from grok1_block_forward import (  # noqa: E402
     NUM_EXPERTS,
     NUM_SELECTED_EXPERTS,
     ForwardError,
+    UnresolvedArchitectureError,
     attention,
     expert_geglu,
     moe_combine,
@@ -60,6 +61,9 @@ from route_preservation_io import MetricsError  # noqa: E402
 from route_preservation_measure import js_divergence  # noqa: E402
 
 EXIT_GATE_FAILURE = 3
+# Distinct from 1 (operational failure) so a caller can tell an unresolved
+# architecture -- RM-249 conclusion 4 -- from a missing file or bad path.
+EXIT_UNRESOLVED = 4
 # Block-0 activations are the token-embedding rows; for any other block those
 # rows are not the residual stream, so the block identity is pinned.
 EXPECT_BLOCK = "block_000"
@@ -468,10 +472,54 @@ def stem_of_inverse(path: Path) -> str:
     return path.stem.replace("__", ".")
 
 
+def write_unresolved_report(out: Path, reason: str) -> Path:
+    """Emit RM-249's bounded conclusion 4 when the architecture cannot be resolved.
+
+    Without this, a ForwardError from role resolution exits non-zero with no
+    artifact, making "an architectural element could not be resolved" -- a real
+    research outcome the issue asks for by name -- indistinguishable from an
+    operational failure such as a missing file. Failing closed and recording the
+    conclusion are not in tension: the exit code still signals failure, and the
+    report says *which* kind.
+    """
+    out.mkdir(parents=True, exist_ok=True)
+    dest = out / "block0-forward-unresolved.json"
+    dest.write_text(
+        json.dumps(
+            {
+                "provenance": {
+                    "issue": "GH #61 / Linear RM-249",
+                    "agent": "Claude Code: Fable 5 (xhigh)",
+                    "implementation": implementation_commit(),
+                    "expect_block": EXPECT_BLOCK,
+                },
+                "conclusion": 4,
+                "conclusion_text": (
+                    "result remains inconclusive because an explicitly named "
+                    "architectural element could not be resolved"
+                ),
+                "unresolved_reason": reason,
+                "measurements": None,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    return dest
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)
+    except UnresolvedArchitectureError as exc:
+        # Only a genuine slot/shape/block contradiction is conclusion 4. A missing
+        # export or bad path raises plain ForwardError below and stays exit 1, so
+        # the two are not conflated -- which was the point of the finding.
+        print(f"error: {exc}", file=sys.stderr)
+        dest = write_unresolved_report(args.out, str(exc))
+        print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
+        return EXIT_UNRESOLVED
     except (ForwardError, MetricsError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

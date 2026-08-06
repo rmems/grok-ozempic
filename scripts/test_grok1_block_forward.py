@@ -31,6 +31,7 @@ from grok1_block_forward import (  # noqa: E402
     SLOT_ROLES,
     ForwardError,
     HeadConfig,
+    UnresolvedArchitectureError,
     attention,
     causal_mask,
     expert_geglu,
@@ -146,6 +147,40 @@ class SlotRoleTests(unittest.TestCase):
         shapes["block_000.slot_11.router_alt"] = (MODEL_SIZE, NUM_EXPERTS)
         with self.assertRaisesRegex(ForwardError, "claimed by both"):
             resolve_roles(shapes)
+
+
+class UnresolvedArchitectureTests(unittest.TestCase):
+    """RM-249 conclusion 4 must be distinguishable from an operational failure."""
+
+    def test_role_contradictions_raise_the_architecture_error(self):
+        cases = {
+            "wrong block": (lambda: resolve_roles(
+                {n.replace("block_000", "block_001"): v for n, v in _block_shapes().items()},
+                expect_block="block_000")),
+            "spans blocks": (lambda: resolve_roles(
+                {**_block_shapes(), "block_001.slot_11.router": (MODEL_SIZE, NUM_EXPERTS)})),
+            "unknown slot": (lambda: resolve_roles(
+                {**_block_shapes(), "block_000.slot_12.mystery": (MODEL_SIZE,)})),
+            "bad shape": (lambda: resolve_roles(
+                {**_block_shapes(), "block_000.slot_11.router": (MODEL_SIZE, 999)})),
+            "duplicate role": (lambda: resolve_roles(
+                {**_block_shapes(), "block_000.slot_11.router_alt": (MODEL_SIZE, NUM_EXPERTS)})),
+        }
+        for label, fn in cases.items():
+            with self.subTest(label), self.assertRaises(UnresolvedArchitectureError):
+                fn()
+
+    def test_missing_tensors_is_not_an_architecture_failure(self):
+        """An un-exported tensor is operational: it must NOT claim conclusion 4."""
+        shapes = _block_shapes()
+        del shapes["block_000.slot_11.router"]
+        with self.assertRaises(ForwardError) as ctx:
+            resolve_roles(shapes)
+        self.assertNotIsInstance(ctx.exception, UnresolvedArchitectureError)
+
+    def test_architecture_error_is_still_a_forward_error(self):
+        """Subclassing keeps existing except-ForwardError callers working."""
+        self.assertTrue(issubclass(UnresolvedArchitectureError, ForwardError))
 
 
 class RmsNormTests(unittest.TestCase):

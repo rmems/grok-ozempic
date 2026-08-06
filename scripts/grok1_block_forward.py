@@ -51,6 +51,7 @@ __all__ = [
     "ROPE_BASE",
     "SLOT_ROLES",
     "ForwardError",
+    "UnresolvedArchitectureError",
     "attention",
     "causal_mask",
     "expert_geglu",
@@ -90,6 +91,17 @@ EMBEDDING_MULTIPLIER = 78.38367176906169
 
 class ForwardError(RuntimeError):
     """Weight set does not match the Grok-1 block contract."""
+
+
+class UnresolvedArchitectureError(ForwardError):
+    """A tensor cannot be mapped to an architectural role.
+
+    Separate from a plain :class:`ForwardError` so callers can tell RM-249's
+    conclusion 4 -- "an explicitly named architectural element could not be
+    resolved" -- from an operational failure such as an un-exported tensor or a
+    wrong path. Raised for slot/shape/block contradictions, never for a file that
+    is simply absent.
+    """
 
 
 @dataclass(frozen=True)
@@ -178,7 +190,9 @@ def _slot_of(structural_name: str) -> str:
     for part in structural_name.split("."):
         if part.startswith("slot_"):
             return part
-    raise ForwardError(f"{structural_name}: no slot_NN component in structural name")
+    raise UnresolvedArchitectureError(
+        f"{structural_name}: no slot_NN component in structural name"
+    )
 
 
 def _block_of(structural_name: str) -> str:
@@ -186,7 +200,7 @@ def _block_of(structural_name: str) -> str:
     for part in structural_name.split("."):
         if part.startswith("block_"):
             return part
-    raise ForwardError(
+    raise UnresolvedArchitectureError(
         f"{structural_name}: no block_NNN component; only decoder-block tensors "
         "can be resolved to block roles"
     )
@@ -203,9 +217,11 @@ def _require_single_block(names: list[str], expect_block: str | None) -> str:
     """
     blocks = sorted({_block_of(n) for n in names})
     if len(blocks) != 1:
-        raise ForwardError(f"tensors span multiple blocks {blocks}; resolve one block at a time")
+        raise UnresolvedArchitectureError(
+            f"tensors span multiple blocks {blocks}; resolve one block at a time"
+        )
     if expect_block is not None and blocks[0] != expect_block:
-        raise ForwardError(f"expected {expect_block} tensors, got {blocks[0]}")
+        raise UnresolvedArchitectureError(f"expected {expect_block} tensors, got {blocks[0]}")
     return blocks[0]
 
 
@@ -214,12 +230,12 @@ def _assign_role(by_role: dict[str, str], name: str, shape: tuple[int, ...]) -> 
     slot = _slot_of(name)
     role = SLOT_ROLES.get(slot)
     if role is None:
-        raise ForwardError(f"{name}: unknown slot {slot!r} for a Grok-1 block")
+        raise UnresolvedArchitectureError(f"{name}: unknown slot {slot!r} for a Grok-1 block")
     if role in by_role:
-        raise ForwardError(f"{role}: claimed by both {by_role[role]} and {name}")
+        raise UnresolvedArchitectureError(f"{role}: claimed by both {by_role[role]} and {name}")
     expected = _ROLE_SHAPES[role]
     if tuple(int(d) for d in shape) != expected:
-        raise ForwardError(
+        raise UnresolvedArchitectureError(
             f"{name}: role {role} expects shape {expected}, got {tuple(shape)} -- "
             "slot/role mapping or checkpoint layout has changed"
         )
