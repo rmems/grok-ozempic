@@ -56,20 +56,45 @@ bd close <id>         # Complete work
 
 Rust edition 2024 crate. CLI binary is feature-gated.
 
-```bash
-# Unit + integration tests (CLI surface)
-cargo test --features cli --locked
+Prefer the root `justfile` (#62 / RM-250):
 
-# Lint / format (match CI spirit)
+```bash
+just --list
+just check              # fmt + clippy (cli) while iterating
+just test               # cargo test --features cli + Python unittests
+just ci                 # pre-PR parity with GitHub Actions
+just doctor             # env/path diagnosis (ok/warn/missing; non-zero only if recipe broken)
+just experiment-smoke   # release CLI --help + local data probe
+```
+
+If `just` is unavailable, mirror the recipes manually (include Python — do not cargo-only):
+
+```bash
+# just check
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 
-# CLI binary
+# just test (numpy required for several scripts/test_* modules)
+python3 -c 'import numpy; print(numpy.__version__)'
+cargo test --features cli --locked
+python3 -m unittest scripts.test_export_grok1_embedding_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_npy -v
+python3 -m unittest scripts.test_export_grok1_int8_select -v
+python3 -m unittest scripts.test_route_preservation_surface -v
+python3 -m unittest scripts.test_route_preservation_io -v
+
+# just ci (pre-PR parity; --locked is intentional and stricter than GHA)
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --all-features --locked
+cargo build --all-targets --all-features --locked
+cargo doc --no-deps --all-features --locked
+# + the five python3 -m unittest lines above
+for f in scripts/*.sh; do bash -n "$f"; done
+
+# CLI smoke
 cargo run --features cli -- --help
 cargo run --features cli -- quantize-goz1 --help
-
-# Full matrix (slower)
-cargo test --all-targets --all-features --locked
 ```
 
 Python 3 is only required for Grok-1 pickle → `.npy` export and host-side analysis:

@@ -8,7 +8,17 @@
 
 ## Quality gates before done
 
-Match CI when shipping (see `.github/workflows/rust.yml`; `--locked` is stricter than CI and preferred):
+Prefer the root `justfile` tiers (#62 / RM-250):
+
+```bash
+just check   # iterate (fmt + clippy --features cli)
+just ci      # before done / pre-PR (matches rust.yml + python-scripts.yml spirit)
+just doctor  # env/data diagnosis (always exit 0)
+```
+
+Slash commands `/smoke` (`just check` + `just test`) and `/pr-ready` (`just ci`) call the same recipes.
+
+Equivalent cargo matrix if `just` is unavailable (see `.github/workflows/rust.yml`; `--locked` is stricter than CI and preferred):
 
 ```bash
 cargo fmt --all -- --check
@@ -18,14 +28,12 @@ cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
 ```
 
-CLI-focused fast path while iterating:
+CLI-focused fast path while iterating (fallback without `just`):
 
 ```bash
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
 ```
-
-Use `/smoke` or `/pr-ready` slash commands.
 
 ## Commits and PRs
 

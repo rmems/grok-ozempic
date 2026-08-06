@@ -137,6 +137,30 @@ cargo run --features cli -- quantize-goz1 \
   --verify
 ```
 
+## Developer verification
+
+Named verification tiers for humans and coding agents (`just` required):
+
+```bash
+just --list   # discover recipes
+```
+
+| Recipe | Purpose |
+|--------|---------|
+| `just check` | Fast fmt + clippy (`--features cli`) while iterating |
+| `just test` | Rust CLI tests + Python script unittests (no multi-GiB weights) |
+| `just build` | `cargo build --all-targets --all-features --locked` |
+| `just bench` | Stable bench entry — currently exits non-zero (no harness yet; kernel benches → `myelin-accelerator`) |
+| `just ci` | Local pre-PR parity with GitHub Actions (fmt, all-features clippy/test/build/doc, Python, `bash -n`) |
+| `just experiment-smoke` | Release CLI `--help` smoke, then require local `CKPT` / `GROK_OZEMPIC_DISSECT_RUN` (fails loud if missing) |
+| `just doctor` | Env/tool/path diagnosis (`ok`/`warn`/`missing`); designed for advisory exit 0 |
+
+`check`, `test`, `build`, `ci`, and `doctor` need **no** multi-GiB checkpoints. Docker image builds and real quant pilots stay out of default `ci`.
+
+Without `just`, use the full cargo **and** Python unittest fallback blocks in
+`CLAUDE.md` / `.claude/commands/pr-ready.md` (not cargo-only — those blocks list
+all five `scripts.test_*` modules and `bash -n` for shell scripts).
+
 ## CUDA kernel ownership
 
 CUDA kernel ownership lives in the **`myelin-accelerator`** project, not in

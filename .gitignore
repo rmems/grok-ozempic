@@ -15,3 +15,10 @@ node_modules/
 *.sarif
 .codacy/
 __pycache__/
+
+# Beads exports (local only; GH+Linear are SoT)
+.beads/issues.jsonl
+.beads/interactions.jsonl
+.beads/export-state.json
+.beads/last_pull
+.beads/last-touched
