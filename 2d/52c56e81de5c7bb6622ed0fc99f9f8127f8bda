@@ -1,0 +1,45 @@
+reports/grok-1-full-block-forward/results.md
+  s_f430523a053518::t_8d05ce2700c7eb 269-278,313-320
+  s_f430523a053518::t_8897464cd0db95 144-159
+scripts/grok1_block0_experiment.py
+  s_f430523a053518::t_cff1f7d0cee015 50,56,60-62,408,415-418,443
+  s_f430523a053518::t_fa56d28ac7a8ee 338-346
+reports/grok-1-full-block-forward/block0-forward-metrics.json
+  s_f430523a053518::t_bd95ed3901138b 34-35,41-42,48-49,55-56,62-63,69-70,76-77
+  s_f430523a053518::t_6c2402c49d7a7e 121,126,220,314,408
+scripts/test_grok1_block_forward.py
+  s_f430523a053518::t_0780dc07c05f19 143-146
+  s_f430523a053518::t_42d08a76b0fb70 101-105,108,110-111,114-141
+scripts/grok1_block_forward.py
+  s_f430523a053518::t_277cf843518347 184-211
+  s_f430523a053518::t_be27063826a209 244,246-247
+  s_f430523a053518::t_98348dda69cbf1 250
+  s_f430523a053518::t_6458d995d4cc9b 230-233
+  s_f430523a053518::t_511cbadd14ff7f 212-228
+reports/grok-1-full-block-forward/block0-forward-tau-sweep.json
+  s_f430523a053518::t_b331ffc04bfbea 35,137,239,341,443,545,647,749
+scripts/grok1_block_weights.py
+  s_f430523a053518::t_4668421185fc4d 343-346,351-353,364-370,378-379
+  s_f430523a053518::t_9c9c302c3c2399 390
+  s_f430523a053518::t_57c2b93635eb2c 26,46,60-63,145-147,156,213,222-224,286-307
+  s_f430523a053518::t_5ea95bb120bdc4 341-342,347-350,354-363,371-377
+  s_f430523a053518::t_d22987cd09826d 83-85,92-98,100,106-107,109-110,114,116-124,131,133-136
+scripts/grok1_block0_tau_sweep.py
+  s_f430523a053518::t_cff1f7d0cee015 42,45,51,94-95,119,159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2d52c56e81de5c7bb6622ed0fc99f9f8127f8bda",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
