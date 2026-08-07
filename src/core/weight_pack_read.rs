@@ -211,11 +211,9 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
             }
             if info.tensor_type == TENSOR_TERNARY {
                 // A zero multiplier with a non-zero absolute cut is inconsistent:
-                // `threshold_abs = gif_threshold × rms` cannot hold if one is zero
-                // and the other is not. The explicit `(0, 0)` pair is allowed --
-                // it is the dense-ternary `τ = 0` case (no GIF gate, no sparsification)
-                // where `rms = threshold_abs / gif_threshold` is `0/0` and not needed,
-                // and writer `validate_stats_ternary` already accepts `0.0` for both.
+                // `threshold_abs = gif_threshold × rms` cannot hold. The explicit
+                // `(0, 0)` pair is allowed (dense ternary, no GIF sparsification).
+                // Writer `validate_stats_ternary` enforces the same rule.
                 if gif == 0.0 && abs_cut != 0.0 {
                     return Err(GrokOzempicError::InvalidConfig(format!(
                         "GOZ1 verify: tensor {} ({}) has inconsistent thresholds \

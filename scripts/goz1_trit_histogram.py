@@ -180,6 +180,13 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
                     f"fp16 tensor {name!r} claims GIF threshold "
                     f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs}); expected 0.0"
                 )
+            # RM-252: match Rust writer + verify_pack_file
+            if tensor_type == TENSOR_TERNARY and gif_threshold == 0.0 and threshold_abs != 0.0:
+                raise Goz1Error(
+                    f"ternary tensor {name!r} has inconsistent thresholds "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs}); "
+                    f"non-zero absolute cut with zero multiplier"
+                )
         tensors.append(
             {
                 "name": name,

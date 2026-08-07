@@ -262,6 +262,18 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 stats.threshold_abs
             )));
         }
+        // RM-252: threshold_abs = gif_threshold × rms. A zero multiplier with a
+        // non-zero absolute cut is impossible; reject at write so packs cannot
+        // pass the writer and fail verify_pack_file. The explicit (0, 0) pair is
+        // allowed (dense ternary, no GIF sparsification).
+        if stats.gif_threshold == 0.0 && stats.threshold_abs != 0.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} has inconsistent thresholds \
+                 (gif_threshold={}, threshold_abs={}); non-zero absolute cut with \
+                 zero multiplier per RM-252",
+                stats.gif_threshold, stats.threshold_abs
+            )));
+        }
         Ok(())
     }
 
@@ -409,6 +421,45 @@ mod tests {
         assert_eq!(&bytes[0..4], b"GOZ1");
         let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         assert_eq!(version, OZ1_VERSION);
+    }
+
+    #[test]
+    fn stream_writer_rejects_ternary_zero_gif_nonzero_abs() {
+        // RM-252: writer must refuse the pair verify_pack_file already rejects.
+        let headers = vec![PackTensorHeader {
+            name: "t".into(),
+            shape: vec![1],
+            tensor_type: TENSOR_TERNARY,
+        }];
+        let meta = sample_metadata();
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        let mut w = PackStreamWriter::begin(&mut buf, &meta, &headers).unwrap();
+        let err = w
+            .write_tensor_data(&[0u8; 1], TensorRowStats::ternary(0.25, 0.0, 0.15))
+            .expect_err("must reject gif_threshold=0 with threshold_abs!=0");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("inconsistent thresholds") || msg.contains("RM-252"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn stream_writer_allows_ternary_zero_gif_zero_abs() {
+        let headers = vec![PackTensorHeader {
+            name: "t".into(),
+            shape: vec![1],
+            tensor_type: TENSOR_TERNARY,
+        }];
+        let meta = sample_metadata();
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        {
+            let mut w = PackStreamWriter::begin(&mut buf, &meta, &headers).unwrap();
+            w.write_tensor_data(&[0u8; 1], TensorRowStats::ternary(0.25, 0.0, 0.0))
+                .expect("dense ternary (0,0) is allowed");
+            w.finalize().unwrap();
+        }
+        assert_eq!(&buf.into_inner()[0..4], b"GOZ1");
     }
 
     #[test]
