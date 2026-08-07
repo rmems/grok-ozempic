@@ -82,11 +82,28 @@ class SlotRoleTests(unittest.TestCase):
         self.assertEqual(SLOT_ROLES["slot_00"], "expert_gelu")
         self.assertEqual(SLOT_ROLES["slot_02"], "expert_value")
 
-    def test_swapped_query_and_output_projection_is_rejected_by_shape(self):
+    def test_invalid_projection_shape_is_rejected(self):
         shapes = _block_shapes()
         shapes["block_000.slot_05.attn_proj_i8.model_width"] = (MODEL_SIZE, 999)
         with self.assertRaises(ForwardError):
             resolve_roles(shapes)
+
+    def test_swapping_slot_04_and_05_resolves_when_shapes_match(self):
+        """Role ambiguity between query and attn_out is governed by slot map only.
+
+        Swapping slot_04 (attn_out) and slot_05 (query) succeeds when they share
+        the same (MODEL_SIZE, MODEL_SIZE) shape, documenting that shape validation
+        alone cannot distinguish them.
+        """
+        shapes = _block_shapes()
+        # Swap the names for slot_04 and slot_05; both are (MODEL_SIZE, MODEL_SIZE).
+        slot_04_name = "block_000.slot_04.attn_proj_i8.model_width"
+        slot_05_name = "block_000.slot_05.attn_proj_i8.model_width"
+        shapes[slot_04_name], shapes[slot_05_name] = shapes[slot_05_name], shapes[slot_04_name]
+        roles = resolve_roles(shapes)
+        # The roles resolve, though they are now mapped to the swapped slots.
+        self.assertIn("query", roles)
+        self.assertIn("attn_out", roles)
 
     def test_missing_tensor_is_rejected(self):
         shapes = _block_shapes()

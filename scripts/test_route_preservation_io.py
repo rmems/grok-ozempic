@@ -173,6 +173,20 @@ class ReadTritsTests(unittest.TestCase):
         _meta, index = rio.load_pack_index(p)
         return td, p, index["t"]
 
+    def _three(self, codes: list[int]):
+        """Build a pack with tensors before and after the target."""
+        td = tempfile.TemporaryDirectory()
+        p = build_pack(
+            Path(td.name) / "p.goz1",
+            [
+                ("before", [8], TENSOR_TERNARY, _trits([1] * 8)),
+                ("target", [len(codes)], TENSOR_TERNARY, _trits(codes)),
+                ("after", [8], TENSOR_TERNARY, _trits([2] * 8)),
+            ],
+        )
+        _meta, index = rio.load_pack_index(p)
+        return td, p, index["target"]
+
     def test_decodes_codes(self) -> None:
         td, p, entry = self._one([0, 1, 2, 0, 1, 2, 1, 0])
         try:
@@ -203,9 +217,12 @@ class ReadTritsTests(unittest.TestCase):
         tensor. An over-long end reads on into the *following* tensor. The
         truncation check only fires at end-of-file, so in a multi-tensor pack
         both return plausible trits from the wrong weights instead of erroring.
+
+        The fixture contains tensors before and after the target, so invalid
+        ranges would overlap neighboring payloads.
         """
         codes = [1, 2, 0, 1, 2, 0, 1, 2]
-        td, p, entry = self._one(codes)
+        td, p, entry = self._three(codes)
         try:
             for start, count in [(-8, 4), (-1, 2), (0, -4), (0, len(codes) + 1), (len(codes) - 2, 8)]:
                 with self.assertRaises(rio.MetricsError, msg=f"{start},{count}") as ctx:
@@ -256,6 +273,21 @@ class ReadF16SliceTests(unittest.TestCase):
         _meta, index = rio.load_pack_index(p)
         return td, p, index["t"]
 
+    def _three(self, values: list[float]):
+        """Build a pack with tensors before and after the target."""
+        td = tempfile.TemporaryDirectory()
+        raw = np.asarray(values, dtype="<f2").tobytes()
+        p = build_pack(
+            Path(td.name) / "p.goz1",
+            [
+                ("before", [4], TENSOR_F16, np.array([9.0, 8.0, 7.0, 6.0], dtype="<f2").tobytes()),
+                ("target", [len(values)], TENSOR_F16, raw),
+                ("after", [4], TENSOR_F16, np.array([5.0, 4.0, 3.0, 2.0], dtype="<f2").tobytes()),
+            ],
+        )
+        _meta, index = rio.load_pack_index(p)
+        return td, p, index["target"]
+
     def test_slices_the_requested_range(self) -> None:
         td, p, entry = self._one([1.0, 2.0, 3.0, 4.0, 5.0])
         try:
@@ -275,8 +307,12 @@ class ReadF16SliceTests(unittest.TestCase):
 
     def test_out_of_range_is_rejected(self) -> None:
         """A negative start seeks into the preceding tensor; an over-long end
-        reads into the following one. Neither is caught by a truncation check."""
-        td, p, entry = self._one([1.0, 2.0, 3.0, 4.0])
+        reads into the following one. Neither is caught by a truncation check.
+
+        The fixture contains tensors before and after the target, so invalid
+        ranges would overlap neighboring payloads.
+        """
+        td, p, entry = self._three([1.0, 2.0, 3.0, 4.0])
         try:
             for start, count in [(-4, 2), (-1, 1), (0, -2), (0, 5), (3, 2)]:
                 with self.subTest(start=start, count=count):

@@ -34,7 +34,11 @@ case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 # already existed -- a commit this call did not author.
 # Bounded read: a plain `cat` blocks forever if stdin is never closed, which
 # would hang the hook and silently skip the amend. 2s is ample for a JSON blob.
-payload=$(timeout 2 cat 2>/dev/null || true)
+if command -v timeout >/dev/null 2>&1; then
+  payload=$(timeout 2 cat 2>/dev/null || true)
+else
+  payload=$(read -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
+fi
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;

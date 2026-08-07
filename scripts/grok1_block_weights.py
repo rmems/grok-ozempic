@@ -187,13 +187,13 @@ def _accumulate_alpha(flat_npy: np.ndarray, pack: Path, entry: dict) -> tuple[fl
     swt, fired, mismatched = 0.0, 0, 0
     for start in range(0, total, _ALPHA_CHUNK):
         count = min(_ALPHA_CHUNK, total - start)
+        # Chunk memory: 256 MiB f32 block + 64 MiB trits + 256 MiB products = 576 MiB.
         trits = read_trits(pack, entry, start, count)
         block = np.asarray(flat_npy[start : start + count], dtype=np.float32)
-        mask = trits != 0
-        products = block[mask] * trits[mask].astype(np.float32)
+        products = block * trits.astype(np.float32)
         swt += float(products.sum(dtype=np.float64))
-        fired += int(mask.sum())
-        mismatched += int((products < 0).sum())
+        fired += int(np.count_nonzero(trits))
+        mismatched += int(np.count_nonzero(products < 0))
     return swt, fired, mismatched
 
 
@@ -434,6 +434,10 @@ class PackWeights(WeightSource):
         preserved: if a pack ternarized one of them, the resulting drift would be
         misattributed to the attention or expert tier. Asserting it against the
         pack itself is cheap and turns a silent misattribution into an error.
+
+        Roles absent from the pack are supplied by the reference source and are
+        therefore skipped (not checked). Only roles present in the pack AND
+        checked are reported.
         """
         quantized = sorted(
             f"{role} ({self.roles[role]})"

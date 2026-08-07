@@ -156,6 +156,12 @@ def read_f16_slice(pack: Path, entry: dict, start: int, count: int) -> np.ndarra
     preserve-tier ``(8, 6144, 32768)`` tensor reads 400 MiB rather than decoding
     all 3.2 GiB.
     """
+    kind = int(entry["tensor_type"])
+    if kind != TENSOR_F16:
+        raise MetricsError(
+            f"{entry['name']}: read_f16_slice requires tensor_type {TENSOR_F16} (fp16), "
+            f"got {kind}"
+        )
     numel = int(entry["numel"])
     # Negative values must be rejected too, not just an over-long end: a negative
     # start would seek backwards into the preceding tensor's payload and return

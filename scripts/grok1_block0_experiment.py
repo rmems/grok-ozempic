@@ -237,7 +237,7 @@ def _routing_agreement(ref: Trace, other: Trace) -> dict:
     top1 = float((other.expert_idx[:, 0] == ref.expert_idx[:, 0]).mean())
     ref_sets = [frozenset(r) for r in ref.expert_idx]
     other_sets = [frozenset(r) for r in other.expert_idx]
-    topk = float(np.mean([a == b for a, b in zip(ref_sets, other_sets)]))
+    topk = float(np.mean([a == b for a, b in zip(ref_sets, other_sets, strict=True)]))
     load_ref, load_other = expert_load(ref.expert_idx), expert_load(other.expert_idx)
     selected = int(ref.expert_idx.shape[1])
     agreement = {
@@ -350,7 +350,7 @@ def _provenance(args: argparse.Namespace, ids: np.ndarray, pack: PackWeights) ->
         "pack": pack.pack.name,
         "pack_sha256": sha256_file(pack.pack),
         "pack_bytes": pack.pack.stat().st_size,
-        "pack_metadata": {k: v for k, v in sorted(pack.metadata.items())},
+        "pack_metadata": dict(sorted(pack.metadata.items())),
         # [15] pack_metadata is reproduced verbatim, and oz.gif_threshold in it is
         # known-wrong under per-tensor tau (#51 / #66): it records defaults||config,
         # not what was applied. Trust the measured sparsity in oracle_alpha instead.

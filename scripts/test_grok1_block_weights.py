@@ -12,6 +12,8 @@ stub, which keeps these fast and runnable in CI.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -206,25 +208,38 @@ class AlphaCacheDiscardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "c.json"
             path.write_text(payload)
-            return _FakeCacheHost(path, fp)._load_cache()
+            stderr_capture = io.StringIO()
+            with contextlib.redirect_stderr(stderr_capture):
+                result = _FakeCacheHost(path, fp)._load_cache()
+            return result, stderr_capture.getvalue()
 
     def test_unreadable_json_is_discarded(self) -> None:
-        self.assertEqual(self._load("{ not json"), {})
+        result, warning = self._load("{ not json")
+        self.assertEqual(result, {})
+        self.assertIn("unreadable", warning)
 
     def test_non_object_payload_is_discarded(self) -> None:
-        self.assertEqual(self._load("[1, 2, 3]"), {})
+        result, warning = self._load("[1, 2, 3]")
+        self.assertEqual(result, {})
+        self.assertIn("not a JSON object", warning)
 
     def test_non_object_scales_is_discarded(self) -> None:
         payload = json.dumps({"fingerprint": {"pack_size": 1}, "scales": [1, 2]})
-        self.assertEqual(self._load(payload), {})
+        result, warning = self._load(payload)
+        self.assertEqual(result, {})
+        self.assertIn("not a JSON object", warning)
 
     def test_malformed_scale_entry_is_discarded(self) -> None:
         payload = json.dumps({"fingerprint": {"pack_size": 1}, "scales": {"t": {"nope": 1}}})
-        self.assertEqual(self._load(payload), {})
+        result, warning = self._load(payload)
+        self.assertEqual(result, {})
+        self.assertIn("malformed scale entry", warning)
 
     def test_fingerprint_mismatch_discards_quietly(self) -> None:
         payload = json.dumps({"fingerprint": {"pack_size": 999}, "scales": {}})
-        self.assertEqual(self._load(payload), {})
+        result, warning = self._load(payload)
+        self.assertEqual(result, {})
+        self.assertEqual(warning, "")
 
     def test_missing_cache_file_is_an_empty_cache(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -236,10 +251,11 @@ class AlphaCacheDiscardTests(unittest.TestCase):
         payload = json.dumps(
             {"fingerprint": fp, "scales": {"t": {"alpha": 0.5, "fired": 2, "total": 4}}}
         )
-        got = self._load(payload, fp)
+        got, warning = self._load(payload, fp)
         self.assertEqual(list(got), ["t"])
         self.assertAlmostEqual(got["t"].alpha, 0.5)
         self.assertAlmostEqual(got["t"].sparsity, 0.5)
+        self.assertEqual(warning, "")
 
 
 class RoleSetTests(unittest.TestCase):
