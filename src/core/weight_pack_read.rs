@@ -304,7 +304,10 @@ mod tests {
     use crate::core::quantizer::{decode_trit, quantize_f32};
 
     fn temp_path(tag: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("grok_ozempic_{tag}_{}.goz1", std::process::id()))
+        // Test-only helper: uses temp_dir with PID + tag; not a security boundary.
+        // Codacy flags temp_dir for security operations, but this is an isolated
+        // unit-test pack that is created and removed within the same test.
+        std::env::temp_dir().join(format!("grok_ozempic_{tag}_{}.goz1", std::process::id())) // lgtm[js/insecure-temp-file]
     }
 
     fn write_pack(path: &Path, headers: &[PackTensorHeader], blobs: &[(&[u8], f32)]) {

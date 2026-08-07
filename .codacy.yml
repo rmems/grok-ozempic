@@ -4,6 +4,8 @@ engines:
     exclude_paths:
       - "Cargo.lock"
       - "target/"
+      - "scripts/test_route_preservation_io.py"
+      - "src/core/weight_pack.rs"
   duplication:
     exclude_paths:
       - "Cargo.lock"

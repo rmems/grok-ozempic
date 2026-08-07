@@ -94,7 +94,7 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
-## After a squash merge: delete the branch, never rebase it
+## After a squash merge: delete the branch (verify first), avoid blind rebase
 
 PRs here land as **squash merges**, which create one new commit on `main` with
 **no ancestry link** to the branch's individual commits. The local branch still
