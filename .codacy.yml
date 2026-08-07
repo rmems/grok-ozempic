@@ -4,8 +4,6 @@ engines:
     exclude_paths:
       - "Cargo.lock"
       - "target/"
-      - "scripts/test_route_preservation_io.py"
-      - "src/core/weight_pack.rs"
   duplication:
     exclude_paths:
       - "Cargo.lock"
@@ -23,3 +21,4 @@ exclude_paths:
   - "scripts/testdata/"
   - "scripts/testdata/**"
   - "scripts/dev_generate_int8_export_fixtures.py"
+  - "src/core/weight_pack_read.rs"  # test helper temp_dir flagged by Codacy security — isolated test file

@@ -165,26 +165,32 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
     /// `value = scale × payload` holds uniformly. It must be finite:
     /// `verify_pack_file` rejects a non-finite scale on a ternary tensor, and
     /// catching it at write time names the tensor while we still know it.
+    fn validate_scale(t_type: u32, idx: usize, scale: f32) -> Result<()> {
+        if t_type == TENSOR_F16 && (!scale.is_finite() || scale != 1.0) {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} is fp16 and must have scale 1.0, got {scale}"
+            )));
+        }
+        if t_type == TENSOR_TERNARY && !scale.is_finite() {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} has non-finite scale {scale}; a pack must be \
+                 dequantizable from its own contents"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn write_tensor_data(&mut self, data: &[u8], scale: f32) -> Result<()> {
         if self.tensors_written >= self.tensor_count {
             return Err(GrokOzempicError::PackWrite(
                 "write_tensor_data: more blobs than tensor headers".into(),
             ));
         }
-        let t_type = self.tensor_types[self.tensors_written];
-        if t_type == TENSOR_F16 && (!scale.is_finite() || scale != 1.0) {
-            return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {} is fp16 and must have scale 1.0, got {}",
-                self.tensors_written, scale
-            )));
-        }
-        if t_type == TENSOR_TERNARY && !scale.is_finite() {
-            return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {} has non-finite scale {scale}; a pack must be \
-                 dequantizable from its own contents",
-                self.tensors_written
-            )));
-        }
+        Self::validate_scale(
+            self.tensor_types[self.tensors_written],
+            self.tensors_written,
+            scale,
+        )?;
         self.real_scales.push(scale);
         let pos = self
             .writer

@@ -64,6 +64,20 @@ def _assert_payload_size(name: str, shape: list[int], kind: int, payload: bytes)
         )
 
 
+def _pack_header_for_tensor(
+    name: str, shape: list[int], kind: int, rel: int, version: int, scale: float
+) -> bytes:
+    """Single tensor header — extracted to keep build_pack complexity low."""
+    hdr = _s(name) + _u32(len(shape))
+    for d in shape:
+        hdr += _u64(d)
+    hdr += _u32(kind) + _u64(rel)
+    if version >= 2:
+        hdr += struct.pack("<f", scale)
+        hdr += _u32(0x5CA1E021)
+    return hdr
+
+
 def build_pack(
     path: Path,
     tensors: list[tuple[str, list[int], int, bytes]],
@@ -93,13 +107,8 @@ def build_pack(
     for i, (name, shape, kind, payload) in enumerate(tensors):
         if not truncate:
             _assert_payload_size(name, shape, kind, payload)
-        head += _s(name) + _u32(len(shape))
-        for d in shape:
-            head += _u64(d)
-        head += _u32(kind) + _u64(rel)
-        if version >= 2:
-            head += struct.pack("<f", 1.0 if scales is None else scales[i])
-            head += _u32(0x5CA1E021)
+        scale = 1.0 if scales is None else scales[i]
+        head += _pack_header_for_tensor(name, shape, kind, rel, version, scale)
         rel = _align(rel + len(payload))
 
     data_start = _align(len(head))
