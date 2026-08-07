@@ -25,7 +25,11 @@ mkdir -p "$state_dir" 2>/dev/null || exit 0
 if command -v timeout >/dev/null 2>&1; then
   payload=$(timeout 2 cat 2>/dev/null || true)
 else
-  payload=$(read -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
+  # `-r` as in coauthor-commit.sh: without it a backslash in the JSON is eaten
+  # and jq yields an empty session_id, so this side records HEAD under the
+  # `nosession` key while the PostToolUse side may key it correctly (or not) --
+  # a mismatch that either skips the amend or, worse, matches another session.
+  payload=$(IFS= read -r -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
 fi
 session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
 head=$(git rev-parse --verify HEAD 2>/dev/null || echo none)

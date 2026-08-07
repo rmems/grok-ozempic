@@ -34,10 +34,17 @@ case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 # already existed -- a commit this call did not author.
 # Bounded read: a plain `cat` blocks forever if stdin is never closed, which
 # would hang the hook and silently skip the amend. 2s is ample for a JSON blob.
+# The fallback runs where `timeout` is absent (macOS without coreutils). `-r` is
+# required, not cosmetic: without it `read` treats backslash as an escape, so a
+# command containing `\"` or `\\` -- routine in this JSON -- arrives mangled and
+# `jq` fails. Both filters below then read empty, which fails *open*: an empty
+# `cmd` skips the --dry-run/--help guard, and an empty `session_id` collapses
+# every concurrent session onto the same `nosession` state key. `IFS=` keeps
+# leading and trailing whitespace out of the stripping path for the same reason.
 if command -v timeout >/dev/null 2>&1; then
   payload=$(timeout 2 cat 2>/dev/null || true)
 else
-  payload=$(read -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
+  payload=$(IFS= read -r -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
 fi
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
 case "$cmd" in

@@ -187,10 +187,19 @@ def _accumulate_alpha(flat_npy: np.ndarray, pack: Path, entry: dict) -> tuple[fl
     swt, fired, mismatched = 0.0, 0, 0
     for start in range(0, total, _ALPHA_CHUNK):
         count = min(_ALPHA_CHUNK, total - start)
-        # Chunk memory: 256 MiB f32 block + 64 MiB trits + 256 MiB products = 576 MiB.
+        # Chunk memory: 256 MiB f32 block + 64 MiB trits + 256 MiB products = 576 MiB
+        # (measured peak RSS 604 MiB, the balance being the interpreter).
+        #
+        # `np.multiply` with an explicit dtype holds that budget structurally: the
+        # int8 -> f32 conversion happens inside the ufunc's small internal buffer,
+        # so no full-size cast of `trits` is ever materialized. The previous
+        # `block * trits.astype(np.float32)` measured the same 576 MiB only because
+        # NumPy elides a refcount-1 temporary and reused the cast's buffer for the
+        # product. That is an invisible optimization to depend on -- binding the
+        # cast to a name defeats it and the peak jumps to 832 MiB.
         trits = read_trits(pack, entry, start, count)
         block = np.asarray(flat_npy[start : start + count], dtype=np.float32)
-        products = block * trits.astype(np.float32)
+        products = np.multiply(block, trits, dtype=np.float32)
         swt += float(products.sum(dtype=np.float64))
         fired += int(np.count_nonzero(trits))
         mismatched += int(np.count_nonzero(products < 0))

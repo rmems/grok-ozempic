@@ -32,6 +32,7 @@ from grok1_block_forward import (  # noqa: E402
     ForwardError,
     HeadConfig,
     UnresolvedArchitectureError,
+    _ROLE_SHAPES,
     attention,
     causal_mask,
     expert_geglu,
@@ -88,22 +89,33 @@ class SlotRoleTests(unittest.TestCase):
         with self.assertRaises(ForwardError):
             resolve_roles(shapes)
 
-    def test_swapping_slot_04_and_05_resolves_when_shapes_match(self):
-        """Role ambiguity between query and attn_out is governed by slot map only.
+    def test_query_and_attn_out_are_separated_by_slot_number_alone(self):
+        """The one role pair no validation here can check -- so SLOT_ROLES must be right.
 
-        Swapping slot_04 (attn_out) and slot_05 (query) succeeds when they share
-        the same (MODEL_SIZE, MODEL_SIZE) shape, documenting that shape validation
-        alone cannot distinguish them.
+        ``query`` and ``attn_out`` have byte-identical expected shapes, because
+        ``NUM_Q_HEADS * KEY_SIZE == MODEL_SIZE`` (48*128 == 6144). That makes
+        ``_assign_role``'s shape check vacuous for this pair: a Q/O transposition
+        is shape-legal. The tensor's trailing name component cannot rescue it
+        either -- both really are named ``attn_proj_i8.model_width`` upstream, so
+        the resolver ignores the suffix and keys purely off the slot number.
+
+        The two tensors below carry suffixes that contradict the slot map. If
+        resolution consulted the name at all, or if SLOT_ROLES transposed 04/05,
+        these assertions invert. (An earlier version of this test swapped the two
+        *shape values* instead, which -- since they are equal -- mutated nothing
+        and could not fail.)
         """
+        self.assertEqual(_ROLE_SHAPES["query"], _ROLE_SHAPES["attn_out"])
+
         shapes = _block_shapes()
-        # Swap the names for slot_04 and slot_05; both are (MODEL_SIZE, MODEL_SIZE).
-        slot_04_name = "block_000.slot_04.attn_proj_i8.model_width"
-        slot_05_name = "block_000.slot_05.attn_proj_i8.model_width"
-        shapes[slot_04_name], shapes[slot_05_name] = shapes[slot_05_name], shapes[slot_04_name]
+        del shapes["block_000.slot_04.attn_proj_i8.model_width"]
+        del shapes["block_000.slot_05.attn_proj_i8.model_width"]
+        shapes["block_000.slot_04.looks_like_query"] = (MODEL_SIZE, MODEL_SIZE)
+        shapes["block_000.slot_05.looks_like_output"] = (MODEL_SIZE, MODEL_SIZE)
+
         roles = resolve_roles(shapes)
-        # The roles resolve, though they are now mapped to the swapped slots.
-        self.assertIn("query", roles)
-        self.assertIn("attn_out", roles)
+        self.assertEqual(roles["attn_out"], "block_000.slot_04.looks_like_query")
+        self.assertEqual(roles["query"], "block_000.slot_05.looks_like_output")
 
     def test_missing_tensor_is_rejected(self):
         shapes = _block_shapes()
