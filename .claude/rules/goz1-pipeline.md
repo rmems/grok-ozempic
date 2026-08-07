@@ -117,7 +117,18 @@ oracle α derived from the source npy **only** there, and must tag it
 An oracle figure is a lower bound no runtime can reproduce, so never report one
 as a pack-only measurement. Full layout and policy: `docs/goz1-format.md`.
 
-⚠ **`oz.gif_threshold` cannot be trusted under per-tensor τ.** It records `defaults || config` only, so a manifest carrying per-tensor `ternary_candidates[].gif_threshold` still reports the CLI default. Verify the applied τ from measured sparsity instead (#51 trap; demonstrated in `reports/grok-1-block-pilot/results.md`).
+⚠ **`oz.gif_threshold` is never authoritative — it records `defaults || config` only.** A manifest carrying per-tensor `ternary_candidates[].gif_threshold` still reports the baseline, which under a tier-aware manifest can be a value *no tensor in the pack used* (#51 / #58 trap; demonstrated in `reports/grok-1-block-pilot/results.md`).
+
+**Fixed for v3 packs (#66):** each tensor row carries the applied τ, so read it from there.
+
+| Pack | How to get the applied τ |
+|------|--------------------------|
+| **v3** | Tensor row: `gif_threshold` (multiplier) and `threshold_abs` (the cut compared against `\|w\|`). `--verify` prints the distinct values; `goz1_trit_histogram.py` reports both per tensor. `rms = threshold_abs / gif_threshold` |
+| **v1 / v2** | Not recorded. Infer from measured sparsity — the metadata key cannot tell you |
+
+v3 packs also carry `oz.gif_threshold_authority = "tensor_row"` and
+`oz.gif_threshold_scope = "baseline_only_not_applied"`, so the pack says of itself
+that the scalar key is not the applied value.
 
 ## Ownership
 

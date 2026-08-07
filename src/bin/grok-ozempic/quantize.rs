@@ -3,7 +3,7 @@
 use grok_ozempic::types::{
     QuantizationConfig, QuantizationInputFormat, quantize_goz1_config, validate_gif_threshold,
 };
-use grok_ozempic::{ShardStats, run_quantization, verify_pack_file};
+use grok_ozempic::{PackVerifyReport, ShardStats, run_quantization, verify_pack_file};
 use std::path::{Path, PathBuf};
 
 use crate::CliInputFormat;
@@ -130,7 +130,50 @@ fn maybe_verify_goz1(output: &Path, verify: bool) -> anyhow::Result<()> {
         "GOZ1 verify ok: version={}, {} tensor header(s), file_size={}.",
         report.version, report.tensor_count, report.file_size
     );
+    print_applied_thresholds(&report);
     Ok(())
+}
+
+/// Surface the τ values the pack actually applied (GH #66).
+///
+/// The pack-level `oz.gif_threshold` metadata key records only
+/// `defaults || config`, so on any run with per-tensor overrides it names a
+/// threshold that some — possibly every — tensor never saw. Printing the
+/// distinct applied values makes that visible at the point a human reads the
+/// pack, instead of leaving `oz.gif_threshold` to be quoted as if authoritative.
+fn print_applied_thresholds(report: &PackVerifyReport) {
+    let Some(gifs) = report.gif_thresholds.as_deref() else {
+        println!(
+            "  applied gif_threshold: not recorded (container v{} predates per-tensor \
+             thresholds; oz.gif_threshold metadata is NOT authoritative under per-tensor τ)",
+            report.version
+        );
+        return;
+    };
+    // Ternary tensors only: fp16 rows carry 0.0 because no GIF gate ran, and
+    // including them would invent a "τ = 0" tier that does not exist.
+    let mut applied: Vec<f32> = gifs
+        .iter()
+        .copied()
+        .filter(|t| *t != 0.0)
+        .collect::<Vec<_>>();
+    applied.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    applied.dedup();
+    match applied.len() {
+        0 => println!("  applied gif_threshold: none (no ternary tensors in this pack)"),
+        1 => println!("  applied gif_threshold: {} (uniform)", applied[0]),
+        n => {
+            let list: Vec<String> = applied.iter().map(|t| t.to_string()).collect();
+            println!(
+                "  applied gif_threshold: {n} distinct values across ternary tensors: {}",
+                list.join(", ")
+            );
+            println!(
+                "  note: oz.gif_threshold metadata records only defaults||config and does \
+                 NOT describe these -- read the tensor rows"
+            );
+        }
+    }
 }
 
 fn path_to_utf8_string(path: &Path, flag: &str) -> anyhow::Result<String> {

@@ -26,6 +26,18 @@ pub struct QuantizedTensor {
     pub rms: f32,
     /// The actual firing threshold τ = gif_threshold × rms.
     pub threshold: f32,
+    /// The `gif_threshold` **multiplier** actually applied to this tensor.
+    ///
+    /// Echoed back rather than left to the caller because the resolved value is
+    /// per-tensor (`ternary_candidates[].gif_threshold` > `defaults` > CLI, see
+    /// [`crate::core::precision`]), so the number the caller *passed in* is the
+    /// only record of what was applied — and the pack-level `oz.gif_threshold`
+    /// metadata key does not carry it (GH #58, #66).
+    ///
+    /// Note the vocabulary trap: this crate writes "τ" for both this multiplier
+    /// and for [`Self::threshold`], the absolute cut it produces. They are
+    /// different numbers; both are persisted in GOZ1 v3 for that reason.
+    pub gif_threshold: f32,
     /// Fraction of weights silenced to zero.
     pub sparsity: f32,
     /// Reconstruction-optimal single scale `α*` for this tensor (GH #65).
@@ -105,6 +117,7 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
             num_elements: 0,
             rms: 0.0,
             threshold: 0.0,
+            gif_threshold,
             sparsity: 1.0,
             scale: 0.0,
         };
@@ -156,6 +169,7 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
         num_elements: n,
         rms,
         threshold,
+        gif_threshold,
         sparsity,
         scale,
     }
