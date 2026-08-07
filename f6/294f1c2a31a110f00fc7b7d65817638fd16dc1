@@ -1,0 +1,28 @@
+.beads/issues.jsonl
+  s_f430523a053518::t_9a00456702a019 19
+scripts/grok1_block_weights.py
+  s_f430523a053518::t_980d3089032c3c 190-199,202
+.claude/hooks/coauthor-commit.sh
+  s_f430523a053518::t_9e5495098fde09 37-43,47
+.claude/hooks/coauthor-record-head.sh
+  s_f430523a053518::t_0dac015a44b4be 28-32
+scripts/test_grok1_block_forward.py
+  s_f430523a053518::t_c737c4abe3b8b1 35
+  s_f430523a053518::t_7d081912d3e57a 92-106,108-109,111-115,117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "f6294f1c2a31a110f00fc7b7d65817638fd16dc1",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
