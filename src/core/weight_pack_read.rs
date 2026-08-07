@@ -74,6 +74,9 @@ pub struct PackVerifyReport {
     /// set, this is the value actually compared against `|w|`. `rms` is
     /// recoverable as `threshold_abs / gif_threshold`.
     pub threshold_abs: Option<Vec<f32>>,
+    /// Per-tensor type tags in tensor-table order, so a consumer can tell a
+    /// ternary `τ = 0` from an fp16 `0.0` that never ran through a GIF gate.
+    pub tensor_types: Vec<u32>,
 }
 
 pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
@@ -207,23 +210,17 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
                 )));
             }
             if info.tensor_type == TENSOR_TERNARY {
-                // Zero multiplier makes `rms = threshold_abs / gif_threshold` 0/0.
-                // Reject it rather than persisting an irrecoverable RMS (RM-252
-                // alternative is to persist rms explicitly). Also reject the
-                // inconsistent pair where the absolute cut is non-zero but the
-                // multiplier is zero.
+                // A zero multiplier with a non-zero absolute cut is inconsistent:
+                // `threshold_abs = gif_threshold × rms` cannot hold if one is zero
+                // and the other is not. The explicit `(0, 0)` pair is allowed --
+                // it is the dense-ternary `τ = 0` case (no GIF gate, no sparsification)
+                // where `rms = threshold_abs / gif_threshold` is `0/0` and not needed,
+                // and writer `validate_stats_ternary` already accepts `0.0` for both.
                 if gif == 0.0 && abs_cut != 0.0 {
                     return Err(GrokOzempicError::InvalidConfig(format!(
                         "GOZ1 verify: tensor {} ({}) has inconsistent thresholds \
                          (gif_threshold={}, threshold_abs={}); non-zero absolute cut \
                          with zero multiplier per RM-252",
-                        i, info.name, gif, abs_cut
-                    )));
-                }
-                if gif == 0.0 {
-                    return Err(GrokOzempicError::InvalidConfig(format!(
-                        "GOZ1 verify: tensor {} ({}) is ternary with zero gif_threshold \
-                         (gif_threshold={}, threshold_abs={}); rms would be 0/0 per RM-252",
                         i, info.name, gif, abs_cut
                     )));
                 }
@@ -274,6 +271,7 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
         scales,
         gif_thresholds,
         threshold_abs,
+        tensor_types: infos.iter().map(|i| i.tensor_type).collect(),
     })
 }
 

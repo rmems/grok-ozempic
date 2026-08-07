@@ -39,7 +39,7 @@ indistinguishable from a well-formed one at parse time; a fixed trailing value
 turns any desync between writer and reader — a miscounted field, or a row width
 changed on one side only — into an immediate error rather than a plausible
 misparse of the following row. Readers must reject a row whose sentinel does not
-match (`OZ1_V2_ROW_SENTINEL` in Rust; the same constant in the Python parser).
+match (`OZ1_ROW_SENTINEL` in Rust; the same constant in the Python parser).
 
 `data_offset` and `scale` are both written as placeholders and patched in
 `finalize`, because the whole tensor table is laid down before any payload is

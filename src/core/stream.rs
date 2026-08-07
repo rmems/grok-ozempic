@@ -330,7 +330,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
 
     let mut metadata: BTreeMap<String, PackMetaValue> = BTreeMap::new();
     metadata.insert("oz.name".into(), PackMetaValue::Str("grok-ozempic".into()));
-    // Provenance twin of the binary OZ1_VERSION. Both move to 2 together: the
+    // Provenance twin of the binary OZ1_VERSION. Both move to 3 together: the
     // binary field gates the layout, this one records it for anything reading
     // metadata only (GH #65).
     metadata.insert(

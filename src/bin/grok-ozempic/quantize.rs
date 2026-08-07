@@ -1,5 +1,6 @@
 //! `quantize-goz1` command: GOZ1 packing via `run_quantization`.
 
+use grok_ozempic::core::weight_pack::TENSOR_TERNARY;
 use grok_ozempic::types::{
     QuantizationConfig, QuantizationInputFormat, quantize_goz1_config, validate_gif_threshold,
 };
@@ -151,17 +152,25 @@ fn print_applied_thresholds(report: &PackVerifyReport) {
         return;
     };
     // Ternary tensors only: fp16 rows carry 0.0 because no GIF gate ran, and
-    // including them would invent a "τ = 0" tier that does not exist.
+    // including them would invent a "τ = 0" tier that does not exist. Filter by
+    // type, not by value -- a ternary tensor can legitimately carry τ = 0.0.
     let mut applied: Vec<f32> = gifs
         .iter()
-        .copied()
-        .filter(|t| *t != 0.0)
+        .zip(report.tensor_types.iter())
+        .filter(|(_, ty)| **ty == TENSOR_TERNARY)
+        .map(|(g, _)| *g)
         .collect::<Vec<_>>();
     applied.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     applied.dedup();
     match applied.len() {
         0 => println!("  applied gif_threshold: none (no ternary tensors in this pack)"),
-        1 => println!("  applied gif_threshold: {} (uniform)", applied[0]),
+        1 => {
+            println!("  applied gif_threshold: {} (uniform)", applied[0]);
+            println!(
+                "  note: oz.gif_threshold metadata records only defaults||config and does \
+                 NOT describe this -- read the tensor rows"
+            );
+        }
         n => {
             let list: Vec<String> = applied.iter().map(|t| t.to_string()).collect();
             println!(

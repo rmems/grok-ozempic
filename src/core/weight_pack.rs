@@ -217,62 +217,71 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
         })
     }
 
-    /// Write one tensor payload and record its reconstruction scale.
-    ///
-    /// `scale` is `α*` from [`crate::core::quantizer::QuantizedTensor::scale`]
-    /// for a ternary payload, and `1.0` for an fp16 payload, so that
-    /// `value = scale × payload` holds uniformly. It must be finite:
-    /// `verify_pack_file` rejects a non-finite scale on a ternary tensor, and
-    /// catching it at write time names the tensor while we still know it.
-    fn validate_stats(t_type: u32, idx: usize, stats: &TensorRowStats) -> Result<()> {
-        if t_type == TENSOR_F16 {
-            // The halves *are* the values, so anything but the identity means the
-            // row and the payload disagree about what the tensor holds. Thresholds
-            // must be zero because no GIF gate ran: a nonzero one here would read
-            // as a silencing cut that never happened.
-            if !stats.scale.is_finite() || stats.scale != 1.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {idx} is fp16 and must have scale 1.0, got {}",
-                    stats.scale
-                )));
-            }
-            if stats.gif_threshold != 0.0 || stats.threshold_abs != 0.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {idx} is fp16 and must have zero thresholds, got \
-                     gif_threshold={} threshold_abs={}",
-                    stats.gif_threshold, stats.threshold_abs
-                )));
-            }
-            return Ok(());
+    fn validate_stats_f16(idx: usize, stats: &TensorRowStats) -> Result<()> {
+        // The halves *are* the values, so anything but the identity means the
+        // row and the payload disagree about what the tensor holds. Thresholds
+        // must be zero because no GIF gate ran: a nonzero one here would read
+        // as a silencing cut that never happened.
+        if !stats.scale.is_finite() || stats.scale != 1.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} is fp16 and must have scale 1.0, got {}",
+                stats.scale
+            )));
         }
-        if t_type == TENSOR_TERNARY {
-            // alpha is a magnitude -- sign lives in the trit -- so a negative
-            // alpha would invert every weight in the tensor.
-            if !stats.scale.is_finite() || stats.scale < 0.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {idx} has non-finite or negative scale {}; a pack \
-                     must be dequantizable from its own contents",
-                    stats.scale
-                )));
-            }
-            // Both thresholds are magnitudes compared against |w|; negative is
-            // meaningless and would describe a gate that silenced nothing.
-            if !stats.gif_threshold.is_finite() || stats.gif_threshold < 0.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {idx} has non-finite or negative gif_threshold {}",
-                    stats.gif_threshold
-                )));
-            }
-            if !stats.threshold_abs.is_finite() || stats.threshold_abs < 0.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {idx} has non-finite or negative threshold_abs {}",
-                    stats.threshold_abs
-                )));
-            }
+        if stats.gif_threshold != 0.0 || stats.threshold_abs != 0.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} is fp16 and must have zero thresholds, got \
+                 gif_threshold={} threshold_abs={}",
+                stats.gif_threshold, stats.threshold_abs
+            )));
         }
         Ok(())
     }
 
+    fn validate_stats_ternary(idx: usize, stats: &TensorRowStats) -> Result<()> {
+        // alpha is a magnitude -- sign lives in the trit -- so a negative
+        // alpha would invert every weight in the tensor.
+        if !stats.scale.is_finite() || stats.scale < 0.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} has non-finite or negative scale {}; a pack \
+                 must be dequantizable from its own contents",
+                stats.scale
+            )));
+        }
+        // Both thresholds are magnitudes compared against |w|; negative is
+        // meaningless and would describe a gate that silenced nothing.
+        if !stats.gif_threshold.is_finite() || stats.gif_threshold < 0.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} has non-finite or negative gif_threshold {}",
+                stats.gif_threshold
+            )));
+        }
+        if !stats.threshold_abs.is_finite() || stats.threshold_abs < 0.0 {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {idx} has non-finite or negative threshold_abs {}",
+                stats.threshold_abs
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_stats(t_type: u32, idx: usize, stats: &TensorRowStats) -> Result<()> {
+        match t_type {
+            TENSOR_F16 => Self::validate_stats_f16(idx, stats),
+            TENSOR_TERNARY => Self::validate_stats_ternary(idx, stats),
+            _ => Ok(()),
+        }
+    }
+
+    /// Write one tensor payload and record its reconstruction scale.
+    ///
+    /// `stats` carries the per-tensor reconstruction scale and the applied
+    /// thresholds. `scale` is `α*` from
+    /// [`crate::core::quantizer::QuantizedTensor::scale`] for a ternary payload,
+    /// and `1.0` for an fp16 payload, so that `value = scale × payload` holds
+    /// uniformly. It must be finite: `verify_pack_file` rejects a non-finite
+    /// scale on a ternary tensor, and catching it at write time names the tensor
+    /// while we still know it.
     pub fn write_tensor_data(&mut self, data: &[u8], stats: TensorRowStats) -> Result<()> {
         if self.tensors_written >= self.tensor_count {
             return Err(GrokOzempicError::PackWrite(
