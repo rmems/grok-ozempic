@@ -1,0 +1,29 @@
+src/core/weight_pack.rs
+  s_f430523a053518::t_e978b2582eef30 175-186
+CLAUDE.md
+  s_f430523a053518::t_a3df46bf4ef42d 97-144
+.claude/rules/agent-workflow.md
+  s_f430523a053518::t_97c244cc59ded4 9-16
+.gitignore
+  s_f430523a053518::t_d02443f78103c6 36-37
+docs/goz1-format.md
+  s_f430523a053518::t_1d683ed28abad9 113-122
+  s_f430523a053518::t_d88eaa08d5bf49 51
+  s_f430523a053518::t_57962dfa2c96c5 28,34-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cf300ec6997a2fc367bd21c86abf27e206d33602",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
