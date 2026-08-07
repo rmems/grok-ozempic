@@ -135,10 +135,10 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
         // ternary one silently dequantizes to garbage (or to all-zero).
         if let Some(scale) = info.scale
             && info.tensor_type == TENSOR_TERNARY
-            && !scale.is_finite()
+            && (!scale.is_finite() || *scale < 0.0)
         {
             return Err(GrokOzempicError::InvalidConfig(format!(
-                "GOZ1 verify: tensor {} ({}) is ternary with non-finite scale {}; the pack \
+                "GOZ1 verify: tensor {} ({}) is ternary with non-finite or negative scale {}; the pack \
                  cannot be dequantized from its own contents",
                 i, info.name, scale
             )));
