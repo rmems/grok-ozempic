@@ -25,6 +25,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from grok1_block_forward import ForwardError  # noqa: E402
+from route_preservation_io import MetricsError  # noqa: E402
 from grok1_block_weights import (  # noqa: E402
     ALPHA_CACHE_SUFFIX,
     ATTENTION_ROLES,
