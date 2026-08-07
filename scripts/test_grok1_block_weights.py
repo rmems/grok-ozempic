@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from grok1_block_forward import ForwardError  # noqa: E402
 from grok1_block_weights import (  # noqa: E402
+    ALPHA_CACHE_SUFFIX,
     ATTENTION_ROLES,
     EXPERT_ROLES,
     PRESERVED_ROLES,
@@ -36,6 +37,8 @@ from grok1_block_weights import (  # noqa: E402
     sha256_file,
     stem_of,
 )
+from route_preservation_io import TENSOR_TERNARY  # noqa: E402
+from test_route_preservation_io import _trits, build_pack  # noqa: E402
 
 
 class _StubSource:
@@ -256,6 +259,93 @@ class AlphaCacheDiscardTests(unittest.TestCase):
         self.assertAlmostEqual(got["t"].alpha, 0.5)
         self.assertAlmostEqual(got["t"].sparsity, 0.5)
         self.assertEqual(warning, "")
+
+
+class StoredScaleTests(unittest.TestCase):
+    """PackWeights must prefer the pack's own scale (GH #65).
+
+    The point of the format change is that a pack dequantizes without the source
+    weights. These build a real pack on disk and deliberately provide **no** npy
+    directory, so any fall-through to the oracle path fails loudly instead of
+    quietly producing a figure no runtime could reproduce.
+
+    A norm-shaped tensor is used because it is the only role whose real shape
+    (6144,) yields a fixture payload small enough to write inline; the scale
+    logic is per-tensor and does not depend on which role it is.
+    """
+
+    NAME = "block_000.slot_07.block_norm"
+    NUMEL = 6144
+
+    def _pack(self, td: Path, **kw) -> Path:
+        return build_pack(
+            td / "p.goz1",
+            [(self.NAME, [self.NUMEL], TENSOR_TERNARY, _trits([1] * self.NUMEL))],
+            **kw,
+        )
+
+    def _weights(self, td: Path, **kw) -> PackWeights:
+        # npy_dir points at a directory with nothing in it: reaching the oracle
+        # path at all is the failure this asserts against.
+        return PackWeights(self._pack(td, **kw), td / "absent-npy", partial=True)
+
+    def test_v2_scale_comes_from_the_pack_with_no_reference_weights(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            w = self._weights(Path(td), version=2, scales=[0.4375])
+            got = w.scale(self.NAME)
+            self.assertAlmostEqual(got.alpha, 0.4375, places=6)
+            self.assertEqual(w.scale_sources[self.NAME], "pack_v2")
+
+    def test_v1_pack_without_reference_npy_fails_with_an_actionable_message(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            w = self._weights(Path(td), version=1)
+            with self.assertRaises(ForwardError) as ctx:
+                w.scale(self.NAME)
+            msg = str(ctx.exception)
+            self.assertIn("v1 pack", msg)
+            self.assertIn("re-pack", msg.lower())
+
+    def test_a_stale_oracle_cache_cannot_shadow_a_stored_scale(self) -> None:
+        """The regression that would silently revert the whole change.
+
+        A cache file left beside a pack from a previous v1 run has the same
+        default path. If it were consulted for a v2 pack, `scale()` would return
+        the oracle alpha and report it as pack-only.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            pack = self._pack(tmp, version=2, scales=[0.25])
+            npy_dir = tmp / "absent-npy"
+
+            # The fingerprint must MATCH, or _load_cache discards the file before
+            # it can shadow anything and the test proves nothing. (It did exactly
+            # that with a dummy fingerprint: a mutant that consulted the cache for
+            # v2 packs still passed.)
+            probe = PackWeights(pack, npy_dir, partial=True)
+            cache = pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
+            cache.write_text(
+                json.dumps(
+                    {
+                        "fingerprint": probe._fingerprint(),
+                        "scales": {self.NAME: {"alpha": 999.0, "fired": 1, "total": 1}},
+                    }
+                )
+            )
+            # Sanity: this cache really would load if it were consulted.
+            self.assertEqual(
+                PackWeights(pack, npy_dir, partial=True)._load_cache()[self.NAME].alpha,
+                999.0,
+            )
+
+            w = PackWeights(pack, npy_dir, partial=True)
+            self.assertAlmostEqual(w.scale(self.NAME).alpha, 0.25, places=6)
+            self.assertEqual(w.scale_sources[self.NAME], "pack_v2")
+
+    def test_non_finite_stored_scale_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            w = self._weights(Path(td), version=2, scales=[float("nan")])
+            with self.assertRaisesRegex(ForwardError, "non-finite scale"):
+                w.scale(self.NAME)
 
 
 class RoleSetTests(unittest.TestCase):

@@ -11,13 +11,17 @@ Memory is the binding constraint: block 0's three expert tensors are 6.44 GiB
 each as f32, so nothing here materializes a whole expert tensor. Callers ask for
 one expert at a time and the reference path hands back a ``memmap`` slice.
 
-**Ternary reconstruction uses an oracle scale.** A GOZ1 pack stores only trits:
-``quantize_f32`` computes ``rms`` and ``threshold`` per tensor but the container
-persists neither, so a pack cannot be dequantized from its own contents. This
-module therefore derives the least-squares optimal ``alpha`` from the *original*
-weights, which is the most favourable scale any runtime could pick. Reported
-degradation is consequently a lower bound on the damage, never an artefact of a
-badly chosen scale.
+**Ternary reconstruction scale.** GOZ1 v2 packs carry the reconstruction-optimal
+per-tensor ``alpha`` in the tensor row (GH #65), so a pack dequantizes from its
+own contents and the figures reflect what a real runtime would compute.
+
+Legacy v1 packs store only trits and persist no scale, so for those this module
+falls back to deriving the least-squares optimal ``alpha`` from the *original*
+weights -- the most favourable scale any runtime could pick, making reported
+degradation a lower bound on the damage rather than an artefact of a badly
+chosen scale, but also a figure no runtime could actually reproduce. Which path
+was taken is recorded per tensor in :attr:`PackWeights.scale_sources`
+(``pack_v2`` or ``legacy_oracle``) so a report cannot present one as the other.
 """
 from __future__ import annotations
 
@@ -320,7 +324,14 @@ class PackWeights(WeightSource):
         )
         self._cache_path = alpha_cache or pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
         self._fp: dict | None = None
-        self._scales: dict[str, TernaryScale] = self._load_cache()
+        # The oracle-alpha cache exists only because deriving alpha streams the
+        # whole tensor. A v2 pack carries the scale for free, so the cache is not
+        # merely unnecessary there -- consulting it would be wrong: a cache left
+        # over from a v1 run would shadow the stored scale, and the run would
+        # silently report oracle figures while believing they were pack-only.
+        self._pack_has_scales = any(e.get("scale") is not None for e in self._index.values())
+        self._scales: dict[str, TernaryScale] = {} if self._pack_has_scales else self._load_cache()
+        self._scale_sources: dict[str, str] = {}
 
     def shapes(self) -> dict[str, tuple[int, ...]]:
         return dict(self._shapes)
@@ -414,17 +425,52 @@ class PackWeights(WeightSource):
         self._cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     def scale(self, name: str) -> TernaryScale:
-        """Oracle scale for a ternary tensor, computed once and cached on disk."""
+        """Reconstruction scale for a ternary tensor.
+
+        Prefers the scale the pack carries (container v2, GH #65), which is what
+        a real runtime has. Falls back to the oracle alpha derived from the
+        reference npy only for legacy v1 packs, which store no scale at all --
+        and that fallback is recorded in :attr:`scale_sources` so a report cannot
+        quietly present an oracle figure as a pack-only one.
+        """
         if name not in self._scales:
+            entry = self._index[name]
+            stored = entry.get("scale")
+            if stored is not None:
+                if not np.isfinite(stored):
+                    raise ForwardError(
+                        f"{name}: pack stores a non-finite scale ({stored}); it cannot be "
+                        "dequantized. Re-pack with a current build, which rejects this at "
+                        "write time."
+                    )
+                # fired/total are diagnostics of the *oracle* derivation and are
+                # not recoverable from a stored scale without walking the trits.
+                # Left at 0 rather than faked; sparsity is reported separately by
+                # the trit histogram.
+                self._scales[name] = TernaryScale(alpha=float(stored), fired=0, total=0)
+                self._scale_sources[name] = "pack_v2"
+                return self._scales[name]
+
             npy = self._npy_dir / f"{stem_of(name)}.npy"
             if not npy.exists():
                 raise ForwardError(
-                    f"{name}: oracle alpha needs the reference npy at {npy}; a GOZ1 pack "
-                    "stores no per-tensor scale, so it cannot be dequantized alone"
+                    f"{name}: this is a v{entry.get('container_version')} pack, which stores "
+                    f"no per-tensor scale, so the oracle alpha needs the reference npy at "
+                    f"{npy}. Re-pack with a current build to get a self-contained v2 pack."
                 )
             self._scales[name] = alpha_for(npy, self.pack, self._index[name])
+            self._scale_sources[name] = "legacy_oracle"
             self._save_cache()
         return self._scales[name]
+
+    @property
+    def scale_sources(self) -> dict[str, str]:
+        """Per-tensor provenance: ``pack_v2`` or ``legacy_oracle``.
+
+        Only populated for tensors whose scale was actually requested, which is
+        the set the figures depend on.
+        """
+        return dict(self._scale_sources)
 
     def scales(self) -> dict[str, TernaryScale]:
         return dict(self._scales)

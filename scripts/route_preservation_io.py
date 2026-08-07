@@ -55,7 +55,7 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
     try:
         file_size = pack.stat().st_size
         with pack.open("rb") as f:
-            _version, metadata, tensors, data_start = read_header(f)
+            version, metadata, tensors, data_start = read_header(f)
     except OSError as exc:
         raise MetricsError(f"{pack}: cannot read pack: {exc}") from exc
     except Exception as exc:  # Goz1Error and friends from the header parser
@@ -65,6 +65,12 @@ def load_pack_index(pack: Path) -> tuple[dict, dict[str, dict]]:
     rel = 0
     for t in tensors:
         entry = _index_entry(pack, t, index, rel, data_start, file_size)
+        # Stamped on every entry rather than returned alongside, so that adding
+        # it does not change this function's shape for its dozen call sites.
+        # ``entry["scale"]`` is the operative signal (None means the layout has
+        # no scale field at all); this is here so provenance can name the exact
+        # container version a figure came from.
+        entry["container_version"] = version
         index[t["name"]] = entry
         rel = _align_up(rel + entry["nbytes"], DATA_ALIGNMENT)
     return metadata, index
