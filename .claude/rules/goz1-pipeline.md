@@ -123,7 +123,7 @@ as a pack-only measurement. Full layout and policy: `docs/goz1-format.md`.
 
 | Pack | How to get the applied τ |
 |------|--------------------------|
-| **v3** | Tensor row: `gif_threshold` (multiplier) and `threshold_abs` (the cut compared against `\|w\|`). `--verify` prints the distinct values; `goz1_trit_histogram.py --json` includes both per tensor (human text shows sparsity only). `rms = threshold_abs / gif_threshold` |
+| **v3** | Tensor row: `gif_threshold` (multiplier) and `threshold_abs` (the cut compared against `\|w\|`). `--verify` prints the distinct values; `goz1_trit_histogram.py --json` includes both per tensor (human text shows sparsity only). When `gif_threshold != 0`, `rms = threshold_abs / gif_threshold`. When both are `0.0` (dense ternary, no GIF gate), RMS is **not** recoverable from the row (`0/0`) — do not divide. |
 | **v1 / v2** | Not recorded. Infer from measured sparsity — the metadata key cannot tell you |
 
 v3 packs also carry `oz.gif_threshold_authority = "tensor_row"` and
