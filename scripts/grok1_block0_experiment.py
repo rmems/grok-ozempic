@@ -374,16 +374,16 @@ def _provenance(args: argparse.Namespace, ids: np.ndarray, pack: PackWeights) ->
                 "sparsity": s.sparsity,
                 "fired": s.fired,
                 "total": s.total,
-                # Nonzero would mean the pack's trits disagree in sign with the
-                # reference weights, invalidating the "best case" claim.
                 "sign_mismatches": s.sign_mismatches,
             }
             for name, s in sorted(pack.scales().items())
         },
+        "scale_sources": dict(pack.scale_sources),
         "ternary_scale_note": (
-            "GOZ1 stores no per-tensor scale, so ternary weights are reconstructed with the "
-            "least-squares optimal alpha derived from the original f32 weights. This is an "
-            "oracle a real runtime does not have, so every number here is a best case."
+            "GOZ1 v2 stores per-tensor scale; pack_v2 entries are pack-only, "
+            "legacy_oracle entries used the oracle fallback for v1 packs. "
+            "GOZ1 v1 stores no scale, so legacy_oracle is a best-case oracle "
+            "a runtime cannot reproduce."
         ),
     }
 
