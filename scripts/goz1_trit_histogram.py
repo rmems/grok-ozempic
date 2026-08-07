@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 import sys
 from collections import Counter
@@ -154,14 +155,31 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
                 )
 
         if scale is not None:
-            import math
-
             if tensor_type == TENSOR_TERNARY:
                 if not math.isfinite(scale) or scale < 0.0:
                     raise Goz1Error(f"ternary tensor {name!r} has non-finite or negative scale {scale}")
             elif tensor_type == TENSOR_F16:
                 if not math.isfinite(scale) or scale != 1.0:
                     raise Goz1Error(f"fp16 tensor {name!r} has invalid scale {scale}; expected 1.0")
+        if gif_threshold is not None and threshold_abs is not None:
+            bad = (
+                not math.isfinite(gif_threshold)
+                or gif_threshold < 0.0
+                or not math.isfinite(threshold_abs)
+                or threshold_abs < 0.0
+            )
+            if bad:
+                raise Goz1Error(
+                    f"tensor {name!r} has non-finite or negative threshold "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs})"
+                )
+            if tensor_type == TENSOR_F16 and (
+                gif_threshold != 0.0 or threshold_abs != 0.0
+            ):
+                raise Goz1Error(
+                    f"fp16 tensor {name!r} claims GIF threshold "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs}); expected 0.0"
+                )
         tensors.append(
             {
                 "name": name,

@@ -187,6 +187,9 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
         // meaningless. An fp16 row must carry zeros: it ran through no GIF gate,
         // and a nonzero value there would describe a silencing cut that never
         // happened -- exactly the kind of false provenance #66 exists to remove.
+        // RM-252: a zero multiplier makes RMS unrecoverable as 0/0 and hides the
+        // absolute cut; a non-zero absolute cut with a zero multiplier is
+        // inconsistent (threshold_abs = gif_threshold × rms).
         if let Some((gif, abs_cut)) = info.thresholds {
             let bad = !gif.is_finite() || gif < 0.0 || !abs_cut.is_finite() || abs_cut < 0.0;
             if bad {
@@ -202,6 +205,28 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
                      (gif_threshold={}, threshold_abs={}); expected 0.0",
                     i, info.name, gif, abs_cut
                 )));
+            }
+            if info.tensor_type == TENSOR_TERNARY {
+                // Zero multiplier makes `rms = threshold_abs / gif_threshold` 0/0.
+                // Reject it rather than persisting an irrecoverable RMS (RM-252
+                // alternative is to persist rms explicitly). Also reject the
+                // inconsistent pair where the absolute cut is non-zero but the
+                // multiplier is zero.
+                if gif == 0.0 && abs_cut != 0.0 {
+                    return Err(GrokOzempicError::InvalidConfig(format!(
+                        "GOZ1 verify: tensor {} ({}) has inconsistent thresholds \
+                         (gif_threshold={}, threshold_abs={}); non-zero absolute cut \
+                         with zero multiplier per RM-252",
+                        i, info.name, gif, abs_cut
+                    )));
+                }
+                if gif == 0.0 {
+                    return Err(GrokOzempicError::InvalidConfig(format!(
+                        "GOZ1 verify: tensor {} ({}) is ternary with zero gif_threshold \
+                         (gif_threshold={}, threshold_abs={}); rms would be 0/0 per RM-252",
+                        i, info.name, gif, abs_cut
+                    )));
+                }
             }
         }
         let nbytes = tensor_nbytes(info)?;
@@ -644,22 +669,45 @@ mod tests {
     fn version_2_pack_parses_but_reports_no_thresholds() {
         // v2 is now legacy: it has a scale but cannot say what tau was applied,
         // and `None` is what tells a consumer to fall back and label the figure.
+        // Two rows exercise mixed-type offset arithmetic: ternary (2 bytes) then
+        // fp16 (8 bytes), padded to DATA_ALIGNMENT.
         let path = temp_path("v2_legacy");
         let _ = std::fs::remove_file(&path);
         make_v2_pack(&path);
         let report = verify_pack_file(&path).unwrap();
         assert_eq!(report.version, 2);
+        assert_eq!(report.tensor_count, 2);
+        assert_eq!(
+            report.tensor_names,
+            vec!["w_ternary".to_string(), "w_fp16".to_string()]
+        );
         assert!(report.scales.is_some(), "v2 carries a scale");
+        assert_eq!(report.scales.as_deref(), Some(&[0.5f32, 1.0f32][..]));
         assert!(
             report.gif_thresholds.is_none() && report.threshold_abs.is_none(),
             "a v2 pack must not appear to know its applied tau"
         );
+        // Mixed-type offset check: second offset must be the aligned size of the
+        // first blob (ternary 8 trits = 2 bytes -> padded to 32).
+        assert_eq!(report.data_offsets, vec![0, 32]);
+        // Verify payload layout directly: ternary nbytes=2, fp16 nbytes=8.
+        let bytes = std::fs::read(&path).unwrap();
+        let first_end = (report.data_section_start + report.data_offsets[1]) as usize;
+        let first_blob =
+            &bytes[(report.data_section_start + report.data_offsets[0]) as usize..first_end];
+        assert_eq!(first_blob.len(), 32);
+        assert_eq!(&first_blob[0..2], &[0xE4u8; 2]);
+        let second_blob_start = (report.data_section_start + report.data_offsets[1]) as usize;
+        assert_eq!(&bytes[second_blob_start..second_blob_start + 8], &[0u8; 8]);
+        // Types are validated via nbytes / scale checks; a wrong type would have
+        // miscomputed the second offset and failed verification.
         let _ = std::fs::remove_file(&path);
     }
 
     /// Hand-built v2 pack, for the same reason as [`make_v1_pack`]: a
     /// compatibility test must describe the older layout independently of the
-    /// current writer.
+    /// current writer. Two rows (ternary + fp16) exercise mixed offset
+    /// arithmetic that a single-row fixture never checks.
     fn make_v2_pack(path: &Path) {
         let mut b: Vec<u8> = Vec::new();
         let put_str = |b: &mut Vec<u8>, s: &str| {
@@ -668,24 +716,36 @@ mod tests {
         };
         b.extend_from_slice(b"GOZ1");
         b.extend_from_slice(&2u32.to_le_bytes());
-        b.extend_from_slice(&1u64.to_le_bytes());
+        b.extend_from_slice(&2u64.to_le_bytes());
         b.extend_from_slice(&1u64.to_le_bytes());
         put_str(&mut b, "oz.name");
         b.extend_from_slice(&META_STR.to_le_bytes());
         put_str(&mut b, "t");
         // v2 row: name, ndim, shape[], tensor_type, data_offset, scale, sentinel.
-        put_str(&mut b, "w");
+        // Row 0: ternary 8 elements -> 2 bytes, offset 0.
+        put_str(&mut b, "w_ternary");
         b.extend_from_slice(&1u32.to_le_bytes());
         b.extend_from_slice(&8u64.to_le_bytes());
         b.extend_from_slice(&TENSOR_TERNARY.to_le_bytes());
         b.extend_from_slice(&0u64.to_le_bytes());
         b.extend_from_slice(&0.5f32.to_le_bytes());
         b.extend_from_slice(&OZ1_ROW_SENTINEL.to_le_bytes());
+        // Row 1: fp16 4 elements -> 8 bytes, offset = align_up(2, 32) = 32.
+        put_str(&mut b, "w_fp16");
+        b.extend_from_slice(&1u32.to_le_bytes());
+        b.extend_from_slice(&4u64.to_le_bytes());
+        b.extend_from_slice(&TENSOR_F16.to_le_bytes());
+        b.extend_from_slice(&32u64.to_le_bytes());
+        b.extend_from_slice(&1.0f32.to_le_bytes());
+        b.extend_from_slice(&OZ1_ROW_SENTINEL.to_le_bytes());
 
         let pad = (DATA_ALIGNMENT - (b.len() as u64 % DATA_ALIGNMENT)) % DATA_ALIGNMENT;
         b.extend(std::iter::repeat_n(0u8, pad as usize));
+        // Payloads, each padded to DATA_ALIGNMENT.
         b.extend_from_slice(&[0xE4u8; 2]);
         b.extend(std::iter::repeat_n(0u8, (DATA_ALIGNMENT - 2) as usize));
+        b.extend_from_slice(&[0u8; 8]);
+        b.extend(std::iter::repeat_n(0u8, (DATA_ALIGNMENT - 8) as usize));
         std::fs::write(path, &b).unwrap();
     }
 

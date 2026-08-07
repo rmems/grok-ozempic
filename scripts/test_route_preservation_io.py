@@ -110,15 +110,20 @@ def build_pack(
     does. ``truncate`` drops that many bytes from the tail.
 
     ``version`` selects the tensor-row layout: 1 has no scale field, 2 appends a
-    per-tensor ``f32`` (GH #65). The default stays 1 so the existing fixtures keep
-    exercising the legacy path they were written for; v2 coverage is explicit.
-    ``scales`` supplies those values (default 1.0 each) and is ignored for v1.
+    per-tensor ``f32`` (GH #65), 3 appends two per-tensor threshold ``f32``s
+    after the scale. The default stays 1 so the existing fixtures keep exercising
+    the legacy path they were written for; v2/v3 coverage is explicit. ``scales``
+    supplies those values (default 1.0 each) and is ignored for v1. ``thresholds``
+    supplies per-tensor ``(float, float)`` pairs (default (0.6, 0.3) each) and is
+    ignored for v1/v2.
     """
     head = bytearray(MAGIC + _u32(version) + _u64(len(tensors)) + _u64(1))
     head += _s("oz.name") + _u32(META_STR) + _s("grok-ozempic")
 
     if scales is not None and len(scales) != len(tensors):
         raise AssertionError("scales must be one per tensor")
+    if thresholds is not None and len(thresholds) != len(tensors):
+        raise AssertionError("thresholds must be one per tensor")
 
     rel = 0
     for i, (name, shape, kind, payload) in enumerate(tensors):
