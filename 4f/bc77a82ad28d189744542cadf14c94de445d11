@@ -1,0 +1,21 @@
+.claude/hooks/coauthor-record-head.sh
+  s_f430523a053518::t_dc35e04afb4615 34-44
+.claude/hooks/coauthor-commit.sh
+  s_f430523a053518::t_a68157805fde41 50-60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4fbc77a82ad28d189744542cadf14c94de445d11",
+  "prompts": {},
+  "sessions": {
+    "s_f430523a053518": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8b954fe8-f5b2-491f-a3d0-d929195cf9c3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
