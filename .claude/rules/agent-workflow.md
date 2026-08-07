@@ -10,10 +10,8 @@
   (`bd dolt remote list` → "No remotes configured"), so `bd dolt push` is not
   required. Having the CLI is not the same as having a remote; see the beads
   sync note in `CLAUDE.md` before adding it to any checklist.
-- **After a squash merge, delete the branch — never `git pull --rebase` it.**
-  Squash merges leave no ancestry link, so replaying the branch's commits onto
-  `main` conflicts (`AA`) on every file it touched. Full explanation and the
-  recovery commands are in `CLAUDE.md`.
+- **After a squash merge, branch deletion is manual — never `git pull --rebase` it.**
+  Verify with `git diff --stat origin/main <branch>` first (should be empty if fully merged), then delete manually only if intended. Squash merges leave no ancestry link, so replaying commits onto `main` conflicts (`AA`) on every file it touched. See `CLAUDE.md`.
 
 ## Quality gates before done
 

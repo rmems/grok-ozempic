@@ -7,8 +7,8 @@ root="$(git rev-parse --show-toplevel)"
 cd "${root}"
 
 if ! command -v just >/dev/null 2>&1; then
-  echo "pre-commit: 'just' not on PATH — skipping (install just, or run: cargo fmt --all -- --check)." >&2
-  exit 0
+  echo "pre-commit: 'just' is required; install it before committing." >&2
+  exit 1
 fi
 
 echo "pre-commit: just check (see REVIEW.md)"

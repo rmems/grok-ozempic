@@ -87,6 +87,7 @@ bd close <id>         # Complete work
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
+**Note:** Step 4 `git pull --rebase` / `git push` applies only when the PR is still open. After a squash merge, delete the branch per recovery below instead of rebasing.
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
@@ -112,16 +113,14 @@ git checkout experiment/my-branch && git pull --rebase
 
 # RIGHT: the work is already on main; start clean
 git checkout main && git pull --rebase
-git branch -D experiment/my-branch      # verify first, below
+# Branch deletion is manual — verify first, then delete only if you intend to:
+# git diff --stat origin/main experiment/my-branch  # should be empty if fully merged
+# git branch -D experiment/my-branch  # manual only
 git checkout -b feat/next-thing
 ```
 
 Confirm the branch really is fully merged before deleting — an empty diff means
-it contributes nothing beyond `main`:
-
-```bash
-git diff --stat origin/main <branch>    # empty => safe to delete
-```
+it contributes nothing beyond `main` (manual check):
 
 Do **not** try to resolve the conflicts, and do **not** hand-merge
 `.beads/issues.jsonl` (re-export instead — see above). If a rebase is already
