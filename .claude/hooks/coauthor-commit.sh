@@ -53,20 +53,38 @@ esac
 
 head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0
 
-# Authoritative check that this call actually created a commit: compare HEAD with
-# what the PreToolUse companion recorded before the command ran. A `git commit`
-# variant that succeeds without committing leaves HEAD unchanged, and is skipped
-# here rather than having its pre-existing HEAD retroactively stamped.
-session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
-state="${TMPDIR:-/tmp}/claude-coauthor/$(state_key "$session").head"
-# No recorded state means we cannot prove this call created the commit, so do
-# nothing. A timestamp fallback was tried and is unsafe: it amends any commit
-# made within the window, including an unrelated one in a different repository
-# the same session happened to touch. This is a convenience backstop --
-# attribution.commit in settings.json is the primary mechanism -- so skipping is
-# strictly better than guessing.
-[ -r "$state" ] || exit 0
-[ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
+# We must prove *this* call created *this* commit before rewriting it. Two
+# independent signals, tried strongest first.
+#
+# 1. git's own report. A successful `git commit` prints "[branch 1234567] subj"
+#    on stdout; resolving that abbreviated sha and finding it equals HEAD is
+#    direct evidence, needs no state, and cannot be confused by ordering or by
+#    another repository. It is unavailable under `git commit -q`, which prints
+#    nothing -- hence the fallback.
+#
+# 2. The PreToolUse companion's recorded HEAD. Weaker: it is only meaningful if
+#    that hook truly ran *before* the command. Observed 2026-08-06 recording the
+#    *post*-command HEAD, which makes the comparison equal and silently skips the
+#    amend -- the failure that motivated signal 1. Kept because when it does hold
+#    it correctly rejects a `git commit` that succeeded without committing.
+#
+# Neither signal means we cannot prove authorship, so we skip. A timestamp
+# fallback was tried and is unsafe: it amends any commit made within the window,
+# including an unrelated one in a different repository the same session touched.
+# This is a convenience backstop -- attribution.commit in settings.json is the
+# primary mechanism -- so skipping is strictly better than guessing.
+reported=$(printf '%s' "$payload" |
+  jq -r '(.tool_response.stdout // "") + "\n" + (.tool_response.stderr // "")' 2>/dev/null |
+  sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' | head -n 1)
+
+if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
+  : # signal 1: git said it created exactly this commit
+else
+  session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
+  state="${TMPDIR:-/tmp}/claude-coauthor/$(state_key "$session").head"
+  [ -r "$state" ] || exit 0
+  [ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
+fi
 
 # A merge commit is detected by parent count, not MERGE_HEAD: git removes
 # MERGE_HEAD as part of a successful commit, so post-commit it is always gone.
