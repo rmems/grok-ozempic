@@ -347,6 +347,49 @@ class StoredScaleTests(unittest.TestCase):
             with self.assertRaisesRegex(ForwardError, "non-finite scale"):
                 w.scale(self.NAME)
 
+    def test_v1_cache_preload_records_scale_source_as_legacy_oracle(self) -> None:
+        """A scale pre-loaded from disk cache must appear in scale_sources.
+
+        Without the fix, calling scale() for a name already in self._scales
+        (because it was loaded from the on-disk v1 alpha cache during __init__)
+        skipped the "if name not in self._scales:" branch entirely and never
+        recorded the scale source, so scale_sources[name] was silently absent.
+
+        This regression would break route-preservation certification: a metric
+        that believes it is reporting pack-only figures could quietly include
+        oracle-derived scales, invalidating the runtime-reproducibility claim.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            pack = self._pack(tmp, version=1)
+            npy_dir = tmp / "absent-npy"
+
+            # Build a matching-fingerprint cache file. The fingerprint must match
+            # or _load_cache discards the file before __init__ can pre-populate
+            # self._scales from it, and the test proves nothing.
+            probe = PackWeights(pack, npy_dir, partial=True)
+            cache = pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
+            cache.write_text(
+                json.dumps(
+                    {
+                        "fingerprint": probe._fingerprint(),
+                        "scales": {self.NAME: {"alpha": 0.1875, "fired": 100, "total": 6144}},
+                    }
+                )
+            )
+
+            # Construct a fresh PackWeights. Because this is a v1 pack,
+            # __init__ will call _load_cache() and pre-populate self._scales.
+            w = PackWeights(pack, npy_dir, partial=True)
+
+            # Calling scale() should return the cached alpha...
+            got = w.scale(self.NAME)
+            self.assertAlmostEqual(got.alpha, 0.1875, places=6)
+
+            # ...and must record the source as legacy_oracle, since v1 packs
+            # never store scales in the container.
+            self.assertEqual(w.scale_sources[self.NAME], "legacy_oracle")
+
 
 class RoleSetTests(unittest.TestCase):
     def test_the_three_tiers_are_disjoint_and_cover_every_role(self) -> None:

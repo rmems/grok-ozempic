@@ -461,6 +461,10 @@ class PackWeights(WeightSource):
             self._scales[name] = alpha_for(npy, self.pack, self._index[name])
             self._scale_sources[name] = "legacy_oracle"
             self._save_cache()
+        # Pre-loaded from the on-disk v1 cache at construction time (_load_cache
+        # in __init__). Without this, scale_sources would have no entry for tensors
+        # loaded from the cache, even though they are unambiguously legacy_oracle.
+        self._scale_sources.setdefault(name, "legacy_oracle")
         return self._scales[name]
 
     @property
