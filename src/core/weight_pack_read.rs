@@ -272,7 +272,19 @@ mod tests {
 
     #[test]
     fn verify_round_trip_stream_writer() {
-        let dir = std::env::temp_dir();
+        // Prefer crate target/ over shared OS temp_dir (Codacy/Semgrep temp-dir).
+        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("goz1-tests")
+            .join(format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("grok_ozempic_verify_test.goz1");
         let _ = std::fs::remove_file(&path);
 
@@ -304,7 +316,21 @@ mod tests {
     use crate::core::quantizer::{decode_trit, quantize_f32};
 
     fn temp_path(tag: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("grok_ozempic_{tag}_{}.goz1", std::process::id()))
+        // Prefer crate target/ over shared OS temp_dir (Codacy/Semgrep temp-dir).
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("goz1-tests")
+            .join(format!(
+                "{}-{}-{}",
+                tag,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        std::fs::create_dir_all(&base).unwrap();
+        base.join(format!("grok_ozempic_{tag}_{}.goz1", std::process::id()))
     }
 
     fn write_pack(path: &Path, headers: &[PackTensorHeader], blobs: &[(&[u8], f32)]) {

@@ -349,10 +349,21 @@ class StoredScaleTests(unittest.TestCase):
             # PackWeights.scale() also rejects them. Accept either.
             try:
                 w = PackWeights(p, Path(td) / "absent-npy", partial=True)
-            except Exception as exc:  # noqa: BLE001
+            except (MetricsError, ForwardError) as exc:
                 self.assertRegex(str(exc).lower(), r"non-finite or negative scale")
                 return
             with self.assertRaisesRegex(ForwardError, "non-finite scale"):
+                w.scale(self.NAME)
+
+    def test_negative_stored_scale_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            p = self._pack(Path(td), version=2, scales=[-0.5])
+            try:
+                w = PackWeights(p, Path(td) / "absent-npy", partial=True)
+            except (MetricsError, ForwardError) as exc:
+                self.assertRegex(str(exc).lower(), r"non-finite or negative scale")
+                return
+            with self.assertRaisesRegex(ForwardError, "non-finite or negative scale"):
                 w.scale(self.NAME)
 
     def test_v1_cache_preload_records_scale_source_as_legacy_oracle(self) -> None:

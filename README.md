@@ -130,7 +130,7 @@ Streams tensors through `run_quantization` into a GOZ1 file
 
 ```bash
 cargo run --features cli -- quantize-goz1 \
-  --input-dir /path/to/npy-or-safetensors \
+  --input-dir /path/to/npy \
   --output /tmp/model.goz1 \
   --manifest dissect/grok-1/structural-manifest.json \
   --input-format npy \
