@@ -250,7 +250,7 @@ qodana scan --linter qodana-rust --project-dir . \
 2. **`just review`** (or `just review-full` when static analysis matters)
 3. Diff hygiene: no secrets, no multi-GiB weights, no accidental `.beads` noise
 4. Commit with imperative subject + GH / Linear IDs when known
-5. `git pull --rebase` (only if PR still open; if squash-merged, delete branch per CLAUDE.md recovery) then `git push`
+5. `git pull --rebase` then `git push`
 6. If the pre-push hook fails, fix failures — do not habitually `--no-verify`
 
 Related: `/pr-ready` (`.claude/commands/pr-ready.md`), root `justfile` (#62 / RM-250),

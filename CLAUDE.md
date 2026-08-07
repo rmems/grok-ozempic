@@ -87,7 +87,6 @@ bd close <id>         # Complete work
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
-**Note:** Step 4 `git pull --rebase` / `git push` applies only when the PR is still open. After a squash merge, delete the branch per recovery below instead of rebasing.
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
