@@ -134,6 +134,15 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
         # the legacy oracle path" from "this tensor's scale really is zero"
         # (which happens legitimately when no trit fires).
         scale = _read_f32(f) if has_scales else None
+        if scale is not None:
+            import math
+
+            if tensor_type == TENSOR_TERNARY:
+                if not math.isfinite(scale) or scale < 0.0:
+                    raise Goz1Error(f"ternary tensor {name!r} has non-finite or negative scale {scale}")
+            elif tensor_type == TENSOR_F16:
+                if not math.isfinite(scale) or scale != 1.0:
+                    raise Goz1Error(f"fp16 tensor {name!r} has invalid scale {scale}; expected 1.0")
         tensors.append(
             {
                 "name": name,
