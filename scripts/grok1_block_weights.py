@@ -443,11 +443,12 @@ class PackWeights(WeightSource):
                         "dequantized. Re-pack with a current build, which rejects this at "
                         "write time."
                     )
-                # fired/total are diagnostics of the *oracle* derivation and are
-                # not recoverable from a stored scale without walking the trits.
-                # Left at 0 rather than faked; sparsity is reported separately by
-                # the trit histogram.
-                self._scales[name] = TernaryScale(alpha=float(stored), fired=0, total=0)
+                total = int(entry["numel"])
+                fired = sum(
+                    int(np.count_nonzero(read_trits(self.pack, entry, start, min(_ALPHA_CHUNK, total - start))))
+                    for start in range(0, total, _ALPHA_CHUNK)
+                )
+                self._scales[name] = TernaryScale(alpha=float(stored), fired=fired, total=total)
                 self._scale_sources[name] = "pack_v2"
                 return self._scales[name]
 
