@@ -31,6 +31,17 @@ else
   # a mismatch that either skips the amend or, worse, matches another session.
   payload=$(IFS= read -r -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
 fi
+# Self-gate, mirroring coauthor-commit.sh: settings.json carries no `if`
+# condition (the `Bash(git commit*)` form anchors at the start of the command and
+# never matched `cd <dir> && git commit ...`), so this runs on every Bash call.
+# Recording HEAD for unrelated commands would overwrite the value the pending
+# commit needs, which is one way the comparison ends up reading equal.
+cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
+case "$cmd" in
+  *"git commit"*) ;;
+  *) exit 0 ;;
+esac
+
 session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
 head=$(git rev-parse --verify HEAD 2>/dev/null || echo none)
 printf '%s\n' "$head" > "$state_dir/$(state_key "$session").head" 2>/dev/null || true

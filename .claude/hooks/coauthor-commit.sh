@@ -47,6 +47,17 @@ else
   payload=$(IFS= read -r -t 2 -d '' _pl 2>/dev/null; printf '%s' "$_pl")
 fi
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
+
+# Self-gate on the command text. settings.json deliberately carries no `if`
+# condition: the permission-style form `Bash(git commit*)` anchors at the start
+# of the command, so it never matched the `cd <dir> && git commit ...` shape that
+# most calls actually take, and the hook simply never ran. Matching here instead
+# costs one substring test on other Bash calls and cannot miss a prefix. An empty
+# cmd (unparseable payload) falls through to the catch-all and skips.
+case "$cmd" in
+  *"git commit"*) ;;
+  *) exit 0 ;;
+esac
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac

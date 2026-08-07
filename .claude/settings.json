@@ -11,7 +11,6 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit*)",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/coauthor-record-head.sh\" 2>/dev/null || true"
           }
         ]
@@ -23,7 +22,6 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit*)",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/coauthor-commit.sh\" 2>/dev/null || true",
             "statusMessage": "Adding Claude co-author trailer"
           }
