@@ -7,7 +7,6 @@
 # interactions.jsonl is NOT tracked -- a short log with little context value, so
 # committing it is pure per-commit churn. Everything else here is machine-local.
 .dolt/
-.beads/*.db
 .beads-credential-key
 
 # Agent / Editor directories
@@ -23,12 +22,11 @@ node_modules/
 .codacy/
 __pycache__/
 
-# Beads machine-local runtime state (issues.jsonl is tracked; see above)
+# Beads machine-local runtime state (issues.jsonl is tracked; see above).
+# Only what beads' own tracked .beads/.gitignore does NOT already cover -- it
+# handles *.db, *.lock, export-state.json, last-touched, backup/, embeddeddolt/.
+# Duplicating those here would create a second source of truth that drifts when
+# beads regenerates its file.
 .beads/interactions.jsonl
-.beads/export-state.json
 .beads/last_pull
-.beads/last-touched
-.beads/.linear-sync.lock
-.beads/backup/
-.beads/embeddeddolt/
 .beads/events.jsonl

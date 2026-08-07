@@ -25,6 +25,7 @@ __all__ = [
     "load_pack_index",
     "read_trits",
     "read_f16",
+    "read_f16_slice",
 ]
 
 # Trit code -> value, matching quantizer.rs encode_trit (0b00=0, 0b01=+1, 0b10=-1).
@@ -109,10 +110,27 @@ def _tensor_nbytes(pack: Path, t: dict, numel: int) -> int:
 def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
     """Decode ``count`` trits starting at flat index ``start``.
 
-    Any flat start is accepted: the read is floored to the enclosing byte and the
-    leading remainder sliced off, so callers are free to chunk by whole rows
-    regardless of whether the row length is a multiple of 4.
+    Any flat start *within the tensor* is accepted: the read is floored to the
+    enclosing byte and the leading remainder sliced off, so callers are free to
+    chunk by whole rows regardless of whether the row length is a multiple of 4.
+
+    The range is bounds-checked against the tensor, matching
+    :func:`read_f16_slice`. Both failure modes are silent without it, because the
+    truncation check below only catches running past end-of-*file*, not past
+    end-of-*tensor*:
+
+    * a negative ``start`` makes ``divmod`` yield a negative ``byte0``
+      (``divmod(-8, 4) == (-2, 0)``), so the seek lands in the *preceding*
+      tensor's payload and returns plausible trits from the wrong weights;
+    * a ``start + count`` past ``numel`` reads on into the *following* tensor
+      whenever the file is long enough, which for any tensor but the last it is.
     """
+    numel = int(entry["numel"])
+    if start < 0 or count < 0 or start + count > numel:
+        raise MetricsError(
+            f"{entry['name']}: trit range [{start}, {start + count}) is not within "
+            f"[0, {numel}) -- refusing to read outside the tensor payload"
+        )
     byte0, skip = divmod(start, 4)
     nbytes = (skip + count + 3) // 4
     with pack.open("rb") as f:
@@ -129,6 +147,41 @@ def read_trits(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
             f"{entry['name']}: invalid 0b11 trit code near flat index {start} -- corrupt pack"
         )
     return _TRIT_LUT[buf].reshape(-1)[skip : skip + count]
+
+
+def read_f16_slice(pack: Path, entry: dict, start: int, count: int) -> np.ndarray:
+    """Read ``count`` fp16 values from flat index ``start``.
+
+    Seeks directly to the slice so a caller wanting one expert out of a
+    preserve-tier ``(8, 6144, 32768)`` tensor reads 400 MiB rather than decoding
+    all 3.2 GiB.
+    """
+    kind = int(entry["tensor_type"])
+    if kind != TENSOR_F16:
+        raise MetricsError(
+            f"{entry['name']}: read_f16_slice requires tensor_type {TENSOR_F16} (fp16), "
+            f"got {kind}"
+        )
+    numel = int(entry["numel"])
+    # Negative values must be rejected too, not just an over-long end: a negative
+    # start would seek backwards into the preceding tensor's payload and return
+    # plausible-looking floats from the wrong weights, and a negative count makes
+    # the read silently empty.
+    if start < 0 or count < 0 or start + count > numel:
+        raise MetricsError(
+            f"{entry['name']}: slice [{start}, {start + count}) is not within "
+            f"[0, {numel}) -- refusing to read outside the tensor payload"
+        )
+    want = count * 2
+    with pack.open("rb") as f:
+        f.seek(entry["abs_offset"] + start * 2)
+        raw = f.read(want)
+    if len(raw) != want:
+        raise MetricsError(
+            f"{entry['name']}: truncated pack -- wanted {want} bytes for fp16 values "
+            f"[{start}, {start + count}), got {len(raw)}"
+        )
+    return np.frombuffer(raw, dtype="<f2").astype(np.float32)
 
 
 def read_f16(pack: Path, entry: dict) -> np.ndarray:
