@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-push quality gate — see REVIEW.md
+# Enable: git config core.hooksPath .githooks
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "${root}"
+
+if ! command -v just >/dev/null 2>&1; then
+  echo "pre-push: 'just' not on PATH." >&2
+  echo "          Install just (https://github.com/casey/just) or run the fallback in REVIEW.md." >&2
+  echo "          Escape hatch: git push --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-push: just review (see REVIEW.md)"
+exec just review

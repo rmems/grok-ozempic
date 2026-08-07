@@ -22,6 +22,9 @@ node_modules/
 .codacy/
 __pycache__/
 
+# Local Qodana CLI results / HTML report (just qodana; see REVIEW.md)
+.qodana/
+
 # Beads machine-local runtime state (issues.jsonl is tracked; see above).
 # Only what beads' own tracked .beads/.gitignore does NOT already cover -- it
 # handles *.db, *.lock, export-state.json, last-touched, backup/, embeddeddolt/.

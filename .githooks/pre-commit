@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fast pre-commit gate — see REVIEW.md
+# Enable: git config core.hooksPath .githooks
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "${root}"
+
+if ! command -v just >/dev/null 2>&1; then
+  echo "pre-commit: 'just' not on PATH — skipping (install just, or run: cargo fmt --all -- --check)." >&2
+  exit 0
+fi
+
+echo "pre-commit: just check (see REVIEW.md)"
+exec just check
