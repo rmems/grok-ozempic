@@ -25,10 +25,19 @@ tensor_table[tensor_count]:
   tensor_type u32               0 = f16, 1 = ternary
   data_offset u64               relative to the data section
   scale       f32               ** version 2 only **
+  sentinel    u32               ** version 2 only ** — 0x5CA1E021
 
 <padding to DATA_ALIGNMENT = 32>
 payload blobs, each padded to 32
 ```
+
+The v2 sentinel closes the row. Because `scale` is patched at `finalize` rather
+than written in place, a row whose scale was never supplied is otherwise
+indistinguishable from a well-formed one at parse time; a fixed trailing value
+turns any desync between writer and reader — a miscounted field, or a row width
+changed on one side only — into an immediate error rather than a plausible
+misparse of the following row. Readers must reject a row whose sentinel does not
+match (`OZ1_V2_ROW_SENTINEL` in Rust; the same constant in the Python parser).
 
 `data_offset` and `scale` are both written as placeholders and patched in
 `finalize`, because the whole tensor table is laid down before any payload is
@@ -39,7 +48,7 @@ quantized — neither value is known when its row is written.
 | Version | Tensor row | Status |
 |---------|------------|--------|
 | 1 | ends at `data_offset` | **legacy, read-only.** Still parsed; never written by current builds |
-| 2 | appends `scale: f32` | **current.** Written by `quantize-goz1` / `run_quantization` |
+| 2 | appends `scale: f32` + `sentinel: u32` | **current.** Written by `quantize-goz1` / `run_quantization` |
 | other | — | **rejected** |
 
 The v2 row is a strict *append*, so a reader parses the common prefix and reads
@@ -101,9 +110,16 @@ which would be a further version bump.
 | Empty tensor | `0.0` | same |
 | `TENSOR_F16` payload | `1.0` | the stored halves *are* the values, so `value = scale × payload` holds uniformly across both payload kinds |
 
-A non-finite scale is rejected twice: `write_tensor_data` refuses it (naming the
-tensor while we still know it), and `verify_pack_file` rejects it on any ternary
-tensor. The placeholder written during `begin` is `NaN` deliberately — a writer
+Scales are validated per payload kind, at both write and verify time:
+
+| Payload | Rejected |
+|---------|----------|
+| `TENSOR_TERNARY` | non-finite, or negative — α is a magnitude; sign lives in the trit, so a negative α silently inverts every weight in the tensor |
+| `TENSOR_F16` | anything other than exactly `1.0` — the halves are the values, so any other scale means the row and the payload disagree |
+
+`write_tensor_data` refuses these (naming the tensor while we still know it) and
+`verify_pack_file` rejects them again on read, so a pack from any writer is
+checked. The placeholder written during `begin` is `NaN` deliberately — a writer
 that somehow finalized without supplying a real value produces a pack that fails
 verification, rather than one that silently reconstructs every weight as zero.
 

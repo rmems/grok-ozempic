@@ -33,3 +33,5 @@ __pycache__/
 .beads/interactions.jsonl
 .beads/last_pull
 .beads/events.jsonl
+.tmp-head
+.tmp-pr-babysit/

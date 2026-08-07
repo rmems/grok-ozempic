@@ -172,21 +172,18 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
             ));
         }
         let t_type = self.tensor_types[self.tensors_written];
-        if t_type == TENSOR_F16 {
-            if !scale.is_finite() || scale != 1.0 {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {} is fp16 and must have scale 1.0, got {}",
-                    self.tensors_written, scale
-                )));
-            }
-        } else if t_type == TENSOR_TERNARY {
-            if !scale.is_finite() {
-                return Err(GrokOzempicError::PackWrite(format!(
-                    "write_tensor_data: tensor {} has non-finite scale {scale}; a pack must be \
-                     dequantizable from its own contents",
-                    self.tensors_written
-                )));
-            }
+        if t_type == TENSOR_F16 && (!scale.is_finite() || scale != 1.0) {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {} is fp16 and must have scale 1.0, got {}",
+                self.tensors_written, scale
+            )));
+        }
+        if t_type == TENSOR_TERNARY && !scale.is_finite() {
+            return Err(GrokOzempicError::PackWrite(format!(
+                "write_tensor_data: tensor {} has non-finite scale {scale}; a pack must be \
+                 dequantizable from its own contents",
+                self.tensors_written
+            )));
         }
         self.real_scales.push(scale);
         let pos = self
