@@ -447,9 +447,9 @@ class PackWeights(WeightSource):
             entry = self._index[name]
             stored = entry.get("scale")
             if stored is not None:
-                if not np.isfinite(stored):
+                if not np.isfinite(stored) or stored < 0:
                     raise ForwardError(
-                        f"{name}: pack stores a non-finite scale ({stored}); it cannot be "
+                        f"{name}: pack stores a non-finite or negative scale ({stored}); it cannot be "
                         "dequantized. Re-pack with a current build, which rejects this at "
                         "write time."
                     )
