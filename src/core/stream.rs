@@ -30,7 +30,8 @@ use crate::{
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
         selection::{TensorClass, classify},
         weight_pack::{
-            PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_F16, TENSOR_TERNARY,
+            OZ1_VERSION, PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_F16,
+            TENSOR_TERNARY,
         },
     },
     error::{GrokOzempicError, Result},
@@ -329,7 +330,13 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
 
     let mut metadata: BTreeMap<String, PackMetaValue> = BTreeMap::new();
     metadata.insert("oz.name".into(), PackMetaValue::Str("grok-ozempic".into()));
-    metadata.insert("oz.quantization_version".into(), PackMetaValue::U32(1));
+    // Provenance twin of the binary OZ1_VERSION. Both move to 2 together: the
+    // binary field gates the layout, this one records it for anything reading
+    // metadata only (GH #65).
+    metadata.insert(
+        "oz.quantization_version".into(),
+        PackMetaValue::U32(OZ1_VERSION),
+    );
     // Record the effective baseline gif_threshold so the artifact's
     // provenance metadata reflects what was actually applied. When the
     // manifest supplies a defaults.gif_threshold that overrides the
@@ -374,17 +381,17 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
             current_path = Some(entry.source_path.clone());
         }
 
-        let (packed, ternary_sparsity) = quantize_manifest_entry(entry, config)?;
+        let payload = quantize_manifest_entry(entry, config)?;
         if entry.emits_fp16_bytes() {
             shard_stats.tensors_fp16 += 1;
         } else {
             shard_stats.tensors_ternary += 1;
-            if let Some(sp) = ternary_sparsity {
+            if let Some(sp) = payload.ternary_sparsity {
                 sparsity_sum += sp;
                 sparsity_n += 1;
             }
         }
-        stream.write_tensor_data(&packed)?;
+        stream.write_tensor_data(&payload.bytes, payload.scale)?;
     }
     if current_path.is_some() {
         if sparsity_n > 0 {
@@ -399,10 +406,28 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
     Ok(all_stats)
 }
 
+/// One tensor's encoded payload plus what the pack header needs to record.
+///
+/// A named struct rather than a tuple because the two `f32`-ish members mean
+/// very different things and are easy to transpose at a call site: `sparsity`
+/// is a diagnostic, while `scale` is load-bearing — it is the only thing that
+/// makes a ternary payload reconstructible (GH #65).
+struct QuantizedPayload {
+    bytes: Vec<u8>,
+    /// `None` for fp16 tensors, which are not ternary-quantized.
+    ternary_sparsity: Option<f32>,
+    /// `α*` for ternary; `1.0` for fp16, where the payload *is* the value.
+    scale: f32,
+}
+
+/// Scale for an fp16 payload: the stored halves are the values themselves, so
+/// `value = scale × payload` holds with an identity scale.
+const FP16_IDENTITY_SCALE: f32 = 1.0;
+
 fn quantize_manifest_entry(
     entry: &ManifestEntry,
     config: &QuantizationConfig,
-) -> Result<(Vec<u8>, Option<f32>)> {
+) -> Result<QuantizedPayload> {
     match config.input_format {
         QuantizationInputFormat::Safetensors => quantize_safetensors_entry(entry, config),
         QuantizationInputFormat::NpyDir => quantize_npy_entry(entry, config),
@@ -412,7 +437,7 @@ fn quantize_manifest_entry(
 fn quantize_safetensors_entry(
     entry: &ManifestEntry,
     _config: &QuantizationConfig,
-) -> Result<(Vec<u8>, Option<f32>)> {
+) -> Result<QuantizedPayload> {
     let file = File::open(&entry.source_path).map_err(GrokOzempicError::Io)?;
     let mmap = unsafe {
         MmapOptions::new()
@@ -436,7 +461,11 @@ fn quantize_safetensors_entry(
 
     if entry.emits_fp16_bytes() {
         let fp16_bytes = encode_fp16_bytes(dtype, view.data())?;
-        Ok((fp16_bytes, None))
+        Ok(QuantizedPayload {
+            bytes: fp16_bytes,
+            ternary_sparsity: None,
+            scale: FP16_IDENTITY_SCALE,
+        })
     } else {
         let qt = match dtype {
             SourceDtype::F32 => {
@@ -453,15 +482,18 @@ fn quantize_safetensors_entry(
             }
             SourceDtype::Other => unreachable!(),
         };
-        let sp = qt.sparsity;
-        Ok((qt.packed, Some(sp)))
+        Ok(QuantizedPayload {
+            bytes: qt.packed,
+            ternary_sparsity: Some(qt.sparsity),
+            scale: qt.scale,
+        })
     }
 }
 
 fn quantize_npy_entry(
     entry: &ManifestEntry,
     _config: &QuantizationConfig,
-) -> Result<(Vec<u8>, Option<f32>)> {
+) -> Result<QuantizedPayload> {
     let npy = MmapNpy::map_path(&entry.source_path)?;
     let dtype = npy_dtype_to_source(npy.dtype());
     if dtype == SourceDtype::Other {
@@ -474,7 +506,11 @@ fn quantize_npy_entry(
 
     if entry.emits_fp16_bytes() {
         let fp16_bytes = encode_fp16_bytes(dtype, raw)?;
-        Ok((fp16_bytes, None))
+        Ok(QuantizedPayload {
+            bytes: fp16_bytes,
+            ternary_sparsity: None,
+            scale: FP16_IDENTITY_SCALE,
+        })
     } else {
         let qt = match dtype {
             SourceDtype::F32 => {
@@ -491,8 +527,11 @@ fn quantize_npy_entry(
             }
             SourceDtype::Other => unreachable!(),
         };
-        let sp = qt.sparsity;
-        Ok((qt.packed, Some(sp)))
+        Ok(QuantizedPayload {
+            bytes: qt.packed,
+            ternary_sparsity: Some(qt.sparsity),
+            scale: qt.scale,
+        })
     }
 }
 

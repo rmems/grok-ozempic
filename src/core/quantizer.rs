@@ -28,6 +28,25 @@ pub struct QuantizedTensor {
     pub threshold: f32,
     /// Fraction of weights silenced to zero.
     pub sparsity: f32,
+    /// Reconstruction-optimal single scale `α*` for this tensor (GH #65).
+    ///
+    /// `α* = Σ(w·t) / count(t ≠ 0)` over fired positions, which minimizes
+    /// `‖w − α·t‖²`: the trits are the fixed pattern, and `Σt² = count(fired)`
+    /// because every fired trit is ±1. It is the best single scale any consumer
+    /// could pick for this trit pattern, so persisting it costs nothing in
+    /// accuracy relative to the format's ceiling.
+    ///
+    /// The numerator uses the **signed** product rather than `Σ|w|`. The two
+    /// agree here by construction — the gate below assigns `+1` only above `+τ`
+    /// and `-1` only below `-τ`, so `sign(t) == sign(w)` at every fired position
+    /// — but the signed form is the actual least-squares numerator, and it
+    /// degrades honestly (a smaller `α`) rather than inflating if that invariant
+    /// is ever broken.
+    ///
+    /// Zero when nothing fires: `α` is undefined with no fired positions, and
+    /// the reconstruction `α·t` is identically zero for any `α`, so `0.0` loses
+    /// no information and keeps the stored value finite.
+    pub scale: f32,
 }
 
 /// Encode a single ternary value {-1, 0, +1} as 2 bits.
@@ -87,6 +106,7 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
             rms: 0.0,
             threshold: 0.0,
             sparsity: 1.0,
+            scale: 0.0,
         };
     }
 
@@ -97,13 +117,23 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
     // Step 2: derive firing threshold.
     let threshold = gif_threshold * rms;
 
-    // Step 3: apply GIF ternary gate.
+    // Step 3: apply GIF ternary gate, accumulating the least-squares numerator
+    // Σ(w·t) as we go. Done in the same pass because the alternative is a second
+    // walk over tensors that reach 6.44 GiB for a single Grok-1 expert.
     let mut ternary = Vec::with_capacity(n);
     let mut zeros: usize = 0;
+    let mut fired: usize = 0;
+    // f64 accumulator: an expert tensor has ~1.6e9 elements, and summing that
+    // many f32 magnitudes in f32 loses low-order bits to rounding.
+    let mut signed_sum: f64 = 0.0;
     for &w in weights {
         let t = if w >= threshold {
+            fired += 1;
+            signed_sum += w as f64; // w · (+1)
             1.0f32
         } else if w <= -threshold {
+            fired += 1;
+            signed_sum -= w as f64; // w · (-1)
             -1.0f32
         } else {
             zeros += 1;
@@ -112,6 +142,11 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
         ternary.push(t);
     }
     let sparsity = zeros as f32 / n as f32;
+    let scale = if fired > 0 {
+        (signed_sum / fired as f64) as f32
+    } else {
+        0.0
+    };
 
     // Step 4: pack into 2-bit representation.
     let packed = pack_trits(&ternary);
@@ -122,6 +157,7 @@ pub fn quantize_f32(weights: &[f32], gif_threshold: f32) -> QuantizedTensor {
         rms,
         threshold,
         sparsity,
+        scale,
     }
 }
 
@@ -204,6 +240,90 @@ mod tests {
         // rms ≈ sqrt((0.0001+0.0001+4+4)/4) ≈ sqrt(2.00005) ≈ 1.414
         // threshold ≈ 1.414  =>  0.01 < threshold, 2.0 > threshold
         assert_eq!(qt.sparsity, 0.5);
+    }
+
+    /// Reconstruct `α·t` from a packed payload, the way a consumer would.
+    fn reconstruct(qt: &QuantizedTensor) -> Vec<f32> {
+        (0..qt.num_elements)
+            .map(|i| {
+                let bits = (qt.packed[i / 4] >> ((i % 4) * 2)) & 0b11;
+                qt.scale * decode_trit(bits)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scale_is_the_least_squares_optimum() {
+        // The defining property of α*: it minimizes ‖w − α·t‖² over α. Perturbing
+        // it either way must increase the residual, which pins the *value* rather
+        // than just re-deriving the formula the implementation already used.
+        let weights: Vec<f32> = (0..512)
+            .map(|i| ((i as f32) * 0.37).sin() * 3.0 + 0.05)
+            .collect();
+        let qt = quantize_f32(&weights, 0.7);
+        assert!(qt.scale.is_finite() && qt.scale > 0.0);
+
+        let sse = |alpha: f32| -> f64 {
+            (0..qt.num_elements)
+                .map(|i| {
+                    let bits = (qt.packed[i / 4] >> ((i % 4) * 2)) & 0b11;
+                    let r = weights[i] - alpha * decode_trit(bits);
+                    (r as f64) * (r as f64)
+                })
+                .sum()
+        };
+        let best = sse(qt.scale);
+        for delta in [-0.25f32, -0.05, -0.01, 0.01, 0.05, 0.25] {
+            assert!(
+                sse(qt.scale + delta) > best,
+                "alpha {} is not optimal: perturbing by {delta} lowered SSE",
+                qt.scale
+            );
+        }
+    }
+
+    #[test]
+    fn scale_equals_mean_absolute_fired_weight() {
+        // sign(t) == sign(w) holds by construction, so the signed numerator must
+        // agree with Σ|w| over fired. If the gate ever changes such that it does
+        // not, this is the test that says so.
+        // rms = sqrt((0.0001 + 0.0001 + 16 + 16)/4) ≈ 2.828, so τ ≈ 2.828 with
+        // gif_threshold = 1.0: both ±4.0 fire and both ±0.01 are silenced.
+        let weights = vec![0.01f32, -0.01, 4.0, -4.0];
+        let qt = quantize_f32(&weights, 1.0);
+        assert_eq!(qt.sparsity, 0.5, "expected the two small weights silenced");
+        assert!((qt.scale - 4.0).abs() < 1e-6, "got {}", qt.scale);
+    }
+
+    #[test]
+    fn scale_is_zero_when_nothing_fires() {
+        // Undefined mathematically; must still be finite, because a non-finite
+        // scale makes the pack unverifiable.
+        let weights: Vec<f32> = (0..16).map(|i| i as f32 * 0.01).collect();
+        let qt = quantize_f32(&weights, 1000.0);
+        assert_eq!(qt.sparsity, 1.0);
+        assert_eq!(qt.scale, 0.0);
+        assert!(qt.scale.is_finite());
+        // Reconstruction is identically zero for any alpha, so nothing is lost.
+        assert!(reconstruct(&qt).iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn empty_tensor_scale_is_finite() {
+        let qt = quantize_f32(&[], 0.5);
+        assert!(qt.scale.is_finite());
+    }
+
+    #[test]
+    fn scale_survives_the_f16_entry_point() {
+        // quantize_f16 delegates, but a future divergence would silently drop the
+        // scale and leave every fp16-sourced ternary tensor unreconstructible.
+        let weights: Vec<f16> = [1.5f32, -2.5, 0.0, 3.5]
+            .iter()
+            .map(|&v| f16::from_f32(v))
+            .collect();
+        let qt = quantize_f16(&weights, 0.5);
+        assert!(qt.scale.is_finite() && qt.scale > 0.0);
     }
 
     #[test]

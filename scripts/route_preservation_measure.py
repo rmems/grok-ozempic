@@ -561,7 +561,11 @@ def measure_routing(
     routing: dict[str, dict] = {}
     for name in sorted(square):
         w_ref = _require_npy(npy_dir, name)
-        w_pilot = reconstruct_full(pack, ternary[name], weights[name]["alpha_optimal"])
+        entry = ternary[name]
+        # Prefer stored v2 scale; fall back to oracle only for legacy v1 (None).
+        scale = entry.get("scale")
+        alpha = float(scale) if scale is not None else weights[name]["alpha_optimal"]
+        w_pilot = reconstruct_full(pack, entry, alpha)
         r = routing_metrics(x, w_ref, w_pilot, router_ref, router_pilot)
         r["activations"] = activations
         routing[name] = r

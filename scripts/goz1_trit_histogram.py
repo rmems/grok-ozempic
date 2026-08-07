@@ -12,7 +12,11 @@ Layout mirrors ``src/core/weight_pack.rs`` / ``weight_pack_read.rs``:
 * magic ``GOZ1`` (LE u32), version u32, tensor_count u64, meta_count u64
 * metadata entries: key (u64 len + utf8), vtype u32 (0=u32, 1=str), value
 * tensor table: name (u64 len + utf8), ndim u32, dims u64*ndim,
-  tensor_type u32 (0=f16, 1=ternary), data_offset u64 (relative)
+  tensor_type u32 (0=f16, 1=ternary), data_offset u64 (relative),
+  **and in version 2 (GH #65) a scale f32** — the per-tensor reconstruction
+  scale ``α*``, appended to the row so ``value = scale × payload`` can be
+  evaluated from the pack alone. Version 1 rows stop after ``data_offset``;
+  unknown versions are rejected rather than parsed as a compatible prefix.
 * header padded to DATA_ALIGNMENT=32; each blob padded to 32 too
 * ternary payload: 2 bits per trit, 4 per byte, LSB-first;
   0b00=0, 0b01=+1, 0b10=-1; final byte zero-padded
@@ -37,6 +41,10 @@ META_STR = 1
 TENSOR_F16 = 0
 TENSOR_TERNARY = 1
 MAGIC = b"GOZ1"
+# Highest container version this parser understands, and the first one carrying
+# a per-tensor scale. Mirrors OZ1_VERSION / OZ1_VERSION_SCALED in Rust.
+OZ1_VERSION_MAX = 2
+OZ1_VERSION_SCALED = 2
 CHUNK = 64 * 1024 * 1024
 
 # Per byte value: counts of (zero, +1, -1) among its four 2-bit trits.
@@ -76,6 +84,10 @@ def _read_u64(f) -> int:
     return struct.unpack("<Q", _read_exact(f, 8))[0]
 
 
+def _read_f32(f) -> float:
+    return struct.unpack("<f", _read_exact(f, 4))[0]
+
+
 def _read_str(f) -> str:
     n = _read_u64(f)
     return _read_exact(f, n).decode("utf-8")
@@ -90,6 +102,12 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
     if _read_exact(f, 4) != MAGIC:
         raise Goz1Error("bad magic (expected GOZ1)")
     version = _read_u32(f)
+    if version == 0 or version > OZ1_VERSION_MAX:
+        raise Goz1Error(
+            f"unsupported container version {version} "
+            f"(this parser understands 1..={OZ1_VERSION_MAX})"
+        )
+    has_scales = version >= OZ1_VERSION_SCALED
     tensor_count = _read_u64(f)
     meta_count = _read_u64(f)
 
@@ -111,12 +129,33 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
         shape = [_read_u64(f) for _ in range(ndim)]
         tensor_type = _read_u32(f)
         data_offset = _read_u64(f)
+        # ``None`` on v1, which has no scale field at all. Kept distinct from a
+        # numeric 0.0 so a consumer can tell "this format stores no scale, use
+        # the legacy oracle path" from "this tensor's scale really is zero"
+        # (which happens legitimately when no trit fires).
+        scale = None
+        if has_scales:
+            scale = _read_f32(f)
+            sentinel = _read_u32(f)
+            if sentinel != 0x5CA1E021:
+                raise Goz1Error(f"tensor {name!r} missing v2 row sentinel (got {hex(sentinel)}); malformed pack")
+
+        if scale is not None:
+            import math
+
+            if tensor_type == TENSOR_TERNARY:
+                if not math.isfinite(scale) or scale < 0.0:
+                    raise Goz1Error(f"ternary tensor {name!r} has non-finite or negative scale {scale}")
+            elif tensor_type == TENSOR_F16:
+                if not math.isfinite(scale) or scale != 1.0:
+                    raise Goz1Error(f"fp16 tensor {name!r} has invalid scale {scale}; expected 1.0")
         tensors.append(
             {
                 "name": name,
                 "shape": shape,
                 "tensor_type": tensor_type,
                 "data_offset": data_offset,
+                "scale": scale,
             }
         )
 
@@ -258,6 +297,8 @@ def analyze(path: Path) -> dict:
                 "shape": t["shape"],
                 "num_elements": n,
                 "type": _type_name(t["tensor_type"], t["name"]),
+                # Present as None on v1 packs; see read_header.
+                "scale": t["scale"],
             }
             if t["tensor_type"] == TENSOR_TERNARY:
                 entry.update(

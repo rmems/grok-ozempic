@@ -64,24 +64,51 @@ def _assert_payload_size(name: str, shape: list[int], kind: int, payload: bytes)
         )
 
 
-def build_pack(path: Path, tensors: list[tuple[str, list[int], int, bytes]], *, truncate: int = 0) -> Path:
+def _pack_header_for_tensor(
+    name: str, shape: list[int], kind: int, rel: int, version: int, scale: float
+) -> bytes:
+    """Single tensor header — extracted to keep build_pack complexity low."""
+    hdr = _s(name) + _u32(len(shape))
+    for d in shape:
+        hdr += _u64(d)
+    hdr += _u32(kind) + _u64(rel)
+    if version >= 2:
+        hdr += struct.pack("<f", scale)
+        hdr += _u32(0x5CA1E021)
+    return hdr
+
+
+def build_pack(
+    path: Path,
+    tensors: list[tuple[str, list[int], int, bytes]],
+    *,
+    truncate: int = 0,
+    version: int = 1,
+    scales: list[float] | None = None,
+) -> Path:
     """Write a minimal GOZ1 pack.
 
     ``tensors`` items are ``(name, shape, tensor_type, payload_bytes)``; payloads
     are laid out at 32-byte-aligned cumulative offsets exactly as the Rust writer
     does. ``truncate`` drops that many bytes from the tail.
+
+    ``version`` selects the tensor-row layout: 1 has no scale field, 2 appends a
+    per-tensor ``f32`` (GH #65). The default stays 1 so the existing fixtures keep
+    exercising the legacy path they were written for; v2 coverage is explicit.
+    ``scales`` supplies those values (default 1.0 each) and is ignored for v1.
     """
-    head = bytearray(MAGIC + _u32(1) + _u64(len(tensors)) + _u64(1))
+    head = bytearray(MAGIC + _u32(version) + _u64(len(tensors)) + _u64(1))
     head += _s("oz.name") + _u32(META_STR) + _s("grok-ozempic")
 
+    if scales is not None and len(scales) != len(tensors):
+        raise AssertionError("scales must be one per tensor")
+
     rel = 0
-    for name, shape, kind, payload in tensors:
+    for i, (name, shape, kind, payload) in enumerate(tensors):
         if not truncate:
             _assert_payload_size(name, shape, kind, payload)
-        head += _s(name) + _u32(len(shape))
-        for d in shape:
-            head += _u64(d)
-        head += _u32(kind) + _u64(rel)
+        scale = 1.0 if scales is None else scales[i]
+        head += _pack_header_for_tensor(name, shape, kind, rel, version, scale)
         rel = _align(rel + len(payload))
 
     data_start = _align(len(head))
@@ -383,6 +410,77 @@ class PreserveShapeAgreementTests(unittest.TestCase):
         self.rpm._require_matching_shapes(
             "block_000.slot_07.block_norm", ref, got, self._entry((6144,)), {}
         )
+
+
+class ContainerVersionTests(unittest.TestCase):
+    """v1/v2 parsing (GH #65).
+
+    The distinction is load-bearing rather than cosmetic: ``scale is None`` is
+    what tells a consumer to fall back to the oracle path and tag its provenance,
+    so reading a v2 scale as absent (or inventing one for v1) silently changes
+    which number a report is built from.
+    """
+
+    def _one_ternary(self, tmp: Path, **kw) -> dict:
+        pack = build_pack(
+            tmp / "p.goz1",
+            [("block_000.slot_05.query", [8], rio.TENSOR_TERNARY, _trits([1] * 8))],
+            **kw,
+        )
+        _meta, index = rio.load_pack_index(pack)
+        return index["block_000.slot_05.query"]
+
+    def test_v2_scale_is_parsed_from_the_tensor_row(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            entry = self._one_ternary(Path(td), version=2, scales=[0.3125])
+            self.assertAlmostEqual(entry["scale"], 0.3125, places=6)
+            self.assertEqual(entry["container_version"], 2)
+
+    def test_v1_reports_no_scale_rather_than_a_default(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            entry = self._one_ternary(Path(td), version=1)
+            self.assertIsNone(
+                entry["scale"],
+                "a v1 pack carries no scale; None is the signal to use the oracle path",
+            )
+            self.assertEqual(entry["container_version"], 1)
+
+    def test_v2_offsets_still_line_up_after_the_extra_field(self) -> None:
+        """The scale widens every row, so the data section moves."""
+        with tempfile.TemporaryDirectory() as td:
+            pack = build_pack(
+                Path(td) / "p.goz1",
+                [
+                    ("a.ternary", [8], rio.TENSOR_TERNARY, _trits([1] * 8)),
+                    ("b.preserve", [4], rio.TENSOR_F16, np.zeros(4, dtype="<f2").tobytes()),
+                ],
+                version=2,
+                scales=[2.0, 1.0],
+            )
+            _meta, index = rio.load_pack_index(pack)
+            with pack.open("rb") as f:
+                f.seek(index["a.ternary"]["abs_offset"])
+                self.assertEqual(f.read(2), _trits([1] * 8))
+                f.seek(index["b.preserve"]["abs_offset"])
+                self.assertEqual(f.read(8), np.zeros(4, dtype="<f2").tobytes())
+
+    def test_unknown_version_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(rio.MetricsError) as ctx:
+                self._one_ternary(Path(td), version=3)
+            self.assertIn("unsupported container version", str(ctx.exception))
+
+    def test_version_zero_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(rio.MetricsError):
+                self._one_ternary(Path(td), version=0)
+
+    def test_a_legitimately_zero_scale_is_not_confused_with_absence(self) -> None:
+        """A tensor where nothing fired stores 0.0, which must stay distinct from v1's None."""
+        with tempfile.TemporaryDirectory() as td:
+            entry = self._one_ternary(Path(td), version=2, scales=[0.0])
+            self.assertIsNotNone(entry["scale"])
+            self.assertEqual(entry["scale"], 0.0)
 
 
 if __name__ == "__main__":

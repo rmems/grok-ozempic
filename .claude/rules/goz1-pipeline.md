@@ -100,9 +100,22 @@ Since #40 / RM-191, **runtime** packs prefer the V2 `structural-manifest.json` w
 | Total GOZ1 **file_size** (bytes) | `--verify` line: `GOZ1 verify ok: … file_size=…` |
 | Wall / max RSS | External: `/usr/bin/time -v`, `gtime -v`, or BSD `time -l` |
 | Exact trit counts / sparsity | `scripts/goz1_trit_histogram.py PACK.goz1` |
+| Per-tensor reconstruction scale | Same histogram (`scale` field); `None` means a legacy v1 pack |
+| Container version | `--verify` line: `GOZ1 verify ok: version=…` |
 | Route-preservation gates | `scripts/route_preservation_metrics.py` (fills run3's `unknown` surface) |
 
 Claim ternary only when the CLI ternary counter matches expectation.
+
+## Container versions (#65)
+
+Packs are **GOZ1 v2**: each tensor row carries the reconstruction-optimal scale
+`α*`, so a pack dequantizes from its own contents (`value = scale × payload`).
+v1 packs have no scale field and are still readable; consumers fall back to the
+oracle α derived from the source npy **only** there, and must tag it
+(`PackWeights.scale_sources` → `legacy_oracle` vs `pack_v2`).
+
+An oracle figure is a lower bound no runtime can reproduce, so never report one
+as a pack-only measurement. Full layout and policy: `docs/goz1-format.md`.
 
 ⚠ **`oz.gif_threshold` cannot be trusted under per-tensor τ.** It records `defaults || config` only, so a manifest carrying per-tensor `ternary_candidates[].gif_threshold` still reports the CLI default. Verify the applied τ from measured sparsity instead (#51 trap; demonstrated in `reports/grok-1-block-pilot/results.md`).
 

@@ -126,16 +126,18 @@ directory as `--input-dir` to `quantize-goz1` below.
 
 Streams tensors through `run_quantization` into a GOZ1 file
 ([#38](https://github.com/rmems/grok-ozempic/issues/38) / Linear
-[RM-193](https://linear.app/rpd-34/issue/RM-193)):
+[RM-193](https://linear.app/rpd-34/issue/RM-193)) — now **GOZ1 v2** with per-tensor reconstruction scale:
 
 ```bash
 cargo run --features cli -- quantize-goz1 \
-  --input-dir /path/to/npy-or-safetensors \
+  --input-dir /path/to/npy \
   --output /tmp/model.goz1 \
-  --manifest dissect/grok-1/baseline.json \
+  --manifest dissect/grok-1/structural-manifest.json \
   --input-format npy \
   --verify
 ```
+
+GOZ1 v2 (`version=2`) appends `scale: f32` + `sentinel 0x5CA1E021` per tensor row so `value = scale × payload` reconstructs without the checkpoint. `TENSOR_TERNARY` stores reconstruction-optimal `α* = Σ(w·t)/count(fired)` (signed, not `Σ|w|`), `TENSOR_F16` stores `1.0`, fully-sparse stores `0.0`; non-finite/negative (ternary) and non-`1.0` (fp16) are rejected at write and at `--verify`. v1 packs remain readable via `entry["scale"] is None` oracle fallback. See [`docs/goz1-format.md`](docs/goz1-format.md).
 
 ## Developer verification
 

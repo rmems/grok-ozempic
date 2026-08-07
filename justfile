@@ -4,8 +4,10 @@
 # Cargo features, Python test modules, or local checkpoint paths.
 #
 # Discovery:  just --list
-# No multi-GiB weights required for: check, test, build, ci, doctor
+# Pre-push gate: just review  (see REVIEW.md + .githooks/)
+# No multi-GiB weights required for: check, test, build, ci, review, doctor
 # experiment-smoke needs local CKPT / GROK_OZEMPIC_DISSECT_RUN (fails loud if missing)
+# review-full / qodana need the Qodana CLI (and usually Docker)
 # Kernel CUDA benches live in myelin-accelerator, not here.
 
 # Default: list all verification tiers.
@@ -38,6 +40,38 @@ _python-tests:
       python3 -m unittest "${m}" -v
     done
 
+# Block-forward / block-weights unittests (not yet in python-scripts.yml / just ci)
+_python-tests-extra:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! python3 -c 'import numpy' >/dev/null 2>&1; then
+      echo "error: numpy is required for Python script unittests" >&2
+      echo "       install: python3 -m pip install --user 'numpy>=1.26,<3'" >&2
+      exit 1
+    fi
+    mods=(
+      scripts.test_grok1_block_forward
+      scripts.test_grok1_block_weights
+    )
+    for m in "${mods[@]}"; do
+      echo "+ python3 -m unittest ${m} -v"
+      python3 -m unittest "${m}" -v
+    done
+
+# cargo-audit.yml parity when the binary is installed; skip (warn) otherwise
+_cargo-audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v cargo-audit >/dev/null 2>&1; then
+      echo "+ cargo audit"
+      cargo audit
+    elif cargo audit -V >/dev/null 2>&1; then
+      echo "+ cargo audit"
+      cargo audit
+    else
+      echo "skip: cargo-audit not installed (cargo install cargo-audit --locked)"
+    fi
+
 _bash-n-scripts:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -51,6 +85,18 @@ _bash-n-scripts:
       echo "+ bash -n ${f}"
       bash -n "${f}"
     done
+
+_py-compile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    scripts=(scripts/*.py)
+    if [[ ${#scripts[@]} -eq 0 ]]; then
+      echo "warn: no scripts/*.py found"
+      exit 0
+    fi
+    echo "+ python3 -m py_compile ${scripts[*]}"
+    python3 -m py_compile "${scripts[@]}"
 
 _optional-linters:
     #!/usr/bin/env bash
@@ -119,6 +165,38 @@ ci:
     @just _python-tests
     @just _bash-n-scripts
     @just _optional-linters
+
+# Pre-push quality gate (REVIEW.md + .githooks/pre-push). No Qodana/Docker/weights.
+review:
+    @just ci
+    @just _cargo-audit
+    @just _python-tests-extra
+    @just _py-compile
+
+# Local JetBrains Qodana (qodana-rust). Needs `qodana` on PATH; results under .qodana/
+qodana:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v qodana >/dev/null 2>&1; then
+      echo "error: qodana CLI not on PATH" >&2
+      echo "       install: https://www.jetbrains.com/help/qodana/getting-started.html" >&2
+      echo "       see REVIEW.md § Local Qodana CLI" >&2
+      exit 1
+    fi
+    mkdir -p .qodana/results .qodana/report
+    echo "+ qodana scan --linter qodana-rust --print-problems (results → .qodana/)"
+    qodana scan \
+      --linter qodana-rust \
+      --project-dir . \
+      --results-dir .qodana/results \
+      --report-dir .qodana/report \
+      --print-problems \
+      --save-report
+
+# Full pre-push including local Qodana scan (slow; optional before large PRs)
+review-full:
+    @just review
+    @just qodana
 
 # Release CLI --help smoke; require CKPT + run3 data (fail loud if missing).
 experiment-smoke:

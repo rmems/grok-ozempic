@@ -94,6 +94,52 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
+## After a squash merge: delete the branch (verify first), avoid blind rebase
+
+PRs here land as **squash merges**, which create one new commit on `main` with
+**no ancestry link** to the branch's individual commits. The local branch still
+holds all of them.
+
+So the "PUSH TO REMOTE" step above (`git pull --rebase`) is **wrong on a branch
+whose PR has already been merged**: git replays every original commit onto a
+`main` that already contains the same content under a different SHA, cannot tell
+they are equivalent, and stops on `both added (AA)` conflicts in essentially
+every file the branch touched.
+
+```bash
+# WRONG after your PR was squash-merged -- 27 commits, ~8 AA conflicts
+git checkout experiment/my-branch && git pull --rebase
+
+# RIGHT: the work is already on main; start clean
+git checkout main && git pull --rebase
+# Branch deletion is manual — verify first, then delete only if you intend to:
+# git diff --stat origin/main experiment/my-branch  # should be empty if fully merged
+# git branch -D experiment/my-branch  # manual only
+git checkout -b feat/next-thing
+```
+
+Confirm the branch really is fully merged before deleting — an empty diff means
+it contributes nothing beyond `main` (manual check):
+
+Do **not** try to resolve the conflicts, and do **not** hand-merge
+`.beads/issues.jsonl` (re-export instead — see above). If a rebase is already
+mid-flight and every file is `AA`, that is this situation: `git rebase --abort`.
+
+This has bitten the repo repeatedly (`ef451fe "refresh artifacts after rebasing
+onto merged #67"` is one such cleanup commit).
+
+## Beads cross-machine sync
+
+The `dolt` CLI is installed (v2.2.3), but **no beads Dolt remote is configured**
+(`bd dolt remote list` → "No remotes configured"), so `bd dolt push` / `bd dolt
+pull` are **not** part of the session-completion checklist. Beads state travels
+via the committed `.beads/issues.jsonl` export plus GitHub/Linear, which remain
+the source of truth.
+
+Having the CLI available is not the same as having a remote wired up. If one is
+ever configured, add `bd dolt push` to the checklist and update this note and
+`.claude/rules/agent-workflow.md` together.
+
 ## Build & Test
 
 Rust edition 2024 crate. CLI binary is feature-gated.
