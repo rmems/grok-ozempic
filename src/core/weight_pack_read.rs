@@ -143,6 +143,15 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
                 i, info.name, scale
             )));
         }
+        if let Some(scale) = info.scale
+            && info.tensor_type == TENSOR_F16
+            && (!scale.is_finite() || *scale != 1.0)
+        {
+            return Err(GrokOzempicError::InvalidConfig(format!(
+                "GOZ1 verify: tensor {} ({}) is fp16 with invalid scale {}; expected 1.0",
+                i, info.name, scale
+            )));
+        }
         let nbytes = tensor_nbytes(info)?;
         let abs = data_section_start + info.data_offset;
         let end = abs.saturating_add(nbytes);
