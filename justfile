@@ -86,6 +86,18 @@ _bash-n-scripts:
       bash -n "${f}"
     done
 
+_py-compile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    scripts=(scripts/*.py)
+    if [[ ${#scripts[@]} -eq 0 ]]; then
+      echo "warn: no scripts/*.py found"
+      exit 0
+    fi
+    echo "+ python3 -m py_compile ${scripts[*]}"
+    python3 -m py_compile "${scripts[@]}"
+
 _optional-linters:
     #!/usr/bin/env bash
     # Fail-fast when an installed optional linter finds issues (just ci must not greenwash).
@@ -159,6 +171,7 @@ review:
     @just ci
     @just _cargo-audit
     @just _python-tests-extra
+    @just _py-compile
 
 # Local JetBrains Qodana (qodana-rust). Needs `qodana` on PATH; results under .qodana/
 qodana:

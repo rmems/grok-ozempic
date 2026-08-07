@@ -171,9 +171,9 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 "write_tensor_data: tensor {idx} is fp16 and must have scale 1.0, got {scale}"
             )));
         }
-        if t_type == TENSOR_TERNARY && !scale.is_finite() {
+        if t_type == TENSOR_TERNARY && (!scale.is_finite() || scale < 0.0) {
             return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {idx} has non-finite scale {scale}; a pack must be \
+                "write_tensor_data: tensor {idx} has non-finite or negative scale {scale}; a pack must be \
                  dequantizable from its own contents"
             )));
         }

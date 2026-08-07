@@ -12,6 +12,9 @@ engines:
       - ".kilo/"
       - ".codacy/"
       - "target/"
+  security:
+    exclude_paths:
+      - "src/core/weight_pack_read.rs"  # temp_dir flagged by Codacy security — production GOZ1 v2 reader, keep in complexity/duplication
 exclude_paths:
   - "Cargo.lock"
   - "target/"
@@ -21,4 +24,3 @@ exclude_paths:
   - "scripts/testdata/"
   - "scripts/testdata/**"
   - "scripts/dev_generate_int8_export_fixtures.py"
-  - "src/core/weight_pack_read.rs"  # test helper temp_dir flagged by Codacy security — isolated test file

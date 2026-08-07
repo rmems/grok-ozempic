@@ -343,7 +343,15 @@ class StoredScaleTests(unittest.TestCase):
 
     def test_non_finite_stored_scale_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            w = self._weights(Path(td), version=2, scales=[float("nan")])
+            p = self._pack(Path(td), version=2, scales=[float("nan")])
+            # goz1_trit_histogram.read_header (via load_pack_index) rejects
+            # non-finite scales at header time as a pack-integrity guard;
+            # PackWeights.scale() also rejects them. Accept either.
+            try:
+                w = PackWeights(p, Path(td) / "absent-npy", partial=True)
+            except Exception as exc:  # noqa: BLE001
+                self.assertRegex(str(exc).lower(), r"non-finite or negative scale")
+                return
             with self.assertRaisesRegex(ForwardError, "non-finite scale"):
                 w.scale(self.NAME)
 
