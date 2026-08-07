@@ -248,30 +248,27 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 stats.scale
             )));
         }
-        // Both thresholds are magnitudes compared against |w|; negative is
-        // meaningless and would describe a gate that silenced nothing.
-        if !stats.gif_threshold.is_finite() || stats.gif_threshold < 0.0 {
+        Self::validate_ternary_threshold_pair(idx, stats.gif_threshold, stats.threshold_abs)
+    }
+
+    /// Magnitudes only; RM-252 forbids zero multiplier with nonzero absolute cut.
+    /// The explicit `(0, 0)` pair is allowed (dense ternary, no GIF sparsification).
+    fn validate_ternary_threshold_pair(idx: usize, gif: f32, abs_cut: f32) -> Result<()> {
+        if !gif.is_finite() || gif < 0.0 {
             return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {idx} has non-finite or negative gif_threshold {}",
-                stats.gif_threshold
+                "write_tensor_data: tensor {idx} has non-finite or negative gif_threshold {gif}"
             )));
         }
-        if !stats.threshold_abs.is_finite() || stats.threshold_abs < 0.0 {
+        if !abs_cut.is_finite() || abs_cut < 0.0 {
             return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {idx} has non-finite or negative threshold_abs {}",
-                stats.threshold_abs
+                "write_tensor_data: tensor {idx} has non-finite or negative threshold_abs {abs_cut}"
             )));
         }
-        // RM-252: threshold_abs = gif_threshold × rms. A zero multiplier with a
-        // non-zero absolute cut is impossible; reject at write so packs cannot
-        // pass the writer and fail verify_pack_file. The explicit (0, 0) pair is
-        // allowed (dense ternary, no GIF sparsification).
-        if stats.gif_threshold == 0.0 && stats.threshold_abs != 0.0 {
+        if gif == 0.0 && abs_cut != 0.0 {
             return Err(GrokOzempicError::PackWrite(format!(
                 "write_tensor_data: tensor {idx} has inconsistent thresholds \
-                 (gif_threshold={}, threshold_abs={}); non-zero absolute cut with \
-                 zero multiplier per RM-252",
-                stats.gif_threshold, stats.threshold_abs
+                 (gif_threshold={gif}, threshold_abs={abs_cut}); non-zero absolute cut with \
+                 zero multiplier per RM-252"
             )));
         }
         Ok(())
