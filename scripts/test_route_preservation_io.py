@@ -99,6 +99,7 @@ def build_pack(
         head += _u32(kind) + _u64(rel)
         if version >= 2:
             head += struct.pack("<f", 1.0 if scales is None else scales[i])
+            head += _u32(0x5CA1E021)
         rel = _align(rel + len(payload))
 
     data_start = _align(len(head))
@@ -438,10 +439,21 @@ class ContainerVersionTests(unittest.TestCase):
     def test_v2_offsets_still_line_up_after_the_extra_field(self) -> None:
         """The scale widens every row, so the data section moves."""
         with tempfile.TemporaryDirectory() as td:
-            entry = self._one_ternary(Path(td), version=2, scales=[2.0])
-            with (Path(td) / "p.goz1").open("rb") as f:
-                f.seek(entry["abs_offset"])
+            pack = build_pack(
+                Path(td) / "p.goz1",
+                [
+                    ("a.ternary", [8], rio.TENSOR_TERNARY, _trits([1] * 8)),
+                    ("b.preserve", [4], rio.TENSOR_F16, np.zeros(4, dtype="<f2").tobytes()),
+                ],
+                version=2,
+                scales=[2.0, 1.0],
+            )
+            _meta, index = rio.load_pack_index(pack)
+            with pack.open("rb") as f:
+                f.seek(index["a.ternary"]["abs_offset"])
                 self.assertEqual(f.read(2), _trits([1] * 8))
+                f.seek(index["b.preserve"]["abs_offset"])
+                self.assertEqual(f.read(8), np.zeros(4, dtype="<f2").tobytes())
 
     def test_unknown_version_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -133,7 +133,13 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
         # numeric 0.0 so a consumer can tell "this format stores no scale, use
         # the legacy oracle path" from "this tensor's scale really is zero"
         # (which happens legitimately when no trit fires).
-        scale = _read_f32(f) if has_scales else None
+        scale = None
+        if has_scales:
+            scale = _read_f32(f)
+            sentinel = _read_u32(f)
+            if sentinel != 0x5CA1E021:
+                raise Goz1Error(f"tensor {name!r} missing v2 row sentinel (got {hex(sentinel)}); malformed pack")
+
         if scale is not None:
             import math
 

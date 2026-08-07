@@ -33,7 +33,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 
@@ -164,20 +164,30 @@ def stem_of(structural_name: str) -> str:
     return structural_name.replace(".", "__")
 
 
-@dataclass(frozen=True)
 class TernaryScale:
     """Least-squares optimal single scale for a ternary tensor."""
 
-    alpha: float
-    fired: int
-    total: int
-    # Fired positions where sign(trit) != sign(w). Zero for a correctly built
-    # pack, since the quantizer assigns +1 above +tau and -1 below -tau.
-    sign_mismatches: int = 0
+    def __init__(self, alpha: float, fired: int | Callable[[], int], total: int, sign_mismatches: int = 0) -> None:
+        self.alpha = float(alpha)
+        self._fired = fired
+        self.total = int(total)
+        self.sign_mismatches = int(sign_mismatches)
+
+    @property
+    def fired(self) -> int:
+        if callable(self._fired):
+            self._fired = self._fired()
+        return self._fired
 
     @property
     def sparsity(self) -> float:
         return 1.0 - (self.fired / self.total) if self.total else 0.0
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TernaryScale):
+            return False
+        return (self.alpha == other.alpha and self.fired == other.fired and 
+                self.total == other.total and self.sign_mismatches == other.sign_mismatches)
 
 
 def _accumulate_alpha(flat_npy: np.ndarray, pack: Path, entry: dict) -> tuple[float, int, int]:
@@ -420,7 +430,7 @@ class PackWeights(WeightSource):
     def _save_cache(self) -> None:
         payload = {
             "fingerprint": self._fingerprint(),
-            "scales": {n: vars(s) for n, s in sorted(self._scales.items())},
+            "scales": {n: {"alpha": s.alpha, "fired": s.fired, "total": s.total, "sign_mismatches": s.sign_mismatches} for n, s in sorted(self._scales.items())},
         }
         self._cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
@@ -444,11 +454,12 @@ class PackWeights(WeightSource):
                         "write time."
                     )
                 total = int(entry["numel"])
-                fired = sum(
-                    int(np.count_nonzero(read_trits(self.pack, entry, start, min(_ALPHA_CHUNK, total - start))))
-                    for start in range(0, total, _ALPHA_CHUNK)
-                )
-                self._scales[name] = TernaryScale(alpha=float(stored), fired=fired, total=total)
+                def compute_fired(pack_path=self.pack, e=entry, n=total):
+                    return sum(
+                        int(np.count_nonzero(read_trits(pack_path, e, start, min(_ALPHA_CHUNK, n - start))))
+                        for start in range(0, n, _ALPHA_CHUNK)
+                    )
+                self._scales[name] = TernaryScale(alpha=float(stored), fired=compute_fired, total=total)
                 self._scale_sources[name] = "pack_v2"
                 return self._scales[name]
 

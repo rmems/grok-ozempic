@@ -44,6 +44,9 @@ const OZ1_MAGIC: u32 = u32::from_le_bytes(*b"GOZ1");
 /// [`crate::core::weight_pack_read`].
 pub const OZ1_VERSION: u32 = 2;
 
+/// Sentinel appended to v2 tensor rows to detect missing scales (GH #65).
+pub const OZ1_V2_ROW_SENTINEL: u32 = 0x5CA1E021;
+
 /// Tensor blob alignment in bytes.
 pub const DATA_ALIGNMENT: u64 = 32;
 
@@ -76,6 +79,7 @@ pub struct PackStreamWriter<'a, W: Write + Seek> {
     writer: &'a mut W,
     tensor_count: usize,
     tensors_written: usize,
+    tensor_types: Vec<u32>,
     offset_field_positions: Vec<u64>,
     real_offsets: Vec<u64>,
     /// Scale fields are patched exactly like offsets, and for the same reason:
@@ -113,6 +117,7 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
 
         let mut offset_field_positions: Vec<u64> = Vec::with_capacity(tensor_headers.len());
         let mut scale_field_positions: Vec<u64> = Vec::with_capacity(tensor_headers.len());
+        let mut tensor_types: Vec<u32> = Vec::with_capacity(tensor_headers.len());
         for entry in tensor_headers {
             write_str(writer, &entry.name)?;
             write_u32(writer, entry.shape.len() as u32)?;
@@ -120,6 +125,7 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 write_u64(writer, dim)?;
             }
             write_u32(writer, entry.tensor_type)?;
+            tensor_types.push(entry.tensor_type);
             offset_field_positions.push(writer.stream_position().map_err(GrokOzempicError::Io)?);
             write_u64(writer, 0u64)?;
             // v2 scale placeholder. NaN rather than 0.0 so a writer that somehow
@@ -128,6 +134,7 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
             // reconstructs every ternary weight as zero.
             scale_field_positions.push(writer.stream_position().map_err(GrokOzempicError::Io)?);
             write_f32(writer, f32::NAN)?;
+            write_u32(writer, OZ1_V2_ROW_SENTINEL)?;
         }
 
         let header_end = writer.stream_position().map_err(GrokOzempicError::Io)?;
@@ -142,6 +149,7 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
             writer,
             tensor_count: tensor_headers.len(),
             tensors_written: 0,
+            tensor_types,
             offset_field_positions,
             real_offsets: Vec::with_capacity(tensor_headers.len()),
             scale_field_positions,
@@ -163,12 +171,22 @@ impl<'a, W: Write + Seek> PackStreamWriter<'a, W> {
                 "write_tensor_data: more blobs than tensor headers".into(),
             ));
         }
-        if !scale.is_finite() {
-            return Err(GrokOzempicError::PackWrite(format!(
-                "write_tensor_data: tensor {} has non-finite scale {scale}; a pack must be \
-                 dequantizable from its own contents",
-                self.tensors_written
-            )));
+        let t_type = self.tensor_types[self.tensors_written];
+        if t_type == TENSOR_F16 {
+            if !scale.is_finite() || scale != 1.0 {
+                return Err(GrokOzempicError::PackWrite(format!(
+                    "write_tensor_data: tensor {} is fp16 and must have scale 1.0, got {}",
+                    self.tensors_written, scale
+                )));
+            }
+        } else if t_type == TENSOR_TERNARY {
+            if !scale.is_finite() {
+                return Err(GrokOzempicError::PackWrite(format!(
+                    "write_tensor_data: tensor {} has non-finite scale {scale}; a pack must be \
+                     dequantizable from its own contents",
+                    self.tensors_written
+                )));
+            }
         }
         self.real_scales.push(scale);
         let pos = self

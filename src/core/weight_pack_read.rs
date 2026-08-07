@@ -102,7 +102,15 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
         // The v2 row appends the scale, so v1 parsing is the same code minus
         // this read; nothing else about the row moved.
         let scale = if has_scales {
-            Some(read_f32(&mut f)?)
+            let s = read_f32(&mut f)?;
+            let sentinel = read_u32(&mut f)?;
+            if sentinel != crate::core::weight_pack::OZ1_V2_ROW_SENTINEL {
+                return Err(GrokOzempicError::InvalidConfig(format!(
+                    "GOZ1 verify: tensor {} ({}) missing v2 row sentinel (got {:#x}); malformed pack",
+                    i, name, sentinel
+                )));
+            }
+            Some(s)
         } else {
             None
         };
@@ -133,24 +141,20 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
         // cannot be reconstructed at all. Checked for ternary specifically: an
         // fp16 payload is self-describing and survives a junk scale, but a
         // ternary one silently dequantizes to garbage (or to all-zero).
-        if let Some(scale) = info.scale
-            && info.tensor_type == TENSOR_TERNARY
-            && (!scale.is_finite() || *scale < 0.0)
-        {
-            return Err(GrokOzempicError::InvalidConfig(format!(
-                "GOZ1 verify: tensor {} ({}) is ternary with non-finite or negative scale {}; the pack \
-                 cannot be dequantized from its own contents",
-                i, info.name, scale
-            )));
-        }
-        if let Some(scale) = info.scale
-            && info.tensor_type == TENSOR_F16
-            && (!scale.is_finite() || *scale != 1.0)
-        {
-            return Err(GrokOzempicError::InvalidConfig(format!(
-                "GOZ1 verify: tensor {} ({}) is fp16 with invalid scale {}; expected 1.0",
-                i, info.name, scale
-            )));
+        if let Some(scale) = info.scale {
+            if info.tensor_type == TENSOR_TERNARY && (!scale.is_finite() || scale < 0.0) {
+                return Err(GrokOzempicError::InvalidConfig(format!(
+                    "GOZ1 verify: tensor {} ({}) is ternary with non-finite or negative scale {}; the pack \
+                     cannot be dequantized from its own contents",
+                    i, info.name, scale
+                )));
+            }
+            if info.tensor_type == TENSOR_F16 && (!scale.is_finite() || scale != 1.0) {
+                return Err(GrokOzempicError::InvalidConfig(format!(
+                    "GOZ1 verify: tensor {} ({}) is fp16 with invalid scale {}; expected 1.0",
+                    i, info.name, scale
+                )));
+            }
         }
         let nbytes = tensor_nbytes(info)?;
         let abs = data_section_start + info.data_offset;
@@ -467,7 +471,7 @@ mod tests {
         std::fs::write(&path, &bytes).unwrap();
 
         let err = verify_pack_file(&path).unwrap_err().to_string();
-        assert!(err.contains("non-finite scale"), "got: {err}");
+        assert!(err.contains("non-finite or negative scale"), "got: {err}");
         let _ = std::fs::remove_file(&path);
     }
 
