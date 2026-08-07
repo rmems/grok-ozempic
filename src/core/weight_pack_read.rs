@@ -89,7 +89,7 @@ pub fn verify_pack_file(path: &Path) -> Result<PackVerifyReport> {
     let mut tensor_names = Vec::with_capacity(tensor_count);
     let mut infos: Vec<TensorInfoParsed> = Vec::with_capacity(tensor_count);
 
-    for _ in 0..tensor_count {
+    for i in 0..tensor_count {
         let name = read_str(&mut f)?;
         tensor_names.push(name.clone());
         let ndim = read_u32(&mut f)? as usize;
