@@ -498,6 +498,25 @@ class PackWeights(WeightSource):
         """GOZ1 tensor type for a role (``TENSOR_F16`` or ``TENSOR_TERNARY``)."""
         return int(self._entry(role)["tensor_type"])
 
+    def tensor_entry(self, structural_name: str) -> dict:
+        """Public pack-table row for a structural tensor name.
+
+        Experiment harnesses should use this instead of reaching into
+        :attr:`_index` so the internal layout can change without silent break.
+        """
+        try:
+            return self._index[structural_name]
+        except KeyError as exc:
+            raise ForwardError(f"{self.pack.name}: no tensor named {structural_name!r}") from exc
+
+    def container_version(self, structural_name: str) -> int | None:
+        """GOZ1 container version recorded on a tensor row."""
+        return self.tensor_entry(structural_name).get("container_version")
+
+    def tensor_names(self) -> list[str]:
+        """Structural names present in the pack, sorted."""
+        return sorted(self._index)
+
     def require_preserved(self, roles: Iterable[str]) -> None:
         """Fail closed unless every named role is stored at preserve precision.
 
