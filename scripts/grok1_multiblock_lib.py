@@ -756,6 +756,24 @@ def _chain_blocks(chain: dict) -> list[int]:
     return [r["block"] for r in (chain.get("per_block") or [])]
 
 
+def _schedule_match_72(chain: dict) -> bool:
+    """Blocks/tokens/seed/top_k match the #72 decision run."""
+    b72 = BASELINE_72
+    observed = (
+        _chain_blocks(chain),
+        int(chain.get("tokens") or 0),
+        int(chain.get("token_seed") or -1),
+        int(chain.get("top_k") or 2),
+    )
+    expected = (
+        list(b72["blocks"]),
+        int(b72["tokens"]),
+        int(b72["token_seed"]),
+        int(b72["top_k"]),
+    )
+    return observed == expected
+
+
 def _pack_identity_match_72(chain: dict) -> bool:
     """When pack_provenance is present, require #72 pack SHA-256 identity."""
     packs = chain.get("pack_provenance")
@@ -772,22 +790,16 @@ def settings_match_72(chain: dict) -> bool:
 
     Compares blocks/tokens/seed/top_k, and pack SHA-256 when provenance is present.
     """
-    b72 = BASELINE_72
-    observed = (
-        _chain_blocks(chain),
-        int(chain.get("tokens") or 0),
-        int(chain.get("token_seed") or -1),
-        int(chain.get("top_k") or 2),
-    )
-    expected = (
-        list(b72["blocks"]),
-        int(b72["tokens"]),
-        int(b72["token_seed"]),
-        int(b72["top_k"]),
-    )
-    if observed != expected:
-        return False
-    return _pack_identity_match_72(chain)
+    return _schedule_match_72(chain) and _pack_identity_match_72(chain)
+
+
+def settings_mismatch_reason(chain: dict) -> str | None:
+    """Machine-readable why a chain is not comparable to #72, or None if ok."""
+    if not _schedule_match_72(chain):
+        return "settings_not_comparable_to_72"
+    if not _pack_identity_match_72(chain):
+        return "pack_identity_not_comparable_to_72"
+    return None
 
 
 def _improved_vs_72(m: dict[str, list[float]], exit_drift: float | None) -> bool:
@@ -875,14 +887,19 @@ def _remedy_from_metrics(
     compounding: str,
 ) -> dict:
     # All policy options (1–3) require #72-comparable settings; otherwise option 4.
-    if not settings_match_72(chain):
-        return _decision_payload(
-            4,
-            "Inconclusive — chain settings differ from cited #72 baseline "
-            "(blocks/tokens/seed/top_k); cannot claim option 1–3 vs that baseline.",
-            rationale + ["settings_not_comparable_to_72"],
-            compounding,
-        )
+    mismatch = settings_mismatch_reason(chain)
+    if mismatch is not None:
+        if mismatch == "pack_identity_not_comparable_to_72":
+            text = (
+                "Inconclusive — pack SHA-256 differs from cited #72 packs "
+                "(schedule settings match, but weights are not the same packs)."
+            )
+        else:
+            text = (
+                "Inconclusive — chain settings differ from cited #72 baseline "
+                "(blocks/tokens/seed/top_k); cannot claim option 1–3 vs that baseline."
+            )
+        return _decision_payload(4, text, rationale + [mismatch], compounding)
     end_cos = m["cos"][-1]
     min_top1, min_topk = min(m["top1"]), min(m["topk"])
     if _remedy_option_1(end_cos, min_top1, min_topk, exit_drift, m["cos"]):

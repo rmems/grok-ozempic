@@ -25,6 +25,8 @@ from grok1_multiblock_experiment import (  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_72,
     channel_alpha_dequant,
+    decide_remedy as decide_remedy_lib,
+    settings_mismatch_reason,
 )
 
 
@@ -412,6 +414,24 @@ class RemedyDecideTests(unittest.TestCase):
         )
         self.assertEqual(d["decision"], 4)
         self.assertTrue(any("settings_not_comparable" in r for r in d["rationale"]))
+        self.assertIn("blocks/tokens/seed/top_k", d["decision_text"])
+
+    def test_pack_mismatch_diagnoses_pack_identity(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.90, "resid_in_drift": 0.0, "top1": 0.90, "top2": 0.85}),
+            _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.10, "top1": 0.80, "top2": 0.70}),
+            _expert_row(2, {"cos": 0.86, "resid_in_drift": 0.20, "top1": 0.70, "top2": 0.60}),
+            _expert_row(3, {"cos": 0.84, "resid_in_drift": 0.30, "top1": 0.60, "top2": 0.50}),
+        ]
+        chain = self._chain(rows, exit_drift=0.40)
+        chain["pack_provenance"] = [
+            {"block": b, "pack_sha256": "0" * 64} for b in (0, 1, 2, 3)
+        ]
+        self.assertEqual(settings_mismatch_reason(chain), "pack_identity_not_comparable_to_72")
+        d = decide_remedy(chain)
+        self.assertEqual(d["decision"], 4)
+        self.assertIn("pack SHA-256", d["decision_text"])
+        self.assertIn("pack_identity_not_comparable_to_72", d["rationale"])
 
 
 class RemedyReportTests(unittest.TestCase):
