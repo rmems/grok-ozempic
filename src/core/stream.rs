@@ -31,7 +31,7 @@ use crate::{
         selection::{TensorClass, classify},
         weight_pack::{
             OZ1_VERSION, PackMetaValue, PackStreamWriter, PackTensorHeader, TENSOR_F16,
-            TENSOR_TERNARY,
+            TENSOR_TERNARY, TensorRowStats,
         },
     },
     error::{GrokOzempicError, Result},
@@ -330,26 +330,42 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
 
     let mut metadata: BTreeMap<String, PackMetaValue> = BTreeMap::new();
     metadata.insert("oz.name".into(), PackMetaValue::Str("grok-ozempic".into()));
-    // Provenance twin of the binary OZ1_VERSION. Both move to 2 together: the
+    // Provenance twin of the binary OZ1_VERSION. Both move to 3 together: the
     // binary field gates the layout, this one records it for anything reading
     // metadata only (GH #65).
     metadata.insert(
         "oz.quantization_version".into(),
         PackMetaValue::U32(OZ1_VERSION),
     );
-    // Record the effective baseline gif_threshold so the artifact's
-    // provenance metadata reflects what was actually applied. When the
-    // manifest supplies a defaults.gif_threshold that overrides the
-    // config value, that manifest default is recorded here. Per-tensor
-    // overrides from ternary_candidates can differ, but this captures the
-    // pipeline-level default that governs the majority of tensors.
-    let effective_gif_threshold = dissect_manifest
+    // The baseline gif_threshold: `defaults.gif_threshold` when the manifest sets
+    // one, else the CLI config. This is a *baseline*, not what was applied.
+    //
+    // The original comment here claimed it "reflects what was actually applied …
+    // the pipeline-level default that governs the majority of tensors". Both
+    // halves can be false: per-tensor `ternary_candidates[].gif_threshold`
+    // outranks defaults (see precision::resolve_threshold), and a tier-aware
+    // manifest can override *every* ternary tensor, so this key may describe no
+    // tensor in the pack at all. That is the #58 trap, and #66's fix is the
+    // per-tensor threshold now in each v3 tensor row.
+    //
+    // The key is retained for backwards compatibility, with a companion key
+    // naming where authority actually lives so a reader does not have to know
+    // this history to avoid the trap.
+    let baseline_gif_threshold = dissect_manifest
         .as_ref()
         .and_then(|m| m.defaults.gif_threshold)
         .unwrap_or(config.gif_threshold);
     metadata.insert(
         "oz.gif_threshold".into(),
-        PackMetaValue::Str(effective_gif_threshold.to_string()),
+        PackMetaValue::Str(baseline_gif_threshold.to_string()),
+    );
+    metadata.insert(
+        "oz.gif_threshold_authority".into(),
+        PackMetaValue::Str("tensor_row".into()),
+    );
+    metadata.insert(
+        "oz.gif_threshold_scope".into(),
+        PackMetaValue::Str("baseline_only_not_applied".into()),
     );
     append_grok1_arch_metadata(&mut metadata);
 
@@ -391,7 +407,7 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
                 sparsity_n += 1;
             }
         }
-        stream.write_tensor_data(&payload.bytes, payload.scale)?;
+        stream.write_tensor_data(&payload.bytes, payload.stats)?;
     }
     if current_path.is_some() {
         if sparsity_n > 0 {
@@ -416,13 +432,10 @@ struct QuantizedPayload {
     bytes: Vec<u8>,
     /// `None` for fp16 tensors, which are not ternary-quantized.
     ternary_sparsity: Option<f32>,
-    /// `α*` for ternary; `1.0` for fp16, where the payload *is* the value.
-    scale: f32,
+    /// Row values the pack header records: `α*` plus the applied thresholds
+    /// (GH #65, #66). Identity/zero for fp16.
+    stats: TensorRowStats,
 }
-
-/// Scale for an fp16 payload: the stored halves are the values themselves, so
-/// `value = scale × payload` holds with an identity scale.
-const FP16_IDENTITY_SCALE: f32 = 1.0;
 
 fn quantize_manifest_entry(
     entry: &ManifestEntry,
@@ -464,7 +477,7 @@ fn quantize_safetensors_entry(
         Ok(QuantizedPayload {
             bytes: fp16_bytes,
             ternary_sparsity: None,
-            scale: FP16_IDENTITY_SCALE,
+            stats: TensorRowStats::fp16(),
         })
     } else {
         let qt = match dtype {
@@ -485,7 +498,10 @@ fn quantize_safetensors_entry(
         Ok(QuantizedPayload {
             bytes: qt.packed,
             ternary_sparsity: Some(qt.sparsity),
-            scale: qt.scale,
+            // The applied multiplier comes back from the quantizer rather than
+            // being re-read from `entry`, so the row records what the gate
+            // actually used.
+            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
         })
     }
 }
@@ -509,7 +525,7 @@ fn quantize_npy_entry(
         Ok(QuantizedPayload {
             bytes: fp16_bytes,
             ternary_sparsity: None,
-            scale: FP16_IDENTITY_SCALE,
+            stats: TensorRowStats::fp16(),
         })
     } else {
         let qt = match dtype {
@@ -530,7 +546,10 @@ fn quantize_npy_entry(
         Ok(QuantizedPayload {
             bytes: qt.packed,
             ternary_sparsity: Some(qt.sparsity),
-            scale: qt.scale,
+            // The applied multiplier comes back from the quantizer rather than
+            // being re-read from `entry`, so the row records what the gate
+            // actually used.
+            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
         })
     }
 }

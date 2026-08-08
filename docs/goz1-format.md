@@ -24,8 +24,10 @@ tensor_table[tensor_count]:
   shape       u64 × ndim        row-major, slowest index first
   tensor_type u32               0 = f16, 1 = ternary
   data_offset u64               relative to the data section
-  scale       f32               ** version 2 only **
-  sentinel    u32               ** version 2 only ** — 0x5CA1E021
+  scale       f32               ** version 2+ **
+  gif_threshold f32             ** version 3+ ** — the applied τ multiplier
+  threshold_abs f32             ** version 3+ ** — τ × rms, the cut vs |w|
+  sentinel    u32               ** version 2+ ** — 0x5CA1E021
 
 <padding to DATA_ALIGNMENT = 32>
 payload blobs, each padded to 32
@@ -37,7 +39,7 @@ indistinguishable from a well-formed one at parse time; a fixed trailing value
 turns any desync between writer and reader — a miscounted field, or a row width
 changed on one side only — into an immediate error rather than a plausible
 misparse of the following row. Readers must reject a row whose sentinel does not
-match (`OZ1_V2_ROW_SENTINEL` in Rust; the same constant in the Python parser).
+match (`OZ1_ROW_SENTINEL` in Rust; the same constant in the Python parser).
 
 `data_offset` and `scale` are both written as placeholders and patched in
 `finalize`, because the whole tensor table is laid down before any payload is
@@ -47,9 +49,14 @@ quantized — neither value is known when its row is written.
 
 | Version | Tensor row | Status |
 |---------|------------|--------|
-| 1 | ends at `data_offset` | **legacy, read-only.** Still parsed; never written by current builds |
-| 2 | appends `scale: f32` + `sentinel: u32` | **current.** Written by `quantize-goz1` / `run_quantization` |
+| 1 | ends at `data_offset` | **legacy, read-only** |
+| 2 | appends `scale: f32` + `sentinel: u32` | **legacy, read-only** |
+| 3 | also appends `gif_threshold: f32`, `threshold_abs: f32` | **current.** Written by `quantize-goz1` / `run_quantization` |
 | other | — | **rejected** |
+
+v2 was *not* redefined in place to carry the thresholds, even though it had never
+been released: it is reachable on `main`, so two different row widths would both
+have claimed version 2. Gating the layout is the version field's only job.
 
 The v2 row is a strict *append*, so a reader parses the common prefix and reads
 the scale only when the version says it is there.
@@ -122,6 +129,44 @@ Scales are validated per payload kind, at both write and verify time:
 checked. The placeholder written during `begin` is `NaN` deliberately — a writer
 that somehow finalized without supplying a real value produces a pack that fails
 verification, rather than one that silently reconstructs every weight as zero.
+
+## Why version 3 exists (GH #66)
+
+τ resolves **per tensor**: `ternary_candidates[].gif_threshold` > `defaults.gif_threshold`
+> CLI `--gif-threshold` (`precision::resolve_threshold`). The pack-level
+`oz.gif_threshold` metadata key records only `defaults || config`, so it misstates
+every tensor that carried an override — and under a tier-aware manifest (attention
+τ=0.4, experts τ=0.9, defaults τ=0.05) it names a value **no tensor in the pack
+used**. That is the #58 trap; #66 closes it by putting the applied τ in the row.
+
+Two fields, because this crate uses "τ" for two different numbers:
+
+| Field | Meaning |
+|-------|---------|
+| `gif_threshold` | the **multiplier** a manifest set (0.4, 0.9, …) |
+| `threshold_abs` | `gif_threshold × rms` — the value actually compared against `\|w\|` |
+
+Storing both also recovers the tensor's saliency for free:
+`rms = threshold_abs / gif_threshold`. So a v3 row describes the entire gate that
+produced the payload, not just its output.
+
+An fp16 row carries `0.0` for both, and verification **rejects** anything else: no
+GIF gate runs on an fp16 payload, so a nonzero threshold there would describe a
+silencing cut that never happened — the same class of false provenance this
+version removes.
+
+`--verify` prints the distinct applied multipliers, and says outright that
+`oz.gif_threshold` does not describe them when more than one is present. v3 packs
+additionally carry:
+
+| Key | Value |
+|-----|-------|
+| `oz.gif_threshold` | the baseline (`defaults \|\| config`) — retained for compatibility, **not** the applied value |
+| `oz.gif_threshold_authority` | `tensor_row` |
+| `oz.gif_threshold_scope` | `baseline_only_not_applied` |
+
+so a reader learns the key is non-authoritative from the pack itself, without
+having to know this history.
 
 ## Consumer policy for v1 packs
 

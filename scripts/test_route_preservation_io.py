@@ -64,17 +64,33 @@ def _assert_payload_size(name: str, shape: list[int], kind: int, payload: bytes)
         )
 
 
+ROW_SENTINEL = 0x5CA1E021
+
+
 def _pack_header_for_tensor(
-    name: str, shape: list[int], kind: int, rel: int, version: int, scale: float
+    name: str,
+    shape: list[int],
+    kind: int,
+    rel: int,
+    version: int,
+    scale: float,
+    thresholds: tuple[float, float] = (0.6, 0.3),
 ) -> bytes:
-    """Single tensor header — extracted to keep build_pack complexity low."""
+    """Single tensor header — extracted to keep build_pack complexity low.
+
+    Each version *appends* to the row, so the branches stack rather than
+    replacing one another, and the sentinel always closes a scale-bearing row.
+    """
     hdr = _s(name) + _u32(len(shape))
     for d in shape:
         hdr += _u64(d)
     hdr += _u32(kind) + _u64(rel)
     if version >= 2:
         hdr += struct.pack("<f", scale)
-        hdr += _u32(0x5CA1E021)
+    if version >= 3:
+        hdr += struct.pack("<f", thresholds[0]) + struct.pack("<f", thresholds[1])
+    if version >= 2:
+        hdr += _u32(ROW_SENTINEL)
     return hdr
 
 
@@ -85,6 +101,7 @@ def build_pack(
     truncate: int = 0,
     version: int = 1,
     scales: list[float] | None = None,
+    thresholds: list[tuple[float, float]] | None = None,
 ) -> Path:
     """Write a minimal GOZ1 pack.
 
@@ -93,22 +110,28 @@ def build_pack(
     does. ``truncate`` drops that many bytes from the tail.
 
     ``version`` selects the tensor-row layout: 1 has no scale field, 2 appends a
-    per-tensor ``f32`` (GH #65). The default stays 1 so the existing fixtures keep
-    exercising the legacy path they were written for; v2 coverage is explicit.
-    ``scales`` supplies those values (default 1.0 each) and is ignored for v1.
+    per-tensor ``f32`` (GH #65), 3 appends two per-tensor threshold ``f32``s
+    after the scale. The default stays 1 so the existing fixtures keep exercising
+    the legacy path they were written for; v2/v3 coverage is explicit. ``scales``
+    supplies those values (default 1.0 each) and is ignored for v1. ``thresholds``
+    supplies per-tensor ``(float, float)`` pairs (default (0.6, 0.3) each) and is
+    ignored for v1/v2.
     """
     head = bytearray(MAGIC + _u32(version) + _u64(len(tensors)) + _u64(1))
     head += _s("oz.name") + _u32(META_STR) + _s("grok-ozempic")
 
     if scales is not None and len(scales) != len(tensors):
         raise AssertionError("scales must be one per tensor")
+    if thresholds is not None and len(thresholds) != len(tensors):
+        raise AssertionError("thresholds must be one per tensor")
 
     rel = 0
     for i, (name, shape, kind, payload) in enumerate(tensors):
         if not truncate:
             _assert_payload_size(name, shape, kind, payload)
         scale = 1.0 if scales is None else scales[i]
-        head += _pack_header_for_tensor(name, shape, kind, rel, version, scale)
+        taus = (0.6, 0.3) if thresholds is None else thresholds[i]
+        head += _pack_header_for_tensor(name, shape, kind, rel, version, scale, taus)
         rel = _align(rel + len(payload))
 
     data_start = _align(len(head))
@@ -467,13 +490,52 @@ class ContainerVersionTests(unittest.TestCase):
     def test_unknown_version_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(rio.MetricsError) as ctx:
-                self._one_ternary(Path(td), version=3)
+                self._one_ternary(Path(td), version=4)
             self.assertIn("unsupported container version", str(ctx.exception))
 
     def test_version_zero_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(rio.MetricsError):
                 self._one_ternary(Path(td), version=0)
+
+    def test_v3_thresholds_are_parsed_from_the_tensor_row(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            entry = self._one_ternary(Path(td), version=3, thresholds=[(0.9, 0.42)])
+            self.assertAlmostEqual(entry["gif_threshold"], 0.9, places=6)
+            self.assertAlmostEqual(entry["threshold_abs"], 0.42, places=6)
+            self.assertEqual(entry["container_version"], 3)
+
+    def test_v2_reports_no_thresholds_rather_than_a_default(self) -> None:
+        """The #66 signal: a v2 pack cannot say what τ was applied.
+
+        ``None`` must survive to the consumer so a report says "unknown, fell back
+        to metadata" instead of quoting a plausible number the tensor never saw.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            entry = self._one_ternary(Path(td), version=2, scales=[0.5])
+            self.assertIsNotNone(entry["scale"])
+            self.assertIsNone(entry["gif_threshold"])
+            self.assertIsNone(entry["threshold_abs"])
+
+    def test_v3_row_width_change_is_caught_by_the_sentinel(self) -> None:
+        """A v3 file mislabelled v2 must fail, not misparse.
+
+        This is what the sentinel buys: the reader would otherwise take the first
+        threshold f32 as the sentinel and read on at the wrong offset.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            pack = build_pack(
+                Path(td) / "p.goz1",
+                [("block_000.slot_05.query", [8], rio.TENSOR_TERNARY, _trits([1] * 8))],
+                version=3,
+                thresholds=[(0.6, 0.3)],
+            )
+            raw = bytearray(pack.read_bytes())
+            raw[4:8] = struct.pack("<I", 2)  # claim v2, but the rows are v3-wide
+            pack.write_bytes(bytes(raw))
+            with self.assertRaises(rio.MetricsError) as ctx:
+                rio.load_pack_index(pack)
+            self.assertIn("sentinel", str(ctx.exception))
 
     def test_a_legitimately_zero_scale_is_not_confused_with_absence(self) -> None:
         """A tensor where nothing fired stores 0.0, which must stay distinct from v1's None."""

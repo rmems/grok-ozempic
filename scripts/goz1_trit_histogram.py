@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 import sys
 from collections import Counter
@@ -43,8 +44,11 @@ TENSOR_TERNARY = 1
 MAGIC = b"GOZ1"
 # Highest container version this parser understands, and the first one carrying
 # a per-tensor scale. Mirrors OZ1_VERSION / OZ1_VERSION_SCALED in Rust.
-OZ1_VERSION_MAX = 2
+OZ1_VERSION_MAX = 3
 OZ1_VERSION_SCALED = 2
+# First version carrying the applied per-tensor thresholds (GH #66).
+OZ1_VERSION_THRESHOLDS = 3
+ROW_SENTINEL = 0x5CA1E021
 CHUNK = 64 * 1024 * 1024
 
 # Per byte value: counts of (zero, +1, -1) among its four 2-bit trits.
@@ -108,6 +112,7 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
             f"(this parser understands 1..={OZ1_VERSION_MAX})"
         )
     has_scales = version >= OZ1_VERSION_SCALED
+    has_thresholds = version >= OZ1_VERSION_THRESHOLDS
     tensor_count = _read_u64(f)
     meta_count = _read_u64(f)
 
@@ -133,22 +138,55 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
         # numeric 0.0 so a consumer can tell "this format stores no scale, use
         # the legacy oracle path" from "this tensor's scale really is zero"
         # (which happens legitimately when no trit fires).
-        scale = None
+        # Each version appends to the row, so an older layout is this same code
+        # reading fewer fields. ``None`` (not 0.0) marks a field the layout does
+        # not have, so a consumer can tell "the pack cannot say" from "the value
+        # really is zero" -- both occur legitimately.
+        scale = _read_f32(f) if has_scales else None
+        gif_threshold = _read_f32(f) if has_thresholds else None
+        threshold_abs = _read_f32(f) if has_thresholds else None
         if has_scales:
-            scale = _read_f32(f)
             sentinel = _read_u32(f)
-            if sentinel != 0x5CA1E021:
-                raise Goz1Error(f"tensor {name!r} missing v2 row sentinel (got {hex(sentinel)}); malformed pack")
+            if sentinel != ROW_SENTINEL:
+                raise Goz1Error(
+                    f"tensor {name!r} row sentinel is {hex(sentinel)}, expected "
+                    f"{hex(ROW_SENTINEL)}; the row width this parser expects for "
+                    f"version {version} does not match the file"
+                )
 
         if scale is not None:
-            import math
-
             if tensor_type == TENSOR_TERNARY:
                 if not math.isfinite(scale) or scale < 0.0:
                     raise Goz1Error(f"ternary tensor {name!r} has non-finite or negative scale {scale}")
             elif tensor_type == TENSOR_F16:
                 if not math.isfinite(scale) or scale != 1.0:
                     raise Goz1Error(f"fp16 tensor {name!r} has invalid scale {scale}; expected 1.0")
+        if gif_threshold is not None and threshold_abs is not None:
+            bad = (
+                not math.isfinite(gif_threshold)
+                or gif_threshold < 0.0
+                or not math.isfinite(threshold_abs)
+                or threshold_abs < 0.0
+            )
+            if bad:
+                raise Goz1Error(
+                    f"tensor {name!r} has non-finite or negative threshold "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs})"
+                )
+            if tensor_type == TENSOR_F16 and (
+                gif_threshold != 0.0 or threshold_abs != 0.0
+            ):
+                raise Goz1Error(
+                    f"fp16 tensor {name!r} claims GIF threshold "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs}); expected 0.0"
+                )
+            # RM-252: match Rust writer + verify_pack_file
+            if tensor_type == TENSOR_TERNARY and gif_threshold == 0.0 and threshold_abs != 0.0:
+                raise Goz1Error(
+                    f"ternary tensor {name!r} has inconsistent thresholds "
+                    f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs}); "
+                    f"non-zero absolute cut with zero multiplier"
+                )
         tensors.append(
             {
                 "name": name,
@@ -156,6 +194,8 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
                 "tensor_type": tensor_type,
                 "data_offset": data_offset,
                 "scale": scale,
+                "gif_threshold": gif_threshold,
+                "threshold_abs": threshold_abs,
             }
         )
 
@@ -297,8 +337,11 @@ def analyze(path: Path) -> dict:
                 "shape": t["shape"],
                 "num_elements": n,
                 "type": _type_name(t["tensor_type"], t["name"]),
-                # Present as None on v1 packs; see read_header.
+                # Present as None on packs whose version predates the field;
+                # see read_header.
                 "scale": t["scale"],
+                "gif_threshold": t["gif_threshold"],
+                "threshold_abs": t["threshold_abs"],
             }
             if t["tensor_type"] == TENSOR_TERNARY:
                 entry.update(
