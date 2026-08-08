@@ -286,6 +286,13 @@ class PeriodicHpScheduleTests(unittest.TestCase):
     def test_n4_only_last(self) -> None:
         self.assertEqual(periodic_hp_blocks([0, 1, 2, 3], period=4), {3})
 
+    def test_n1_is_every_block(self) -> None:
+        self.assertEqual(periodic_hp_blocks([0, 1, 2, 3], period=1), {0, 1, 2, 3})
+
+    def test_period_below_one_raises(self) -> None:
+        with self.assertRaises(ForwardError):
+            periodic_hp_blocks([0, 1, 2, 3], period=0)
+
 
 class ChannelAlphaDequantTests(unittest.TestCase):
     def test_recovers_per_channel_scale(self) -> None:
@@ -297,6 +304,24 @@ class ChannelAlphaDequantTests(unittest.TestCase):
         # On fired positions reconstruction should match w.
         fired = t != 0
         np.testing.assert_allclose(out[fired], w[fired], rtol=1e-5, atol=1e-5)
+
+    def test_dead_channel_yields_zero_alpha(self) -> None:
+        t = np.zeros((8, 3), dtype=np.float32)
+        t[:, 0] = 1.0
+        w = np.ones((8, 3), dtype=np.float32) * 2.0
+        out = channel_alpha_dequant(w, t)
+        np.testing.assert_allclose(out[:, 0], 2.0, rtol=1e-5)
+        np.testing.assert_allclose(out[:, 1:], 0.0, atol=1e-7)
+
+    def test_shape_mismatch_raises(self) -> None:
+        with self.assertRaises(ForwardError):
+            channel_alpha_dequant(np.ones((2, 2)), np.ones((2, 3)))
+
+    def test_1d_vector_path(self) -> None:
+        t = np.array([1.0, -1.0, 0.0, 1.0], dtype=np.float32)
+        w = t * 3.0
+        out = channel_alpha_dequant(w, t)
+        np.testing.assert_allclose(out[t != 0], w[t != 0], rtol=1e-5)
 
 
 class RemedyDecideTests(unittest.TestCase):

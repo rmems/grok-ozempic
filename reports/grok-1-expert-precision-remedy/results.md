@@ -11,12 +11,16 @@
 
 Primary evidence is **Arm C** `expert_periodic_hp_n2`: **ternary on {0,2}, HP (FP16 experts) on {1,3}**.
 
-| Signal | #72 ternary | **Arm C N=2** | Arm A channel-α |
+| Signal | #72 ternary | Arm C N=2 (primary) | Arm A channel-α |
 |--------|------------:|--------------:|----------------:|
 | b3 block_out cos | 0.839 | **0.882** | 0.866 |
-| b3 top-1 | 0.528 | **0.548** | 0.563 |
-| b3 top-2 set | 0.290 | **0.317** | 0.326 |
+| b3 top-1 | 0.528 | 0.548 | **0.563** |
+| b3 top-2 set | 0.290 | 0.317 | **0.326** |
 | chain_exit residual drift | 0.654 | **0.529** | 0.564 |
+
+*Bold marks the better remedy value per row (not “primary arm”). Primary decision is still Arm C N=2.*
+
+**Option-2 sensitivity (Arm A):** top-1 gain ≈0.035 and cosine gain ≈0.027 are both below their disjunct thresholds (0.05 / 0.03); only exit-drift gain ≈0.090 clears the 0.08 bar (margin ≈0.010).
 
 - Arm C cuts exit drift **+0.125** vs #72 and lifts b3 top-1 by **+0.020**.
 - Still below viability bands (option 1 needs top-1 ≥ ~0.95 through b3 and exit drift < 0.25).
@@ -37,7 +41,7 @@ Source: `reports/grok-1-expert-only-multiblock/` (PR #72). Tokens=2048, seed=202
 ## Method
 
 - Sequential chain 0→1→2→3, paired residual trajectories.
-- Attention / routers / norms never ternaryized.
+- Attention / routers / norms never ternarized.
 - Tokens: 2048, seed 20260806, top_k=2.
 - **Arm C:** `expert_periodic_hp_n2` — ternary on {0,2}, HP (FP16 experts) on {1,3}.
 - **Arm A (appendix):** same ternary trits × per-output-channel LS α from npy (harness-local; no GOZ1 layout bump).
@@ -70,12 +74,12 @@ Source: `reports/grok-1-expert-only-multiblock/` (PR #72). Tokens=2048, seed=202
 
 Full dump: `metrics-channel_alpha.json`, `results-channel_alpha.md`. Decision also **option 2**.
 
-| block | block_out cos | resid_in drift | top-1 | top-2 |
-|------:|--------------:|---------------:|------:|------:|
-| 0 | 0.972652 | 0.000000 | 1.000000 | 1.000000 |
-| 1 | 0.960093 | 0.236060 | 0.905273 | 0.704102 |
-| 2 | 0.907956 | 0.282125 | 0.710449 | 0.576172 |
-| 3 | 0.866169 | 0.428825 | 0.563477 | 0.325684 |
+| block | block_out cos | resid_in drift | top-1 | top-2 | JS bits |
+|------:|--------------:|---------------:|------:|------:|--------:|
+| 0 | 0.972652 | 0.000000 | 1.000000 | 1.000000 | 0.000000 |
+| 1 | 0.960093 | 0.236060 | 0.905273 | 0.704102 | 0.004023 |
+| 2 | 0.907956 | 0.282125 | 0.710449 | 0.576172 | 0.009103 |
+| 3 | 0.866169 | 0.428825 | 0.563477 | 0.325684 | 0.017105 |
 
 - chain_exit residual drift = **0.564145**
 - scale provenance: `research_per_channel_side` (not a GOZ1 pack field)

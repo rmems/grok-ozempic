@@ -64,6 +64,7 @@ _ARM_TO_MODE = {
     "periodic_hp": "periodic_hp",
     "channel_alpha": "channel_alpha",
 }
+_REMEDY_ARMS = frozenset({"periodic_hp", "channel_alpha"}) & frozenset(_ARM_TO_MODE)
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -143,18 +144,14 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
     pilot_cmp["residual_stream_in"] = stream_pilot
     pilot_cmp["label"] = mixed.label
     print(
-        f"    {pilot_trace.seconds:.1f}s  block_out_cos={pilot_cmp['block_output_cosine']:.6f} "
+        f"    {pilot_trace.seconds:.1f}s  cos={pilot_cmp['block_output_cosine']:.6f} "
         f"top1={pilot_cmp['router_top1_agreement']:.6f} "
-        f"resid_in_drift={stream_pilot['residual_in_drift_relative_norm']:.6f}",
+        f"drift={stream_pilot['residual_in_drift_relative_norm']:.6f}",
         flush=True,
     )
-
     fp16_cmp, next_fp16 = None, h_fp16
     if control is not None and h_fp16 is not None:
-        fp16_cmp, next_fp16 = _forward_fp16(
-            control, h_fp16, ref_trace, stream_fp16, cfg.top_k
-        )
-
+        fp16_cmp, next_fp16 = _forward_fp16(control, h_fp16, ref_trace, stream_fp16, cfg.top_k)
     row = {
         "block": b,
         "reference_seconds": ref_trace.seconds,
@@ -162,7 +159,8 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         "fp16_control": fp16_cmp,
         "pilot_label": mixed.label,
     }
-    prov = pack_provenance_row(b, pack_path, npy_dir, pack)
+    applied = getattr(mixed, "applied_scale_sources", None)
+    prov = pack_provenance_row(b, pack_path, npy_dir, pack, applied_scale_sources=applied)
     return row, (ref_trace.block_out, pilot_trace.block_out, next_fp16), prov
 
 
@@ -199,11 +197,12 @@ def _arm_meta(blocks, expert_mode: str, hp_period: int, hp_blocks: set[int], lab
         )
     elif expert_mode == "channel_alpha":
         arm_label = "research_per_channel_side"
+        ternary_set = []  # experts use channel-α side scales, not pack ternary path
     return {
         "expert_mode": expert_mode,
         "hp_period": int(hp_period) if expert_mode == "periodic_hp" else None,
         "hp_blocks": hp_list,
-        "ternary_blocks": ternary_set if expert_mode == "periodic_hp" else list(blocks),
+        "ternary_blocks": ternary_set if expert_mode in ("periodic_hp", "channel_alpha") else list(blocks),
         "hp_schedule_prose": prose,
         "arm_label": arm_label,
         "pilot_labels_per_block": labels,
@@ -282,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _is_remedy_arm(arm: str) -> bool:
-    return arm in ("periodic_hp", "channel_alpha")
+    return arm in _REMEDY_ARMS
 
 
 def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
@@ -304,6 +303,7 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
             "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
             "scale_policy": "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle",
             "arm": arm,
+            "metrics_filename": "metrics.json",
             "metrics_note": (
                 "#72 single-scale ternary baseline cited from "
                 "reports/grok-1-expert-only-multiblock/ (bit-identical seed/tokens/packs)."
@@ -371,50 +371,68 @@ def run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _agent_for_arm(arm: str | None) -> tuple[str, str]:
+    remedy = _is_remedy_arm(arm or "ternary_baseline")
+    if remedy:
+        return "GH #73 / Linear RM-362", REMEDY_AGENT_LINE
+    return "GH #68 / Linear RM-255", AGENT_LINE
+
+
+def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
+    args.out.mkdir(parents=True, exist_ok=True)
+    dest = args.out / "multiblock-unresolved.json"
+    issue, agent = _agent_for_arm(getattr(args, "arm", None))
+    dest.write_text(
+        json.dumps(
+            {
+                "provenance": {
+                    "issue": issue,
+                    "agent": agent,
+                    "arm": getattr(args, "arm", None),
+                    "implementation": implementation_commit(),
+                },
+                "decision": 4,
+                "decision_text": "Inconclusive — architectural element unresolved.",
+                "unresolved_reason": str(exc),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
+    return EXIT_UNRESOLVED
+
+
+def _write_legacy(args: argparse.Namespace, exc: Exception) -> int:
+    if hasattr(args, "out"):
+        args.out.mkdir(parents=True, exist_ok=True)
+        _, agent = _agent_for_arm(getattr(args, "arm", None))
+        (args.out / "multiblock-legacy-oracle.json").write_text(
+            json.dumps(
+                {
+                    "decision": 4,
+                    "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
+                    "error": str(exc),
+                    "agent": agent,
+                    "arm": getattr(args, "arm", None),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    return EXIT_LEGACY_ORACLE
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return run(args)
     except UnresolvedArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        args.out.mkdir(parents=True, exist_ok=True)
-        dest = args.out / "multiblock-unresolved.json"
-        dest.write_text(
-            json.dumps(
-                {
-                    "provenance": {
-                        "issue": "GH #73 / Linear RM-362",
-                        "agent": REMEDY_AGENT_LINE,
-                        "implementation": implementation_commit(),
-                    },
-                    "decision": 4,
-                    "decision_text": "Inconclusive — architectural element unresolved.",
-                    "unresolved_reason": str(exc),
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-        print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
-        return EXIT_UNRESOLVED
+        return _write_unresolved(args, exc)
     except LegacyOracleError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        if hasattr(args, "out"):
-            args.out.mkdir(parents=True, exist_ok=True)
-            opt_inconclusive = 4  # decision option index
-            (args.out / "multiblock-legacy-oracle.json").write_text(
-                json.dumps(
-                    {
-                        "decision": opt_inconclusive,
-                        "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
-                        "error": str(exc),
-                        "agent": REMEDY_AGENT_LINE,
-                    },
-                    indent=2,
-                )
-                + "\n"
-            )
-        return EXIT_LEGACY_ORACLE
+        return _write_legacy(args, exc)
     except ForwardError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_OP

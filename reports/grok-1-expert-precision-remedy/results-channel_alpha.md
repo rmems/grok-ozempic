@@ -1,8 +1,6 @@
 # Expert higher-precision remedies for multi-block residual fidelity
 
 **Agent:** SpacexAI · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362
-**Model:** Grok-4.5 (high)
-**Issue:** GH [#73](https://github.com/rmems/grok-ozempic/issues/73) / [RM-362](https://linear.app/rpd-34/issue/RM-362)
 **Predecessor:** PR [#72](https://github.com/rmems/grok-ozempic/pull/72) / #68 option 3 · **Baseline (#64):** Claude Fable 5
 **Implementation commit:** `352b2c791f8c2021a1ca5f4bcddb94ad3af458fb`
 
@@ -48,7 +46,7 @@ Re-run only if packs or harness invalidate comparison; this report cites.
 
 - Arm: `channel_alpha` / label `research_per_channel_side`.
 - Sequential chain with paired residual trajectories.
-- Attention / routers / norms never ternaryized.
+- Attention / routers / norms never ternarized.
 - Tokens: 2048, seed 20260806, top_k=2.
 
 ## Per-block metrics (remedy arm vs FP reference)
@@ -71,7 +69,7 @@ Re-run only if packs or harness invalidate comparison; this report cites.
 
 ## Provenance
 
-See `metrics.json` for pack SHA-256, scales, τ, and `scale_sources`.
+See `metrics-channel_alpha.json` for pack SHA-256, scales, τ, and `scale_sources`.
 Chain exit under `chain.end_of_chain.expert_only_chain_exit`.
 Arm A uses `research_per_channel_side` (not pack_v2) when present.
 

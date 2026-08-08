@@ -177,15 +177,15 @@ def channel_alpha_dequant(weights: np.ndarray, trits: np.ndarray) -> np.ndarray:
         )
     w = weights.astype(np.float64, copy=False)
     t = trits.astype(np.float64, copy=False)
-    axes = tuple(range(w.ndim - 1)) if w.ndim >= 1 else ()
-    if not axes:
-        den = float(t * t)
-        alpha = (float(w * t) / den) if den > 0 else 0.0
-        return np.float32(alpha * trits.astype(np.float32))
+    if w.ndim <= 1:
+        den = float((t * t).sum())
+        alpha = (float((w * t).sum()) / den) if den > 0 else 0.0
+        return trits.astype(np.float32) * np.float32(alpha)
+    axes = tuple(range(w.ndim - 1))
     num = (w * t).sum(axis=axes)
     den = (t * t).sum(axis=axes)
     alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-    return (trits.astype(np.float32) * alpha.astype(np.float32))
+    return trits.astype(np.float32) * alpha.astype(np.float32)
 
 
 class ChannelAlphaExperts:
@@ -293,6 +293,11 @@ def load_block_sources(
         hp_period=hp_period,
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
+    # Honest applied-scale map for experts (channel-α overrides pack_v2 tags).
+    applied = dict(pack.scale_sources)
+    if hasattr(primary, "scale_sources"):
+        applied.update(dict(primary.scale_sources))
+    mixed.applied_scale_sources = applied  # type: ignore[attr-defined]
     return reference, pack, mixed, control
 
 
@@ -301,7 +306,14 @@ def _host_safe_name(path: Path) -> str:
     return Path(path).name
 
 
-def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWeights) -> dict:
+def pack_provenance_row(
+    block: int,
+    pack_path: Path,
+    npy_dir: Path,
+    pack: PackWeights,
+    *,
+    applied_scale_sources: dict[str, str] | None = None,
+) -> dict:
     """Machine-readable pack provenance for one block."""
     names = pack.tensor_names()
     versions = {pack.container_version(n) for n in names}
@@ -313,7 +325,8 @@ def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWe
         "pack_bytes": pack_path.stat().st_size,
         "npy_dir": _host_safe_name(npy_dir),
         "container_versions": sorted(versions),
-        "scale_sources": dict(pack.scale_sources),
+        "scale_sources": dict(applied_scale_sources or pack.scale_sources),
+        "pack_scale_sources": dict(pack.scale_sources),
         "ternary_scales": {
             n: {"alpha": s.alpha, "sparsity": s.sparsity, "fired": s.fired, "total": s.total}
             for n, s in sorted(pack.scales().items())
@@ -820,6 +833,15 @@ def _remedy_from_metrics(
     rationale: list[str],
     compounding: str,
 ) -> dict:
+    # All policy options (1–3) require #72-comparable settings; otherwise option 4.
+    if not settings_match_72(chain):
+        return _decision_payload(
+            4,
+            "Inconclusive — chain settings differ from cited #72 baseline "
+            "(blocks/tokens/seed/top_k); cannot claim option 1–3 vs that baseline.",
+            rationale + ["settings_not_comparable_to_72"],
+            compounding,
+        )
     end_cos = m["cos"][-1]
     min_top1, min_topk = min(m["top1"]), min(m["topk"])
     if _remedy_option_1(end_cos, min_top1, min_topk, exit_drift, m["cos"]):
@@ -828,15 +850,6 @@ def _remedy_from_metrics(
             "Remedy restores multi-block viability "
             "(mostly-ternary experts with the documented remedy is policy-ready).",
             rationale,
-            compounding,
-        )
-    # Relative #72 options require bit-identical settings; else do not claim help/fail.
-    if not settings_match_72(chain):
-        return _decision_payload(
-            4,
-            "Inconclusive — chain settings differ from cited #72 baseline "
-            "(blocks/tokens/seed/top_k); cannot score option 2/3 against fixed metrics.",
-            rationale + ["settings_not_comparable_to_72"],
             compounding,
         )
     if _improved_vs_72(m, exit_drift):
@@ -881,9 +894,6 @@ def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
         "# Expert higher-precision remedies for multi-block residual fidelity",
         "",
         f"**Agent:** {prov.get('agent', REMEDY_AGENT_LINE)}",
-        f"**Model:** {prov.get('model', 'Grok-4.5 (high)')}",
-        "**Issue:** GH [#73](https://github.com/rmems/grok-ozempic/issues/73) / "
-        "[RM-362](https://linear.app/rpd-34/issue/RM-362)",
         "**Predecessor:** PR [#72](https://github.com/rmems/grok-ozempic/pull/72) / "
         "#68 option 3 · **Baseline (#64):** Claude Fable 5",
         f"**Implementation commit:** `{_fmt_commit(prov.get('implementation'))}`",
@@ -936,7 +946,7 @@ def write_remedy_results_md(path: Path, payload: dict) -> None:
         lines.append(f"- {chain['hp_schedule_prose']}")
     lines += [
         "- Sequential chain with paired residual trajectories.",
-        "- Attention / routers / norms never ternaryized.",
+        "- Attention / routers / norms never ternarized.",
         f"- Tokens: {chain['tokens']}, seed {chain['token_seed']}, top_k={top_k}.",
         "",
         "## Per-block metrics (remedy arm vs FP reference)",
@@ -944,13 +954,14 @@ def write_remedy_results_md(path: Path, payload: dict) -> None:
     ]
     lines += _metrics_table(rows, top_k)
     lines += _fp16_table(rows, top_k)
+    metrics_name = (payload.get("provenance") or {}).get("metrics_filename") or "metrics.json"
     lines += [
         "",
         "## Provenance",
         "",
-        "See `metrics.json` for pack SHA-256, scales, τ, and `scale_sources`.",
+        f"See `{metrics_name}` for pack SHA-256, scales, τ, and applied `scale_sources`.",
         "Chain exit under `chain.end_of_chain.expert_only_chain_exit`.",
-        "Arm A uses `research_per_channel_side` (not pack_v2) when present.",
+        "Arm A applied scales use `research_per_channel_side` (pack row may still be `pack_v2`).",
         "",
     ]
     path.write_text("\n".join(lines) + "\n")
