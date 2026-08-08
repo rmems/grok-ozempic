@@ -43,7 +43,6 @@ from grok1_multiblock_lib import (  # noqa: E402
     residual_stream_metrics,
     resolve_path,
     remedy_metrics_note,
-    settings_match_72,
     write_remedy_results_md,
     write_results_md,
 )
@@ -355,7 +354,7 @@ def run(args: argparse.Namespace) -> int:
     decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
     prov = _provenance(paths, args.skip_fp16_control, args.arm)
     if _is_remedy_arm(args.arm):
-        prov["metrics_note"] = remedy_metrics_note(settings_match_72(chain))
+        prov["metrics_note"] = remedy_metrics_note(chain)
     payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")

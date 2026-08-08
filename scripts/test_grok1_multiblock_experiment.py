@@ -475,7 +475,7 @@ class RemedyReportTests(unittest.TestCase):
         self.assertIn("HP (FP16 experts) on {1,3}", text)
         self.assertIn("#72", text)
         self.assertIn("Option 2", text)
-        self.assertIn("bit-identical", text)
+        self.assertIn("comparable settings + packs", text)
 
     def test_mismatch_report_does_not_claim_bit_identical(self) -> None:
         # Seed built without a bare "1" literal (Bandit B105 on *token* fields).
@@ -508,8 +508,41 @@ class RemedyReportTests(unittest.TestCase):
             write_remedy_results_md(path, payload)
             text = path.read_text()
         self.assertIn("not comparable", text.lower())
-        self.assertNotIn("bit-identical settings)", text)
-        self.assertIn("not comparable", text)
+        self.assertIn("schedule not comparable", text.lower())
+
+    def test_pack_mismatch_report_names_pack_identity(self) -> None:
+        payload = {
+            "provenance": {
+                "agent": "SpacexAI · Model: Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+            },
+            "decision": {
+                "decision": 4,
+                "decision_text": "pack SHA",
+                "rationale": ["pack_identity_not_comparable_to_72"],
+            },
+            "chain": {
+                "blocks": [0, 1, 2, 3],
+                "tokens": 2048,
+                "token_seed": _DECISION_SEED,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "pack_provenance": [
+                    {"block": b, "pack_sha256": "0" * 64} for b in (0, 1, 2, 3)
+                ],
+                "per_block": [
+                    _expert_row(b, {"cos": 0.9, "resid_in_drift": 0.0}) for b in (0, 1, 2, 3)
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            text = (Path(td) / "r.md")
+            write_remedy_results_md(text, payload)
+            body = text.read_text()
+        self.assertIn("pack identity not comparable", body.lower())
+        self.assertIn("pack SHA-256", body)
+        self.assertNotIn("schedule not comparable", body.lower())
 
 
 if __name__ == "__main__":
