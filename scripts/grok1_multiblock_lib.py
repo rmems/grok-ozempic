@@ -47,6 +47,19 @@ BASELINE_72 = {
     "router_top2": [1.0, 0.680664, 0.548828, 0.289551],
     "chain_exit_residual_drift": 0.6538863846584987,
     "arm_label": "goz1_expert_ternary_only",
+    # Pack SHAs from the #72 decision run (multiblock-68 packs).
+    "pack_sha256": {
+        0: "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+        1: "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+        2: "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+        3: "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
+    },
+    "pack_names": {
+        0: "block_000-attention_plus_expert.goz1",
+        1: "block_001-attention_plus_expert.goz1",
+        2: "block_002-attention_plus_expert.goz1",
+        3: "block_003-attention_plus_expert.goz1",
+    },
 }
 
 BASELINE_64 = {
@@ -262,6 +275,25 @@ def _expert_primary(
     raise ForwardError(f"unknown expert mode {mode!r}")
 
 
+def _applied_expert_scale_sources(
+    pack: PackWeights,
+    primary: object,
+    reference: NpyWeights,
+    *,
+    expert_mode: str,
+    block: int,
+    hp_blocks: set[int],
+) -> dict[str, str]:
+    """Map expert tensors to the scale source actually used for the pilot."""
+    applied = dict(pack.scale_sources)
+    if hasattr(primary, "scale_sources"):
+        applied.update(dict(primary.scale_sources))
+    elif expert_mode == "periodic_hp" and block in hp_blocks:
+        for name in _expert_names(reference):
+            applied[name] = "fp16_control"
+    return applied
+
+
 def load_block_sources(
     block: int,
     npy_dir: Path,
@@ -277,6 +309,7 @@ def load_block_sources(
     names = npy_names(npy_dir)
     if not names:
         raise ForwardError(f"{npy_dir}: no .npy tensors")
+    hp = hp_blocks or set()
     reference = NpyWeights(npy_dir, names, expect_block=expect)
     pack = PackWeights(pack_path, npy_dir, partial=True, expect_block=expect)
     _require_pack_experts(pack, pack_path)
@@ -284,20 +317,12 @@ def load_block_sources(
     require_pack_only_scales(pack, _expert_names(reference))
     control = F16Weights(npy_dir, names, expect_block=expect) if require_fp16 else None
     primary, label = _expert_primary(
-        expert_mode,
-        pack,
-        reference,
-        control,
-        block=block,
-        hp_blocks=hp_blocks or set(),
-        hp_period=hp_period,
+        expert_mode, pack, reference, control, block=block, hp_blocks=hp, hp_period=hp_period
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
-    # Honest applied-scale map for experts (channel-α overrides pack_v2 tags).
-    applied = dict(pack.scale_sources)
-    if hasattr(primary, "scale_sources"):
-        applied.update(dict(primary.scale_sources))
-    mixed.applied_scale_sources = applied  # type: ignore[attr-defined]
+    mixed.applied_scale_sources = _applied_expert_scale_sources(  # type: ignore[attr-defined]
+        pack, primary, reference, expert_mode=expert_mode, block=block, hp_blocks=hp
+    )
     return reference, pack, mixed, control
 
 
@@ -731,8 +756,22 @@ def _chain_blocks(chain: dict) -> list[int]:
     return [r["block"] for r in (chain.get("per_block") or [])]
 
 
+def _pack_identity_match_72(chain: dict) -> bool:
+    """When pack_provenance is present, require #72 pack SHA-256 identity."""
+    packs = chain.get("pack_provenance")
+    if not packs:
+        # Unit tests / dry metrics without packs: schedule settings only.
+        return True
+    expected = BASELINE_72["pack_sha256"]
+    observed = {int(r["block"]): r.get("pack_sha256") for r in packs}
+    return observed == expected
+
+
 def settings_match_72(chain: dict) -> bool:
-    """True when chain settings are bit-comparable to the cited #72 baseline."""
+    """True when chain settings are bit-comparable to the cited #72 baseline.
+
+    Compares blocks/tokens/seed/top_k, and pack SHA-256 when provenance is present.
+    """
     b72 = BASELINE_72
     observed = (
         _chain_blocks(chain),
@@ -746,7 +785,9 @@ def settings_match_72(chain: dict) -> bool:
         int(b72["token_seed"]),
         int(b72["top_k"]),
     )
-    return observed == expected
+    if observed != expected:
+        return False
+    return _pack_identity_match_72(chain)
 
 
 def _improved_vs_72(m: dict[str, list[float]], exit_drift: float | None) -> bool:
@@ -936,11 +977,12 @@ def remedy_metrics_note(comparable: bool) -> str:
     if comparable:
         return (
             "#72 single-scale ternary baseline cited from "
-            "reports/grok-1-expert-only-multiblock/ (bit-identical seed/tokens/packs)."
+            "reports/grok-1-expert-only-multiblock/ "
+            "(matching seed/tokens/blocks/top_k; pack SHA when recorded)."
         )
     return (
-        "Chain settings differ from cited #72 baseline "
-        "(blocks/tokens/seed/top_k); not bit-identical."
+        "Chain settings or pack identity differ from cited #72 baseline "
+        "(blocks/tokens/seed/top_k/pack_sha256); not comparable."
     )
 
 
