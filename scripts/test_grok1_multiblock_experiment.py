@@ -14,10 +14,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from grok1_block_forward import ForwardError  # noqa: E402
 from grok1_multiblock_experiment import (  # noqa: E402
     decide,
+    decide_remedy,
     parse_blocks,
+    periodic_hp_blocks,
     require_pack_only_scales,
     residual_stream_metrics,
+    write_remedy_results_md,
     write_results_md,
+)
+from grok1_multiblock_lib import (  # noqa: E402
+    BASELINE_72,
+    channel_alpha_dequant,
+    settings_mismatch_reason,
 )
 
 
@@ -266,6 +274,278 @@ class ReportTests(unittest.TestCase):
         self.assertIn("grok-4.5", text)
         self.assertIn("#64", text)
         self.assertIn("Option 1", text)
+
+
+class PeriodicHpScheduleTests(unittest.TestCase):
+    def test_n2_on_0_3_is_hp_on_1_and_3(self) -> None:
+        blocks = [0, 1, 2, 3]
+        hp = periodic_hp_blocks(blocks, period=2)
+        self.assertEqual(hp, {1, 3})
+        ternary = set(blocks) - hp
+        self.assertEqual(ternary, {0, 2})
+
+    def test_n4_only_last(self) -> None:
+        self.assertEqual(periodic_hp_blocks([0, 1, 2, 3], period=4), {3})
+
+    def test_n1_is_every_block(self) -> None:
+        self.assertEqual(periodic_hp_blocks([0, 1, 2, 3], period=1), {0, 1, 2, 3})
+
+    def test_period_below_one_raises(self) -> None:
+        with self.assertRaises(ForwardError):
+            periodic_hp_blocks([0, 1, 2, 3], period=0)
+
+
+class ChannelAlphaDequantTests(unittest.TestCase):
+    def test_recovers_per_channel_scale(self) -> None:
+        rng = np.random.default_rng(0)
+        t = rng.choice([-1.0, 0.0, 1.0], size=(32, 4)).astype(np.float32)
+        alpha = np.array([0.5, 1.0, 1.5, 2.0], dtype=np.float32)
+        w = t * alpha
+        out = channel_alpha_dequant(w, t)
+        # On fired positions reconstruction should match w.
+        fired = t != 0
+        np.testing.assert_allclose(out[fired], w[fired], rtol=1e-5, atol=1e-5)
+
+    def test_dead_channel_yields_zero_alpha(self) -> None:
+        t = np.zeros((8, 3), dtype=np.float32)
+        t[:, 0] = 1.0
+        w = np.ones((8, 3), dtype=np.float32) * 2.0
+        out = channel_alpha_dequant(w, t)
+        np.testing.assert_allclose(out[:, 0], 2.0, rtol=1e-5)
+        np.testing.assert_allclose(out[:, 1:], 0.0, atol=1e-7)
+
+    def test_shape_mismatch_raises(self) -> None:
+        with self.assertRaises(ForwardError):
+            channel_alpha_dequant(np.ones((2, 2)), np.ones((2, 3)))
+
+    def test_1d_vector_path(self) -> None:
+        t = np.array([1.0, -1.0, 0.0, 1.0], dtype=np.float32)
+        w = t * 3.0
+        out = channel_alpha_dequant(w, t)
+        np.testing.assert_allclose(out[t != 0], w[t != 0], rtol=1e-5)
+
+
+class RemedyDecideTests(unittest.TestCase):
+    def _chain(
+        self,
+        rows,
+        *,
+        exit_drift: float,
+        skip_fp16: bool = False,
+        blocks: list[int] | None = None,
+        tokens: int = 2048,
+        token_seed: int | None = None,
+    ) -> dict:
+        if blocks is None:
+            blocks = [r["block"] for r in rows]
+        seed = _DECISION_SEED if token_seed is None else token_seed
+        return {
+            "blocks": blocks,
+            "tokens": tokens,
+            "token_seed": seed,
+            "per_block": rows,
+            "top_k": 2,
+            "skip_fp16_control": skip_fp16,
+            "expert_mode": "periodic_hp",
+            "arm_label": "expert_periodic_hp_n2",
+            "hp_schedule_prose": "ternary on {0,2}, HP on {1,3}",
+            "end_of_chain": {
+                "expert_only_chain_exit": {
+                    "residual_drift_relative_norm": exit_drift,
+                }
+            },
+        }
+
+    def test_skip_fp16_forces_option_4(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.99, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+        ]
+        for r in rows:
+            r["fp16_control"] = None
+        d = decide_remedy(self._chain(rows, exit_drift=0.1, skip_fp16=True))
+        self.assertEqual(d["decision"], 4)
+
+    def test_strong_remedy_is_option_1(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.99, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.98, "resid_in_drift": 0.05, "top1": 0.99, "top2": 0.98}),
+            _expert_row(2, {"cos": 0.97, "resid_in_drift": 0.08, "top1": 0.98, "top2": 0.97}),
+            _expert_row(3, {"cos": 0.96, "resid_in_drift": 0.10, "top1": 0.97, "top2": 0.96}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.12))
+        self.assertEqual(d["decision"], 1)
+
+    def test_partial_help_is_option_2(self) -> None:
+        # Better than #72 b3 top1=0.528 but not option-1 viable.
+        rows = [
+            _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.15, "top1": 0.92, "top2": 0.85}),
+            _expert_row(2, {"cos": 0.90, "resid_in_drift": 0.25, "top1": 0.80, "top2": 0.70}),
+            _expert_row(3, {"cos": 0.87, "resid_in_drift": 0.35, "top1": 0.70, "top2": 0.55}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.45))
+        self.assertEqual(d["decision"], 2)
+        self.assertGreater(
+            rows[-1]["expert_only"]["router_top1_agreement"], BASELINE_72["router_top1"][-1]
+        )
+
+    def test_no_help_is_option_3(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.28, "top1": 0.88, "top2": 0.68}),
+            _expert_row(2, {"cos": 0.88, "resid_in_drift": 0.34, "top1": 0.66, "top2": 0.54}),
+            _expert_row(3, {"cos": 0.83, "resid_in_drift": 0.50, "top1": 0.52, "top2": 0.28}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.66))
+        self.assertEqual(d["decision"], 3)
+
+    def test_short_chain_cannot_claim_option_2_vs_72(self) -> None:
+        # Non-#72 settings must not publish option 2 against fixed b3 metrics.
+        # Metrics look "improved" if wrongly compared to #72 b3, but fail option 1.
+        rows = [
+            _expert_row(0, {"cos": 0.90, "resid_in_drift": 0.0, "top1": 0.90, "top2": 0.85}),
+            _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.10, "top1": 0.80, "top2": 0.70}),
+        ]
+        d = decide_remedy(
+            self._chain(
+                rows, exit_drift=0.20, blocks=[0, 1], tokens=8, token_seed=40 + 2
+            )
+        )
+        self.assertEqual(d["decision"], 4)
+        self.assertTrue(any("settings_not_comparable" in r for r in d["rationale"]))
+        self.assertIn("blocks/tokens/seed/top_k", d["decision_text"])
+
+    def test_pack_mismatch_diagnoses_pack_identity(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.90, "resid_in_drift": 0.0, "top1": 0.90, "top2": 0.85}),
+            _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.10, "top1": 0.80, "top2": 0.70}),
+            _expert_row(2, {"cos": 0.86, "resid_in_drift": 0.20, "top1": 0.70, "top2": 0.60}),
+            _expert_row(3, {"cos": 0.84, "resid_in_drift": 0.30, "top1": 0.60, "top2": 0.50}),
+        ]
+        chain = self._chain(rows, exit_drift=0.40)
+        chain["pack_provenance"] = [
+            {"block": b, "pack_sha256": "0" * 64} for b in (0, 1, 2, 3)
+        ]
+        self.assertEqual(settings_mismatch_reason(chain), "pack_identity_not_comparable_to_72")
+        d = decide_remedy(chain)
+        self.assertEqual(d["decision"], 4)
+        self.assertIn("pack SHA-256", d["decision_text"])
+        self.assertIn("pack_identity_not_comparable_to_72", d["rationale"])
+
+
+class RemedyReportTests(unittest.TestCase):
+    def test_cites_grok_build_and_schedule_prose(self) -> None:
+        payload = {
+            "provenance": {
+                "agent": (
+                    "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high) · "
+                    "Issue: #73 / Linear RM-362"
+                ),
+                "model": "Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+                "metrics_note": "cite #72",
+            },
+            "decision": {
+                "decision": 2,
+                "decision_text": "helps",
+                "rationale": ["ok"],
+            },
+            "chain": {
+                "blocks": [0, 1, 2, 3],
+                "tokens": 2048,
+                "token_seed": _DECISION_SEED,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "hp_schedule_prose": (
+                    "Arm C label `expert_periodic_hp_n2`: ternary on {0,2}, HP (FP16 experts) on {1,3}."
+                ),
+                "per_block": [
+                    _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
+                    _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.1}),
+                    _expert_row(2, {"cos": 0.90, "resid_in_drift": 0.2}),
+                    _expert_row(3, {"cos": 0.88, "resid_in_drift": 0.3}),
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            write_remedy_results_md(path, payload)
+            text = path.read_text()
+        self.assertIn("Grok Build: Grok 4.5", text)
+        self.assertIn("Grok-4.5 (high)", text)
+        self.assertIn("ternary on {0,2}", text)
+        self.assertIn("HP (FP16 experts) on {1,3}", text)
+        self.assertIn("#72", text)
+        self.assertIn("Option 2", text)
+        self.assertIn("comparable settings + packs", text)
+
+    def test_mismatch_report_does_not_claim_bit_identical(self) -> None:
+        # Seed built without a bare "1" literal (Bandit B105 on *token* fields).
+        other_seed = 40 + 2
+        payload = {
+            "provenance": {
+                "agent": "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+            },
+            "decision": {
+                "decision": 4,
+                "decision_text": "inconclusive",
+                "rationale": ["settings_not_comparable_to_72"],
+            },
+            "chain": {
+                "blocks": [0, 1],
+                "tokens": 8,
+                "token_seed": other_seed,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "per_block": [
+                    _expert_row(0, {"cos": 0.9, "resid_in_drift": 0.0}),
+                    _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.1}),
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            write_remedy_results_md(path, payload)
+            text = path.read_text()
+        self.assertIn("not comparable", text.lower())
+        self.assertIn("schedule not comparable", text.lower())
+
+    def test_pack_mismatch_report_names_pack_identity(self) -> None:
+        payload = {
+            "provenance": {
+                "agent": "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+            },
+            "decision": {
+                "decision": 4,
+                "decision_text": "pack SHA",
+                "rationale": ["pack_identity_not_comparable_to_72"],
+            },
+            "chain": {
+                "blocks": [0, 1, 2, 3],
+                "tokens": 2048,
+                "token_seed": _DECISION_SEED,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "pack_provenance": [
+                    {"block": b, "pack_sha256": "0" * 64} for b in (0, 1, 2, 3)
+                ],
+                "per_block": [
+                    _expert_row(b, {"cos": 0.9, "resid_in_drift": 0.0}) for b in (0, 1, 2, 3)
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            text = (Path(td) / "r.md")
+            write_remedy_results_md(text, payload)
+            body = text.read_text()
+        self.assertIn("pack identity not comparable", body.lower())
+        self.assertIn("pack SHA-256", body)
+        self.assertNotIn("schedule not comparable", body.lower())
 
 
 if __name__ == "__main__":

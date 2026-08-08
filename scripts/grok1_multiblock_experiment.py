@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Expert-only ternary multi-block residual fidelity (GH #68 / RM-255)."""
+"""Multi-block residual fidelity: #68 ternary baseline + #73 remedy arms."""
 from __future__ import annotations
 
 import argparse
@@ -30,26 +30,42 @@ from grok1_block_weights import implementation_commit  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     AGENT_LINE,
     BASELINE_64,
+    BASELINE_72,
+    REMEDY_AGENT_LINE,
     LegacyOracleError,
     decide,
+    decide_remedy,
     load_block_sources,
     pack_provenance_row,
     parse_blocks,
+    periodic_hp_blocks,
     require_pack_only_scales,
     residual_stream_metrics,
     resolve_path,
+    remedy_metrics_note,
+    write_remedy_results_md,
     write_results_md,
 )
 from route_preservation_io import MetricsError  # noqa: E402
 
 __all__ = [
     "decide",
+    "decide_remedy",
     "parse_blocks",
+    "periodic_hp_blocks",
     "require_pack_only_scales",
     "residual_stream_metrics",
     "write_results_md",
+    "write_remedy_results_md",
     "main",
 ]
+
+_ARM_TO_MODE = {
+    "ternary_baseline": "ternary",
+    "periodic_hp": "periodic_hp",
+    "channel_alpha": "channel_alpha",
+}
+_REMEDY_ARMS = frozenset({"periodic_hp", "channel_alpha"}) & frozenset(_ARM_TO_MODE)
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -93,64 +109,66 @@ def _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k):
     return fp16_cmp, fp16_trace.block_out
 
 
-def _run_block(b, paths, h_ref, h_pilot, h_fp16, top_k, skip_fp16):
-    """Forward one block; return metrics row and next residual streams."""
+@dataclass(frozen=True)
+class _BlockRunCfg:
+    top_k: int
+    skip_fp16: bool
+    expert_mode: str
+    hp_blocks: frozenset[int]
+    hp_period: int
+
+
+def _run_block(b, paths, streams, cfg: _BlockRunCfg):
+    """Forward one block; streams is (h_ref, h_pilot, h_fp16)."""
+    h_ref, h_pilot, h_fp16 = streams
     npy_dir, pack_path = _block_paths(paths, b)
     print(f"== block {b:03d}  residual_in shape={h_ref.shape}", flush=True)
     reference, pack, mixed, control = load_block_sources(
-        b, npy_dir, pack_path, require_fp16=not skip_fp16
+        b,
+        npy_dir,
+        pack_path,
+        require_fp16=not cfg.skip_fp16,
+        expert_mode=cfg.expert_mode,
+        hp_blocks=set(cfg.hp_blocks),
+        hp_period=cfg.hp_period,
     )
     stream_pilot = residual_stream_metrics(h_ref, h_pilot)
     stream_fp16 = residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None
 
     print("  reference forward ...", flush=True)
-    ref_trace = forward_block(h_ref, reference, top_k=top_k)
+    ref_trace = forward_block(h_ref, reference, top_k=cfg.top_k)
     print(f"    {ref_trace.seconds:.1f}s experts={ref_trace.experts_touched}", flush=True)
 
-    print("  expert-only ternary ...", flush=True)
-    pilot_trace = forward_block(h_pilot, mixed, top_k=top_k)
+    print(f"  pilot ({mixed.label}) ...", flush=True)
+    pilot_trace = forward_block(h_pilot, mixed, top_k=cfg.top_k)
     pilot_cmp = compare(ref_trace, pilot_trace)
     pilot_cmp["residual_stream_in"] = stream_pilot
+    pilot_cmp["label"] = mixed.label
     print(
-        f"    {pilot_trace.seconds:.1f}s  block_out_cos={pilot_cmp['block_output_cosine']:.6f} "
+        f"    {pilot_trace.seconds:.1f}s  cos={pilot_cmp['block_output_cosine']:.6f} "
         f"top1={pilot_cmp['router_top1_agreement']:.6f} "
-        f"resid_in_drift={stream_pilot['residual_in_drift_relative_norm']:.6f}",
+        f"drift={stream_pilot['residual_in_drift_relative_norm']:.6f}",
         flush=True,
     )
-
     fp16_cmp, next_fp16 = None, h_fp16
     if control is not None and h_fp16 is not None:
-        fp16_cmp, next_fp16 = _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k)
-
+        fp16_cmp, next_fp16 = _forward_fp16(control, h_fp16, ref_trace, stream_fp16, cfg.top_k)
     row = {
         "block": b,
         "reference_seconds": ref_trace.seconds,
         "expert_only": pilot_cmp,
         "fp16_control": fp16_cmp,
+        "pilot_label": mixed.label,
     }
-    return row, ref_trace.block_out, pilot_trace.block_out, next_fp16, pack_provenance_row(b, pack_path, npy_dir, pack)
+    applied = getattr(mixed, "applied_scale_sources", None)
+    prov = pack_provenance_row(b, pack_path, npy_dir, pack, applied_scale_sources=applied)
+    return row, (ref_trace.block_out, pilot_trace.block_out, next_fp16), prov
 
 
-def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
-    if blocks[0] != 0:
-        raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
-    ids = token_ids(tokens, seed, vocab=131072)
-    _validate_embedding_shard(paths.embedding_shard)
-    h0 = embedding_rows(paths.embedding_shard, ids)
-    h_ref, h_pilot = h0, h0.copy()
-    h_fp16 = h0.copy() if not skip_fp16 else None
-    per_block, pack_provenance = [], []
-    for b in blocks:
-        row, h_ref, h_pilot, h_fp16, prov = _run_block(
-            b, paths, h_ref, h_pilot, h_fp16, top_k, skip_fp16
-        )
-        per_block.append(row)
-        pack_provenance.append(prov)
-    # Post-chain residual stream (= residual into a virtual next block). This is
-    # *not* residual-in to the last block; last-block residual-in is per_block[-1].
+def _chain_exit_block(h_ref, h_pilot, h_fp16) -> dict:
     expert_exit = residual_stream_metrics(h_ref, h_pilot)
     fp16_exit = None if h_fp16 is None else residual_stream_metrics(h_ref, h_fp16)
-    end = {
+    return {
         "expert_only_chain_exit": {
             "residual_cosine": expert_exit["residual_in_cosine"],
             "residual_drift_relative_norm": expert_exit["residual_in_drift_relative_norm"],
@@ -164,6 +182,60 @@ def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
             "note": "post-final-block residual stream under FP16 control",
         },
     }
+
+
+def _arm_meta(blocks, expert_mode: str, hp_period: int, hp_blocks: set[int], labels: list) -> dict:
+    ternary_set = sorted(set(blocks) - hp_blocks)
+    hp_list = sorted(hp_blocks)
+    prose = None
+    arm_label = expert_mode
+    if expert_mode == "periodic_hp":
+        arm_label = f"expert_periodic_hp_n{hp_period}"
+        prose = (
+            f"Arm C label `{arm_label}`: "
+            f"ternary on {{{','.join(map(str, ternary_set))}}}, "
+            f"HP (FP16 experts) on {{{','.join(map(str, hp_list))}}}."
+        )
+    elif expert_mode == "channel_alpha":
+        arm_label = "research_per_channel_side"
+        ternary_set = []  # experts use channel-α side scales, not pack ternary path
+    return {
+        "expert_mode": expert_mode,
+        "hp_period": int(hp_period) if expert_mode == "periodic_hp" else None,
+        "hp_blocks": hp_list,
+        "ternary_blocks": ternary_set if expert_mode in ("periodic_hp", "channel_alpha") else list(blocks),
+        "hp_schedule_prose": prose,
+        "arm_label": arm_label,
+        "pilot_labels_per_block": labels,
+    }
+
+
+def run_chain(
+    blocks, paths, *, tokens, seed, top_k, skip_fp16, expert_mode="ternary", hp_period=2
+) -> dict:
+    if blocks[0] != 0:
+        raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
+    hp_blocks = periodic_hp_blocks(blocks, hp_period) if expert_mode == "periodic_hp" else set()
+    cfg = _BlockRunCfg(
+        top_k=top_k,
+        skip_fp16=skip_fp16,
+        expert_mode=expert_mode,
+        hp_blocks=frozenset(hp_blocks),
+        hp_period=int(hp_period),
+    )
+    ids = token_ids(tokens, seed, vocab=131072)
+    _validate_embedding_shard(paths.embedding_shard)
+    h0 = embedding_rows(paths.embedding_shard, ids)
+    streams = (h0, h0.copy(), h0.copy() if not skip_fp16 else None)
+    per_block, pack_provenance = [], []
+    for b in blocks:
+        row, streams, prov = _run_block(b, paths, streams, cfg)
+        per_block.append(row)
+        pack_provenance.append(prov)
+    h_ref, h_pilot, h_fp16 = streams
+    meta = _arm_meta(
+        blocks, expert_mode, hp_period, hp_blocks, [r.get("pilot_label") for r in per_block]
+    )
     return {
         "blocks": blocks,
         "tokens": int(ids.size),
@@ -172,9 +244,10 @@ def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
         "token_id_last": int(ids[-1]),
         "top_k": int(top_k),
         "per_block": per_block,
-        "end_of_chain": end,
+        "end_of_chain": _chain_exit_block(h_ref, h_pilot, h_fp16),
         "pack_provenance": pack_provenance,
         "skip_fp16_control": bool(skip_fp16),
+        **meta,
     }
 
 
@@ -193,10 +266,48 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--skip-fp16-control", action="store_true")
     p.add_argument("--write-report-md", action="store_true")
+    p.add_argument(
+        "--arm",
+        choices=sorted(_ARM_TO_MODE),
+        default="ternary_baseline",
+        help="ternary_baseline=#68; periodic_hp=#73 arm C; channel_alpha=#73 arm A",
+    )
+    p.add_argument(
+        "--hp-period",
+        type=int,
+        default=2,
+        help="Arm C: period N (N=2 → ternary {0,2}, HP {1,3} on chain 0..3)",
+    )
     return p
 
 
-def _provenance(paths: ChainPaths, skip_fp16: bool) -> dict:
+def _is_remedy_arm(arm: str) -> bool:
+    return arm in _REMEDY_ARMS
+
+
+def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
+    if _is_remedy_arm(arm):
+        return {
+            "issue": "GH #73 / Linear RM-362",
+            "agent": REMEDY_AGENT_LINE,
+            "model": "Grok-4.5 (high)",
+            "design": "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)",
+            "baseline_64": BASELINE_64,
+            "baseline_72": BASELINE_72,
+            "implementation": implementation_commit(),
+            "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+            "numpy": np.__version__,
+            "python": platform.python_version(),
+            "embedding_shard": Path(paths.embedding_shard).name,
+            "skip_fp16_control": bool(skip_fp16),
+            "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+            "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
+            "scale_policy": "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle",
+            "arm": arm,
+            "metrics_filename": "metrics.json",
+            # metrics_note filled after chain when comparability is known
+            "metrics_note": None,
+        }
     return {
         "issue": "GH #68 / Linear RM-255",
         "agent": AGENT_LINE,
@@ -218,6 +329,8 @@ def _provenance(paths: ChainPaths, skip_fp16: bool) -> dict:
 def run(args: argparse.Namespace) -> int:
     if args.tokens < 1:
         raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
+    if args.hp_period < 1:
+        raise ForwardError(f"--hp-period must be >= 1, got {args.hp_period}")
     blocks = parse_blocks(args.blocks)
     paths = ChainPaths(
         npy_root=args.npy_root.expanduser(),
@@ -227,19 +340,85 @@ def run(args: argparse.Namespace) -> int:
         embedding_shard=args.embedding_shard.expanduser(),
     )
     args.out = args.out.expanduser()
+    expert_mode = _ARM_TO_MODE[args.arm]
     chain = run_chain(
-        blocks, paths, tokens=args.tokens, seed=args.seed, top_k=args.top_k, skip_fp16=args.skip_fp16_control
+        blocks,
+        paths,
+        tokens=args.tokens,
+        seed=args.seed,
+        top_k=args.top_k,
+        skip_fp16=args.skip_fp16_control,
+        expert_mode=expert_mode,
+        hp_period=args.hp_period,
     )
-    decision = decide(chain)
-    payload = {"provenance": _provenance(paths, args.skip_fp16_control), "chain": chain, "decision": decision}
+    decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
+    prov = _provenance(paths, args.skip_fp16_control, args.arm)
+    if _is_remedy_arm(args.arm):
+        prov["metrics_note"] = remedy_metrics_note(chain)
+    payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
     print(f"wrote {args.out / 'metrics.json'}")
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        write_results_md(args.out / "results.md", payload)
+        if _is_remedy_arm(args.arm):
+            write_remedy_results_md(args.out / "results.md", payload)
+        else:
+            write_results_md(args.out / "results.md", payload)
         print(f"wrote {args.out / 'results.md'}")
     return EXIT_OK
+
+
+def _agent_for_arm(arm: str | None) -> tuple[str, str]:
+    remedy = _is_remedy_arm(arm or "ternary_baseline")
+    if remedy:
+        return "GH #73 / Linear RM-362", REMEDY_AGENT_LINE
+    return "GH #68 / Linear RM-255", AGENT_LINE
+
+
+def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
+    args.out.mkdir(parents=True, exist_ok=True)
+    dest = args.out / "multiblock-unresolved.json"
+    issue, agent = _agent_for_arm(getattr(args, "arm", None))
+    dest.write_text(
+        json.dumps(
+            {
+                "provenance": {
+                    "issue": issue,
+                    "agent": agent,
+                    "arm": getattr(args, "arm", None),
+                    "implementation": implementation_commit(),
+                },
+                "decision": 4,
+                "decision_text": "Inconclusive — architectural element unresolved.",
+                "unresolved_reason": str(exc),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
+    return EXIT_UNRESOLVED
+
+
+def _write_legacy(args: argparse.Namespace, exc: Exception) -> int:
+    if hasattr(args, "out"):
+        args.out.mkdir(parents=True, exist_ok=True)
+        _, agent = _agent_for_arm(getattr(args, "arm", None))
+        (args.out / "multiblock-legacy-oracle.json").write_text(
+            json.dumps(
+                {
+                    "decision": 4,
+                    "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
+                    "error": str(exc),
+                    "agent": agent,
+                    "arm": getattr(args, "arm", None),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    return EXIT_LEGACY_ORACLE
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -248,44 +427,10 @@ def main(argv: list[str] | None = None) -> int:
         return run(args)
     except UnresolvedArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        args.out.mkdir(parents=True, exist_ok=True)
-        dest = args.out / "multiblock-unresolved.json"
-        dest.write_text(
-            json.dumps(
-                {
-                    "provenance": {
-                        "issue": "GH #68 / Linear RM-255",
-                        "agent": AGENT_LINE,
-                        "implementation": implementation_commit(),
-                    },
-                    "decision": 4,
-                    "decision_text": "Inconclusive — architectural element unresolved.",
-                    "unresolved_reason": str(exc),
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-        print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
-        return EXIT_UNRESOLVED
+        return _write_unresolved(args, exc)
     except LegacyOracleError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        if hasattr(args, "out"):
-            args.out.mkdir(parents=True, exist_ok=True)
-            opt_inconclusive = 4  # #68 decision option index
-            (args.out / "multiblock-legacy-oracle.json").write_text(
-                json.dumps(
-                    {
-                        "decision": opt_inconclusive,
-                        "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
-                        "error": str(exc),
-                        "agent": AGENT_LINE,
-                    },
-                    indent=2,
-                )
-                + "\n"
-            )
-        return EXIT_LEGACY_ORACLE
+        return _write_legacy(args, exc)
     except ForwardError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_OP
