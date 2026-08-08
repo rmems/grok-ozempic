@@ -6,7 +6,6 @@
     "design": "Grok Build design lock: arms C (periodic HP) and A (channel \u03b1 side-table)",
     "baseline_64": {
       "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
-      "agent_measurement": "Claude Code: Fable 5",
       "tokens": 2048,
       "expert_only": {
         "block_output_cosine": 0.963572,

@@ -1,7 +1,7 @@
 # Expert higher-precision remedies for multi-block residual fidelity
 
 **Agent:** Grok Build: Grok 4.5 (xAI) · **Model:** Grok-4.5 (high) · **Issue:** #73 / Linear RM-362
-**Design:** Grok Build design lock · **Predecessor:** PR #72 / #68 option 3 · **Baseline (#64):** Claude Fable 5
+**Design:** Grok Build design lock · **Predecessor:** PR #72 / #68 option 3 · **Baseline (#64):** PR #64 / #61
 **Issue:** GH [#73](https://github.com/rmems/grok-ozempic/issues/73) / [RM-362](https://linear.app/rpd-34/issue/RM-362)
 **Implementation commit:** `352b2c791f8c2021a1ca5f4bcddb94ad3af458fb`
 

@@ -64,7 +64,7 @@ BASELINE_72 = {
 
 BASELINE_64 = {
     "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
-    "agent_measurement": "Claude Code: Fable 5",
+    # Cite the published report only — do not attribute this PR's agent line to Fable.
     "tokens": 2048,
     "expert_only": {
         "block_output_cosine": 0.963572,
@@ -675,7 +675,7 @@ def _report_header(payload: dict, dec: int, decision_text: str) -> list[str]:
         "# Expert-only ternary multi-block residual fidelity",
         "",
         f"**Agent:** {AGENT_LINE}",
-        "**Design:** Grok Build super-research · **Baseline (#64):** Claude Fable 5",
+        "**Design:** Grok Build super-research · **Baseline (#64):** PR #64 / #61",
         "**Issue:** GH [#68](https://github.com/rmems/grok-ozempic/issues/68) / RM-255",
         "**Predecessor:** PR [#64](https://github.com/rmems/grok-ozempic/pull/64) / #61",
         f"**Implementation commit:** `{_fmt_commit(payload['provenance'].get('implementation'))}`",
@@ -953,7 +953,7 @@ def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
         "",
         f"**Agent:** {prov.get('agent', REMEDY_AGENT_LINE)}",
         "**Predecessor:** PR [#72](https://github.com/rmems/grok-ozempic/pull/72) / "
-        "#68 option 3 · **Baseline (#64):** Claude Fable 5",
+        "#68 option 3 · **Baseline (#64):** PR #64 / #61",
         f"**Implementation commit:** `{_fmt_commit(prov.get('implementation'))}`",
         "",
         "## Decision",
