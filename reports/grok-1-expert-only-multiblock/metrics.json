@@ -24,8 +24,8 @@
       }
     },
     "implementation": {
-      "commit": "abb232ea0f4b3436072e679c690976704dfd7bb9",
-      "dirty": false
+      "commit": "6aa576259a00a59fc2f9278c5de65c3fd30639f2",
+      "dirty": true
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "numpy": "2.5.1",
@@ -867,13 +867,15 @@
       }
     ],
     "end_of_chain": {
-      "expert_only_end_residual_in": {
-        "residual_in_cosine": 0.8391436864849655,
-        "residual_in_drift_relative_norm": 0.6538863846584987
+      "expert_only_chain_exit": {
+        "residual_cosine": 0.8391436864849655,
+        "residual_drift_relative_norm": 0.6538863846584987,
+        "note": "post-final-block residual stream (chain exit), not last-block residual-in"
       },
-      "fp16_end_residual_in": {
-        "residual_in_cosine": 0.9999195401900538,
-        "residual_in_drift_relative_norm": 0.012685837908964355
+      "fp16_chain_exit": {
+        "residual_cosine": 0.9999195401900538,
+        "residual_drift_relative_norm": 0.012685837908964355,
+        "note": "post-final-block residual stream under FP16 control"
       }
     },
     "pack_provenance": [
@@ -1161,7 +1163,8 @@
           "oz.gif_threshold_scope": "baseline_only_not_applied"
         }
       }
-    ]
+    ],
+    "skip_fp16_control": false
   },
   "decision": {
     "decision": 3,
@@ -1169,12 +1172,14 @@
     "rationale": [
       "block_output_cosine sequence=['0.963572', '0.945765', '0.884956', '0.839144']",
       "residual_in_drift sequence=['0.000000', '0.277351', '0.341935', '0.498308']",
+      "block_output_drift sequence=['0.277351', '0.341935', '0.498308', '0.653886']",
       "router_top1 sequence=['1.000000', '0.887695', '0.666504', '0.528320']",
-      "router_top2 sequence=['1.000000', '0.680664', '0.548828', '0.289551']",
+      "router_top2_set_agreement sequence=['1.000000', '0.680664', '0.548828', '0.289551']",
       "expert_load_js_bits sequence=['0.000000', '0.005559', '0.009347', '0.024023']",
       "compounding_heuristic=roughly_linear",
       "end_block_output_cosine=0.839144",
-      "end_residual_in_drift=0.4983081493750823",
+      "last_block_residual_in_drift=0.4983081493750823",
+      "chain_exit_residual_drift=0.6538863846584987",
       "#64 block0 expert-only block_output_cosine baseline=0.963572"
     ],
     "compounding": "roughly_linear"

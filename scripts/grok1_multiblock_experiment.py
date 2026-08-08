@@ -21,6 +21,7 @@ from grok1_block0_experiment import (  # noqa: E402
     token_ids,
 )
 from grok1_block_forward import (  # noqa: E402
+    MODEL_SIZE,
     NUM_SELECTED_EXPERTS,
     ForwardError,
     UnresolvedArchitectureError,
@@ -63,14 +64,13 @@ class ChainPaths:
     embedding_shard: Path
 
 
-def _validate_embedding_shard(shard: Path, ids: np.ndarray) -> None:
+def _validate_embedding_shard(shard: Path) -> None:
+    """Shape-only checks; vocab bounds are enforced by ``embedding_rows``."""
     table = np.load(shard, mmap_mode="r")
     if table.ndim != 2:
         raise ForwardError(f"{shard}: expected 2-D embedding table, got shape {table.shape}")
-    if table.shape[1] != 6144:
-        raise ForwardError(f"{shard}: expected model width 6144, got {table.shape[1]}")
-    if ids.max(initial=0) >= table.shape[0]:
-        raise ForwardError(f"{shard}: token id {int(ids.max())} exceeds vocab {table.shape[0]}")
+    if table.shape[1] != MODEL_SIZE:
+        raise ForwardError(f"{shard}: expected model width {MODEL_SIZE}, got {table.shape[1]}")
 
 
 def _block_paths(paths: ChainPaths, b: int) -> tuple[Path, Path]:
@@ -134,7 +134,7 @@ def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
     ids = token_ids(tokens, seed, vocab=131072)
-    _validate_embedding_shard(paths.embedding_shard, ids)
+    _validate_embedding_shard(paths.embedding_shard)
     h0 = embedding_rows(paths.embedding_shard, ids)
     h_ref, h_pilot = h0, h0.copy()
     h_fp16 = h0.copy() if not skip_fp16 else None
@@ -145,9 +145,23 @@ def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
         )
         per_block.append(row)
         pack_provenance.append(prov)
+    # Post-chain residual stream (= residual into a virtual next block). This is
+    # *not* residual-in to the last block; last-block residual-in is per_block[-1].
+    expert_exit = residual_stream_metrics(h_ref, h_pilot)
+    fp16_exit = None if h_fp16 is None else residual_stream_metrics(h_ref, h_fp16)
     end = {
-        "expert_only_end_residual_in": residual_stream_metrics(h_ref, h_pilot),
-        "fp16_end_residual_in": residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None,
+        "expert_only_chain_exit": {
+            "residual_cosine": expert_exit["residual_in_cosine"],
+            "residual_drift_relative_norm": expert_exit["residual_in_drift_relative_norm"],
+            "note": "post-final-block residual stream (chain exit), not last-block residual-in",
+        },
+        "fp16_chain_exit": None
+        if fp16_exit is None
+        else {
+            "residual_cosine": fp16_exit["residual_in_cosine"],
+            "residual_drift_relative_norm": fp16_exit["residual_in_drift_relative_norm"],
+            "note": "post-final-block residual stream under FP16 control",
+        },
     }
     return {
         "blocks": blocks,
