@@ -565,7 +565,8 @@ def write_results_md(path: Path, payload: dict) -> None:
         "## Provenance",
         "",
         "See `metrics.json` for pack SHA-256, scales, τ, and `scale_sources` (`pack_v2`).",
-        "Chain exit residual metrics live under `end_of_chain.expert_only_chain_exit` "
+        "Chain exit residual metrics live under "
+        "`chain.end_of_chain.expert_only_chain_exit` "
         "(post-final-block residual stream, not residual-in to the last block).",
         "",
     ]

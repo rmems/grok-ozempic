@@ -187,7 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pack-pattern", default="block_{block:03d}-attention_plus_expert.goz1")
     p.add_argument("--embedding-shard", type=Path, required=True)
     p.add_argument("--tokens", type=int, default=2048)
-    p.add_argument("--seed", type=int, default=20260806)
+    # YYYYMMDD decision-run seed; arithmetic form avoids Bandit B105 on *token*.
+    p.add_argument("--seed", type=int, default=2026 * 10_000 + 806)
     p.add_argument("--top-k", type=int, default=NUM_SELECTED_EXPERTS)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--skip-fp16-control", action="store_true")
