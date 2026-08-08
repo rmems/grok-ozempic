@@ -27,9 +27,9 @@ AGENT_LINE = (
     "beads goz-vvgm5z"
 )
 
-# #73 / RM-362 — SpacexAI product line; model string holds Grok-4.5 (high).
+# #73 / RM-362 — Grok Build product line; model string holds Grok-4.5 (high).
 REMEDY_AGENT_LINE = (
-    "SpacexAI · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362"
+    "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362"
 )
 
 # Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
@@ -1036,7 +1036,7 @@ def _remedy_method_lines(chain: dict, top_k: int) -> list[str]:
 
 
 def write_remedy_results_md(path: Path, payload: dict) -> None:
-    """#73 human report: SpacexAI citation, #72 cite, arm C schedule prose."""
+    """#73 human report: Grok Build citation, #72 cite, arm C schedule prose."""
     d = payload["decision"]
     chain = payload["chain"]
     rows = chain["per_block"]

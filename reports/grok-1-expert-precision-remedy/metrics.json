@@ -1,9 +1,9 @@
 {
   "provenance": {
     "issue": "GH #73 / Linear RM-362",
-    "agent": "SpacexAI \u00b7 Model: Grok-4.5 (high) \u00b7 Issue: #73 / Linear RM-362",
+    "agent": "Grok Build: Grok 4.5 (xAI) \u00b7 Model: Grok-4.5 (high) \u00b7 Issue: #73 / Linear RM-362",
     "model": "Grok-4.5 (high)",
-    "design": "SpacexAI design lock: arms C (periodic HP) and A (channel \u03b1 side-table)",
+    "design": "Grok Build design lock: arms C (periodic HP) and A (channel \u03b1 side-table)",
     "baseline_64": {
       "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
       "agent_measurement": "Claude Code: Fable 5",

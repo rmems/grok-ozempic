@@ -291,7 +291,7 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
             "issue": "GH #73 / Linear RM-362",
             "agent": REMEDY_AGENT_LINE,
             "model": "Grok-4.5 (high)",
-            "design": "SpacexAI design lock: arms C (periodic HP) and A (channel α side-table)",
+            "design": "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)",
             "baseline_64": BASELINE_64,
             "baseline_72": BASELINE_72,
             "implementation": implementation_commit(),

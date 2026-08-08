@@ -434,10 +434,13 @@ class RemedyDecideTests(unittest.TestCase):
 
 
 class RemedyReportTests(unittest.TestCase):
-    def test_cites_spacexai_and_schedule_prose(self) -> None:
+    def test_cites_grok_build_and_schedule_prose(self) -> None:
         payload = {
             "provenance": {
-                "agent": "SpacexAI · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362",
+                "agent": (
+                    "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high) · "
+                    "Issue: #73 / Linear RM-362"
+                ),
                 "model": "Grok-4.5 (high)",
                 "implementation": {"commit": "deadbeef", "dirty": False},
                 "metrics_note": "cite #72",
@@ -469,7 +472,7 @@ class RemedyReportTests(unittest.TestCase):
             path = Path(td) / "results.md"
             write_remedy_results_md(path, payload)
             text = path.read_text()
-        self.assertIn("SpacexAI", text)
+        self.assertIn("Grok Build: Grok 4.5", text)
         self.assertIn("Grok-4.5 (high)", text)
         self.assertIn("ternary on {0,2}", text)
         self.assertIn("HP (FP16 experts) on {1,3}", text)
@@ -482,7 +485,7 @@ class RemedyReportTests(unittest.TestCase):
         other_seed = 40 + 2
         payload = {
             "provenance": {
-                "agent": "SpacexAI · Model: Grok-4.5 (high)",
+                "agent": "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high)",
                 "implementation": {"commit": "deadbeef", "dirty": False},
             },
             "decision": {
@@ -513,7 +516,7 @@ class RemedyReportTests(unittest.TestCase):
     def test_pack_mismatch_report_names_pack_identity(self) -> None:
         payload = {
             "provenance": {
-                "agent": "SpacexAI · Model: Grok-4.5 (high)",
+                "agent": "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high)",
                 "implementation": {"commit": "deadbeef", "dirty": False},
             },
             "decision": {
