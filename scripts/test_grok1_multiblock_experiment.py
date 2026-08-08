@@ -427,6 +427,7 @@ class RemedyReportTests(unittest.TestCase):
                 "rationale": ["ok"],
             },
             "chain": {
+                "blocks": [0, 1, 2, 3],
                 "tokens": 2048,
                 "token_seed": _DECISION_SEED,
                 "top_k": 2,
@@ -438,6 +439,8 @@ class RemedyReportTests(unittest.TestCase):
                 "per_block": [
                     _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
                     _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.1}),
+                    _expert_row(2, {"cos": 0.90, "resid_in_drift": 0.2}),
+                    _expert_row(3, {"cos": 0.88, "resid_in_drift": 0.3}),
                 ],
             },
         }
@@ -451,6 +454,39 @@ class RemedyReportTests(unittest.TestCase):
         self.assertIn("HP (FP16 experts) on {1,3}", text)
         self.assertIn("#72", text)
         self.assertIn("Option 2", text)
+        self.assertIn("bit-identical", text)
+
+    def test_mismatch_report_does_not_claim_bit_identical(self) -> None:
+        payload = {
+            "provenance": {
+                "agent": "SpacexAI · Model: Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+            },
+            "decision": {
+                "decision": 4,
+                "decision_text": "inconclusive",
+                "rationale": ["settings_not_comparable_to_72"],
+            },
+            "chain": {
+                "blocks": [0, 1],
+                "tokens": 8,
+                "token_seed": 1,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "per_block": [
+                    _expert_row(0, {"cos": 0.9, "resid_in_drift": 0.0}),
+                    _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.1}),
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            write_remedy_results_md(path, payload)
+            text = path.read_text()
+        self.assertIn("not comparable", text.lower())
+        self.assertNotIn("bit-identical settings)", text)
+        self.assertIn("not bit-identical", text)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,8 @@ from grok1_multiblock_lib import (  # noqa: E402
     require_pack_only_scales,
     residual_stream_metrics,
     resolve_path,
+    remedy_metrics_note,
+    settings_match_72,
     write_remedy_results_md,
     write_results_md,
 )
@@ -304,10 +306,8 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
             "scale_policy": "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle",
             "arm": arm,
             "metrics_filename": "metrics.json",
-            "metrics_note": (
-                "#72 single-scale ternary baseline cited from "
-                "reports/grok-1-expert-only-multiblock/ (bit-identical seed/tokens/packs)."
-            ),
+            # metrics_note filled after chain when comparability is known
+            "metrics_note": None,
         }
     return {
         "issue": "GH #68 / Linear RM-255",
@@ -353,11 +353,10 @@ def run(args: argparse.Namespace) -> int:
         hp_period=args.hp_period,
     )
     decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
-    payload = {
-        "provenance": _provenance(paths, args.skip_fp16_control, args.arm),
-        "chain": chain,
-        "decision": decision,
-    }
+    prov = _provenance(paths, args.skip_fp16_control, args.arm)
+    if _is_remedy_arm(args.arm):
+        prov["metrics_note"] = remedy_metrics_note(settings_match_72(chain))
+    payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
     print(f"wrote {args.out / 'metrics.json'}")

@@ -907,10 +907,19 @@ def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
     ]
 
 
-def _remedy_baseline_section() -> list[str]:
+def _remedy_baseline_section(*, comparable: bool) -> list[str]:
     b = BASELINE_72
+    if comparable:
+        title = "## #72 baseline (cited — bit-identical settings)"
+        footer = "Re-run only if packs or harness invalidate comparison; this report cites."
+    else:
+        title = "## #72 baseline (reference only — settings not comparable)"
+        footer = (
+            "This run's blocks/tokens/seed/top_k differ from the cited #72 decision run; "
+            "option 1–3 vs that baseline are disabled (decision option 4)."
+        )
     return [
-        "## #72 baseline (cited — bit-identical settings)",
+        title,
         "",
         f"Source: `{b['source']}`.",
         f"Tokens={b['tokens']}, seed={b['token_seed']}, blocks={b['blocks']}.",
@@ -918,26 +927,25 @@ def _remedy_baseline_section() -> list[str]:
         f"b3 top-1 **{b['router_top1'][-1]:.6f}**; "
         f"b3 block_out cos **{b['block_output_cosine'][-1]:.6f}**.",
         "Decision option **3** (single-scale ternary not multi-block viable).",
-        "Re-run only if packs or harness invalidate comparison; this report cites.",
+        footer,
         "",
     ]
 
 
-def write_remedy_results_md(path: Path, payload: dict) -> None:
-    """#73 human report: SpacexAI citation, #72 cite, arm C schedule prose."""
-    d = payload["decision"]
-    chain = payload["chain"]
-    rows = chain["per_block"]
-    top_k = int(chain.get("top_k") or 2)
-    prov = payload.get("provenance") or {}
-    lines = _remedy_header_lines(prov, int(d["decision"]), d["decision_text"])
-    lines += [f"- `{r}`" for r in d.get("rationale", [])]
-    note = prov.get("metrics_note")
-    if note:
-        lines += ["", f"**Metrics note:** {note}", ""]
-    lines += ["", "### Why not the other options", "", _remedy_why_not(int(d["decision"])), ""]
-    lines += _remedy_baseline_section()
-    lines += [
+def remedy_metrics_note(comparable: bool) -> str:
+    if comparable:
+        return (
+            "#72 single-scale ternary baseline cited from "
+            "reports/grok-1-expert-only-multiblock/ (bit-identical seed/tokens/packs)."
+        )
+    return (
+        "Chain settings differ from cited #72 baseline "
+        "(blocks/tokens/seed/top_k); not bit-identical."
+    )
+
+
+def _remedy_method_lines(chain: dict, top_k: int) -> list[str]:
+    lines = [
         "## Method",
         "",
         f"- Arm: `{chain.get('expert_mode', 'unknown')}` / label `{chain.get('arm_label', '')}`.",
@@ -952,9 +960,27 @@ def write_remedy_results_md(path: Path, payload: dict) -> None:
         "## Per-block metrics (remedy arm vs FP reference)",
         "",
     ]
+    return lines
+
+
+def write_remedy_results_md(path: Path, payload: dict) -> None:
+    """#73 human report: SpacexAI citation, #72 cite, arm C schedule prose."""
+    d = payload["decision"]
+    chain = payload["chain"]
+    rows = chain["per_block"]
+    top_k = int(chain.get("top_k") or 2)
+    prov = payload.get("provenance") or {}
+    comparable = settings_match_72(chain)
+    note = prov.get("metrics_note") or remedy_metrics_note(comparable)
+    lines = _remedy_header_lines(prov, int(d["decision"]), d["decision_text"])
+    lines += [f"- `{r}`" for r in d.get("rationale", [])]
+    lines += ["", f"**Metrics note:** {note}", ""]
+    lines += ["", "### Why not the other options", "", _remedy_why_not(int(d["decision"])), ""]
+    lines += _remedy_baseline_section(comparable=comparable)
+    lines += _remedy_method_lines(chain, top_k)
     lines += _metrics_table(rows, top_k)
     lines += _fp16_table(rows, top_k)
-    metrics_name = (payload.get("provenance") or {}).get("metrics_filename") or "metrics.json"
+    metrics_name = prov.get("metrics_filename") or "metrics.json"
     lines += [
         "",
         "## Provenance",
