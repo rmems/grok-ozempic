@@ -300,8 +300,23 @@ class ChannelAlphaDequantTests(unittest.TestCase):
 
 
 class RemedyDecideTests(unittest.TestCase):
-    def _chain(self, rows, *, exit_drift: float, skip_fp16: bool = False) -> dict:
+    def _chain(
+        self,
+        rows,
+        *,
+        exit_drift: float,
+        skip_fp16: bool = False,
+        blocks: list[int] | None = None,
+        tokens: int = 2048,
+        token_seed: int | None = None,
+    ) -> dict:
+        if blocks is None:
+            blocks = [r["block"] for r in rows]
+        seed = _DECISION_SEED if token_seed is None else token_seed
         return {
+            "blocks": blocks,
+            "tokens": tokens,
+            "token_seed": seed,
             "per_block": rows,
             "top_k": 2,
             "skip_fp16_control": skip_fp16,
@@ -357,6 +372,19 @@ class RemedyDecideTests(unittest.TestCase):
         ]
         d = decide_remedy(self._chain(rows, exit_drift=0.66))
         self.assertEqual(d["decision"], 3)
+
+    def test_short_chain_cannot_claim_option_2_vs_72(self) -> None:
+        # Non-#72 settings must not publish option 2 against fixed b3 metrics.
+        # Metrics look "improved" if wrongly compared to #72 b3, but fail option 1.
+        rows = [
+            _expert_row(0, {"cos": 0.90, "resid_in_drift": 0.0, "top1": 0.90, "top2": 0.85}),
+            _expert_row(1, {"cos": 0.88, "resid_in_drift": 0.10, "top1": 0.80, "top2": 0.70}),
+        ]
+        d = decide_remedy(
+            self._chain(rows, exit_drift=0.20, blocks=[0, 1], tokens=8, token_seed=1)
+        )
+        self.assertEqual(d["decision"], 4)
+        self.assertTrue(any("settings_not_comparable" in r for r in d["rationale"]))
 
 
 class RemedyReportTests(unittest.TestCase):

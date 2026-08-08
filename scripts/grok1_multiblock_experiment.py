@@ -113,6 +113,7 @@ class _BlockRunCfg:
     skip_fp16: bool
     expert_mode: str
     hp_blocks: frozenset[int]
+    hp_period: int
 
 
 def _run_block(b, paths, streams, cfg: _BlockRunCfg):
@@ -127,6 +128,7 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         require_fp16=not cfg.skip_fp16,
         expert_mode=cfg.expert_mode,
         hp_blocks=set(cfg.hp_blocks),
+        hp_period=cfg.hp_period,
     )
     stream_pilot = residual_stream_metrics(h_ref, h_pilot)
     stream_fp16 = residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None
@@ -219,6 +221,7 @@ def run_chain(
         skip_fp16=skip_fp16,
         expert_mode=expert_mode,
         hp_blocks=frozenset(hp_blocks),
+        hp_period=int(hp_period),
     )
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)

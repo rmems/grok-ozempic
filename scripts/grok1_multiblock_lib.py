@@ -39,6 +39,7 @@ BASELINE_72 = {
     "tokens": 2048,
     "token_seed": 2026 * 10_000 + 806,
     "blocks": [0, 1, 2, 3],
+    "top_k": 2,
     "decision": 3,
     "block_output_cosine": [0.963572, 0.945765, 0.884956, 0.839144],
     "residual_in_drift": [0.0, 0.277351, 0.341935, 0.498308],
@@ -242,6 +243,7 @@ def _expert_primary(
     *,
     block: int,
     hp_blocks: set[int],
+    hp_period: int = 2,
 ) -> tuple[object, str]:
     """Return (primary WeightSource for experts, arm label)."""
     if mode == "ternary":
@@ -253,7 +255,7 @@ def _expert_primary(
                     f"block {block}: periodic HP needs FP16 expert source "
                     "(do not --skip-fp16-control on decision runs)"
                 )
-            return control, "expert_periodic_hp_n2"
+            return control, f"expert_periodic_hp_n{int(hp_period)}"
         return pack, "goz1_expert_ternary_only"
     if mode == "channel_alpha":
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
@@ -268,6 +270,7 @@ def load_block_sources(
     require_fp16: bool,
     expert_mode: str = "ternary",
     hp_blocks: set[int] | None = None,
+    hp_period: int = 2,
 ) -> tuple[NpyWeights, PackWeights, MixedWeights, F16Weights | None]:
     """Load reference, pack, expert mix (arm-aware), optional fp16 control."""
     expect = f"block_{block:03d}"
@@ -281,7 +284,13 @@ def load_block_sources(
     require_pack_only_scales(pack, _expert_names(reference))
     control = F16Weights(npy_dir, names, expect_block=expect) if require_fp16 else None
     primary, label = _expert_primary(
-        expert_mode, pack, reference, control, block=block, hp_blocks=hp_blocks or set()
+        expert_mode,
+        pack,
+        reference,
+        control,
+        block=block,
+        hp_blocks=hp_blocks or set(),
+        hp_period=hp_period,
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
     return reference, pack, mixed, control
@@ -702,10 +711,41 @@ def write_results_md(path: Path, payload: dict) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _chain_blocks(chain: dict) -> list[int]:
+    blocks = chain.get("blocks")
+    if blocks is not None:
+        return list(blocks)
+    return [r["block"] for r in (chain.get("per_block") or [])]
+
+
+def settings_match_72(chain: dict) -> bool:
+    """True when chain settings are bit-comparable to the cited #72 baseline."""
+    b72 = BASELINE_72
+    observed = (
+        _chain_blocks(chain),
+        int(chain.get("tokens") or 0),
+        int(chain.get("token_seed") or -1),
+        int(chain.get("top_k") or 2),
+    )
+    expected = (
+        list(b72["blocks"]),
+        int(b72["tokens"]),
+        int(b72["token_seed"]),
+        int(b72["top_k"]),
+    )
+    return observed == expected
+
+
 def _improved_vs_72(m: dict[str, list[float]], exit_drift: float | None) -> bool:
-    """True if remedy clearly beats cited #72 single-scale ternary baseline."""
+    """True if remedy clearly beats cited #72 single-scale ternary baseline.
+
+    Caller must ensure :func:`settings_match_72` first — otherwise final-block
+    indices and sample size are not comparable to the fixed #72 vectors.
+    """
     b72 = BASELINE_72
     if not m["top1"] or not m["cos"]:
+        return False
+    if len(m["top1"]) != len(b72["router_top1"]) or len(m["cos"]) != len(b72["block_output_cosine"]):
         return False
     top1_gain = m["top1"][-1] - b72["router_top1"][-1]
     cos_gain = m["cos"][-1] - b72["block_output_cosine"][-1]
@@ -774,7 +814,11 @@ def _remedy_rationale(chain: dict, m: dict, compounding: str, exit_drift: float 
 
 
 def _remedy_from_metrics(
-    m: dict[str, list[float]], exit_drift: float | None, rationale: list[str], compounding: str
+    chain: dict,
+    m: dict[str, list[float]],
+    exit_drift: float | None,
+    rationale: list[str],
+    compounding: str,
 ) -> dict:
     end_cos = m["cos"][-1]
     min_top1, min_topk = min(m["top1"]), min(m["topk"])
@@ -784,6 +828,15 @@ def _remedy_from_metrics(
             "Remedy restores multi-block viability "
             "(mostly-ternary experts with the documented remedy is policy-ready).",
             rationale,
+            compounding,
+        )
+    # Relative #72 options require bit-identical settings; else do not claim help/fail.
+    if not settings_match_72(chain):
+        return _decision_payload(
+            4,
+            "Inconclusive — chain settings differ from cited #72 baseline "
+            "(blocks/tokens/seed/top_k); cannot score option 2/3 against fixed metrics.",
+            rationale + ["settings_not_comparable_to_72"],
             compounding,
         )
     if _improved_vs_72(m, exit_drift):
@@ -820,7 +873,7 @@ def decide_remedy(chain: dict) -> dict:
     fp16_hit = _fp16_gate(chain, rows, rationale, compounding)
     if fp16_hit is not None:
         return fp16_hit
-    return _remedy_from_metrics(m, exit_drift, rationale, compounding)
+    return _remedy_from_metrics(chain, m, exit_drift, rationale, compounding)
 
 
 def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
