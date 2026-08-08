@@ -25,7 +25,6 @@ from grok1_multiblock_experiment import (  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_72,
     channel_alpha_dequant,
-    decide_remedy as decide_remedy_lib,
     settings_mismatch_reason,
 )
 
