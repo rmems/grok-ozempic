@@ -24,7 +24,7 @@
       }
     },
     "implementation": {
-      "commit": "6aa576259a00a59fc2f9278c5de65c3fd30639f2",
+      "commit": "18a027b2d589b9c1cbfc61342ca1334ff68d0daa",
       "dirty": true
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
@@ -34,7 +34,8 @@
     "skip_fp16_control": false,
     "activation_policy": "paired residual trajectories; block0=embed*EMBEDDING_MULTIPLIER; no Gaussian; no embedding rows for b!=0",
     "ternary_policy": "experts only; attention/routers/norms high precision",
-    "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle"
+    "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
+    "metrics_note": "Numeric chain metrics from the original 2048-token decision run; end_of_chain keys and decision rationale re-derived under the review-hardened harness (chain_exit residual naming + FP16 gates)."
   },
   "chain": {
     "blocks": [

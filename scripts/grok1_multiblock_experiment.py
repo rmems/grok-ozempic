@@ -251,7 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         dest.write_text(
             json.dumps(
                 {
-                    "provenance": {"issue": "GH #68 / Linear RM-255", "agent": AGENT_LINE, "implementation": implementation_commit()},
+                    "provenance": {
+                        "issue": "GH #68 / Linear RM-255",
+                        "agent": AGENT_LINE,
+                        "implementation": implementation_commit(),
+                    },
                     "decision": 4,
                     "decision_text": "Inconclusive — architectural element unresolved.",
                     "unresolved_reason": str(exc),
@@ -260,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             + "\n"
         )
+        print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
         return EXIT_UNRESOLVED
     except ForwardError as exc:
         print(f"error: {exc}", file=sys.stderr)

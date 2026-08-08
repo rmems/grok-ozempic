@@ -233,10 +233,11 @@ class DecideTests(unittest.TestCase):
 
 class ReportTests(unittest.TestCase):
     def test_results_md_cites_agent_and_model(self) -> None:
+        option_viable = 1  # #68 decision option index (not a credential)
         payload = {
             "provenance": {"implementation": {"commit": "abc", "dirty": False}},
             "decision": {
-                "decision": 1,  # nosec B105 — option index, not a secret
+                "decision": option_viable,
                 "decision_text": "viable",
                 "rationale": ["ok"],
             },
