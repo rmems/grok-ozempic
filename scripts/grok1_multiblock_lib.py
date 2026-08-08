@@ -16,7 +16,7 @@ from grok1_block_weights import (
     NpyWeights,
     PackWeights,
 )
-from route_preservation_io import TENSOR_TERNARY
+from route_preservation_io import TENSOR_TERNARY, read_trits
 
 
 class LegacyOracleError(ForwardError):
@@ -26,6 +26,27 @@ AGENT_LINE = (
     "Grok Build: Grok 4.5 (xAI) · Model: grok-4.5 · Issue: #68 / Linear RM-255 · "
     "beads goz-vvgm5z"
 )
+
+# #73 / RM-362 — SpacexAI product line; model string holds Grok-4.5 (high).
+REMEDY_AGENT_LINE = (
+    "SpacexAI · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362"
+)
+
+# Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
+# settings: tokens=2048, seed=20260806, blocks=0..3, pack-only v3 experts.
+BASELINE_72 = {
+    "source": "reports/grok-1-expert-only-multiblock/ (PR #72 / #68 / RM-255)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "decision": 3,
+    "block_output_cosine": [0.963572, 0.945765, 0.884956, 0.839144],
+    "residual_in_drift": [0.0, 0.277351, 0.341935, 0.498308],
+    "router_top1": [1.0, 0.887695, 0.666504, 0.528320],
+    "router_top2": [1.0, 0.680664, 0.548828, 0.289551],
+    "chain_exit_residual_drift": 0.6538863846584987,
+    "arm_label": "goz1_expert_ternary_only",
+}
 
 BASELINE_64 = {
     "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
@@ -136,14 +157,119 @@ def _require_pack_experts(pack: PackWeights, pack_path: Path) -> None:
             raise ForwardError(f"{pack_path.name}: missing expert role {role!r}")
 
 
+def periodic_hp_blocks(blocks: list[int], period: int = 2) -> set[int]:
+    """Blocks that use high-precision experts under arm C.
+
+    For period=2 on chain 0,1,2,3 → HP on {1,3}, ternary on {0,2}.
+    Prose: \"every 2nd block\" means odd indices in the chain, not \"HP starting at 0\".
+    """
+    if period < 1:
+        raise ForwardError(f"hp period must be >= 1, got {period}")
+    return {b for i, b in enumerate(blocks) if (i % period) == (period - 1)}
+
+
+def channel_alpha_dequant(weights: np.ndarray, trits: np.ndarray) -> np.ndarray:
+    """Per-output-channel LS scale: α_n = Σ_k w·t / Σ_k t² along all but last axis."""
+    if weights.shape != trits.shape:
+        raise ForwardError(
+            f"channel-α shape mismatch: weights {weights.shape} vs trits {trits.shape}"
+        )
+    w = weights.astype(np.float64, copy=False)
+    t = trits.astype(np.float64, copy=False)
+    axes = tuple(range(w.ndim - 1)) if w.ndim >= 1 else ()
+    if not axes:
+        den = float(t * t)
+        alpha = (float(w * t) / den) if den > 0 else 0.0
+        return np.float32(alpha * trits.astype(np.float32))
+    num = (w * t).sum(axis=axes)
+    den = (t * t).sum(axis=axes)
+    alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+    return (trits.astype(np.float32) * alpha.astype(np.float32))
+
+
+class ChannelAlphaExperts:
+    """Expert primary source: pack trits × research per-channel α (not pack scalar).
+
+    Scale provenance tag is ``research_per_channel_side`` — never claim pack_v2.
+    """
+
+    label = "research_per_channel_side"
+
+    def __init__(self, pack: PackWeights, reference: NpyWeights) -> None:
+        self._pack = pack
+        self._ref = reference
+        self.roles = {r: pack.roles[r] for r in EXPERT_ROLES if r in pack.roles}
+        missing = sorted(EXPERT_ROLES - set(self.roles))
+        if missing:
+            raise ForwardError(f"channel-α primary lacks expert roles {missing}")
+        self.scale_sources = {
+            self.roles[r]: "research_per_channel_side" for r in self.roles
+        }
+
+    def _trit_slice(self, role: str, start: int, count: int, shape: tuple[int, ...]) -> np.ndarray:
+        entry = self._pack.tensor_entry(self.roles[role])
+        if int(entry["tensor_type"]) != TENSOR_TERNARY:
+            raise ForwardError(f"{entry['name']}: channel-α requires ternary payload")
+        trits = read_trits(self._pack.pack, entry, start, count)
+        return trits.astype(np.float32).reshape(shape)
+
+    def vector(self, role: str) -> np.ndarray:
+        entry = self._pack.tensor_entry(self.roles[role])
+        shape = tuple(int(d) for d in entry["shape"])
+        trits = self._trit_slice(role, 0, int(entry["numel"]), shape)
+        w = np.asarray(self._ref.vector(role), dtype=np.float32)
+        return channel_alpha_dequant(w, trits)
+
+    def matrix(self, role: str) -> np.ndarray:
+        return self.vector(role)
+
+    def expert(self, role: str, index: int) -> np.ndarray:
+        entry = self._pack.tensor_entry(self.roles[role])
+        lead, rows, cols = (int(d) for d in entry["shape"])
+        if not 0 <= index < lead:
+            raise ForwardError(f"{entry['name']}: expert {index} out of range 0..{lead - 1}")
+        per = rows * cols
+        trits = self._trit_slice(role, index * per, per, (rows, cols))
+        w = np.asarray(self._ref.expert(role, index), dtype=np.float32)
+        return channel_alpha_dequant(w, trits)
+
+
+def _expert_primary(
+    mode: str,
+    pack: PackWeights,
+    reference: NpyWeights,
+    control: F16Weights | None,
+    *,
+    block: int,
+    hp_blocks: set[int],
+) -> tuple[object, str]:
+    """Return (primary WeightSource for experts, arm label)."""
+    if mode == "ternary":
+        return pack, "goz1_expert_ternary_only"
+    if mode == "periodic_hp":
+        if block in hp_blocks:
+            if control is None:
+                raise ForwardError(
+                    f"block {block}: periodic HP needs FP16 expert source "
+                    "(do not --skip-fp16-control on decision runs)"
+                )
+            return control, "expert_periodic_hp_n2"
+        return pack, "goz1_expert_ternary_only"
+    if mode == "channel_alpha":
+        return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
+    raise ForwardError(f"unknown expert mode {mode!r}")
+
+
 def load_block_sources(
     block: int,
     npy_dir: Path,
     pack_path: Path,
     *,
     require_fp16: bool,
+    expert_mode: str = "ternary",
+    hp_blocks: set[int] | None = None,
 ) -> tuple[NpyWeights, PackWeights, MixedWeights, F16Weights | None]:
-    """Load reference, pack, expert-only mix, optional fp16 control."""
+    """Load reference, pack, expert mix (arm-aware), optional fp16 control."""
     expect = f"block_{block:03d}"
     names = npy_names(npy_dir)
     if not names:
@@ -153,8 +279,11 @@ def load_block_sources(
     _require_pack_experts(pack, pack_path)
     pack.require_preserved([r for r in PRESERVED_ROLES if r in pack.roles])
     require_pack_only_scales(pack, _expert_names(reference))
-    mixed = MixedWeights(pack, reference, frozenset(EXPERT_ROLES), "goz1_expert_ternary_only")
     control = F16Weights(npy_dir, names, expect_block=expect) if require_fp16 else None
+    primary, label = _expert_primary(
+        expert_mode, pack, reference, control, block=block, hp_blocks=hp_blocks or set()
+    )
+    mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
     return reference, pack, mixed, control
 
 
@@ -568,6 +697,207 @@ def write_results_md(path: Path, payload: dict) -> None:
         "Chain exit residual metrics live under "
         "`chain.end_of_chain.expert_only_chain_exit` "
         "(post-final-block residual stream, not residual-in to the last block).",
+        "",
+    ]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _improved_vs_72(m: dict[str, list[float]], exit_drift: float | None) -> bool:
+    """True if remedy clearly beats cited #72 single-scale ternary baseline."""
+    b72 = BASELINE_72
+    if not m["top1"] or not m["cos"]:
+        return False
+    top1_gain = m["top1"][-1] - b72["router_top1"][-1]
+    cos_gain = m["cos"][-1] - b72["block_output_cosine"][-1]
+    drift_gain = 0.0
+    if exit_drift is not None:
+        drift_gain = b72["chain_exit_residual_drift"] - exit_drift
+    return top1_gain >= 0.05 or cos_gain >= 0.03 or drift_gain >= 0.08
+
+
+def _remedy_option_1(
+    end_cos: float,
+    min_top1: float,
+    min_topk: float,
+    exit_drift: float | None,
+    cos: list[float],
+) -> bool:
+    """#73 success shape: multi-block viability with documented remedy."""
+    return (
+        end_cos >= 0.93
+        and min_top1 >= 0.95
+        and min_topk >= 0.90
+        and (exit_drift is None or exit_drift < 0.25)
+        and min(cos) >= 0.90
+    )
+
+
+def _remedy_why_not(decision: int) -> str:
+    selected = {
+        1: "selected — remedy restores multi-block viability vs #72 collapse.",
+        2: "selected — clear help vs #72 but residual/routing still need more.",
+        3: "selected — tested remedies fail to stop residual-driven collapse.",
+        4: "selected — inconclusive (control/pack/honesty gap).",
+    }
+    rejected = {
+        1: "rejected — routing/residual still outside viability bands.",
+        2: "rejected as primary — either fully viable or no clear help.",
+        3: "rejected — remedy improved enough to prefer option 1 or 2.",
+        4: "rejected — FP16 control and pack-honest path resolved.",
+    }
+    lines = []
+    for i in (1, 2, 3, 4):
+        tag = "selected" if i == decision else "not chosen"
+        body = selected[i] if i == decision else rejected[i]
+        lines.append(f"- **Option {i} ({tag}):** {body}")
+    return "\n".join(lines)
+
+
+def _remedy_rationale(chain: dict, m: dict, compounding: str, exit_drift: float | None) -> list[str]:
+    top_k = int(chain.get("top_k") or 2)
+    last_resid_in = m["resid_in"][-1] if m["resid_in"] else None
+    rationale = _build_rationale(
+        m, compounding, m["cos"][-1], last_resid_in, exit_drift, top_k
+    )
+    rationale.append(
+        f"#72 baseline chain_exit_drift={BASELINE_72['chain_exit_residual_drift']:.6f} "
+        f"b3_top1={BASELINE_72['router_top1'][-1]:.6f} "
+        f"b3_cos={BASELINE_72['block_output_cosine'][-1]:.6f} (cited, not re-run)"
+    )
+    arm = chain.get("arm_label") or chain.get("expert_mode")
+    if arm:
+        rationale.append(f"arm={arm}")
+    schedule = chain.get("hp_schedule_prose")
+    if schedule:
+        rationale.append(f"hp_schedule={schedule}")
+    return rationale
+
+
+def _remedy_from_metrics(
+    m: dict[str, list[float]], exit_drift: float | None, rationale: list[str], compounding: str
+) -> dict:
+    end_cos = m["cos"][-1]
+    min_top1, min_topk = min(m["top1"]), min(m["topk"])
+    if _remedy_option_1(end_cos, min_top1, min_topk, exit_drift, m["cos"]):
+        return _decision_payload(
+            1,
+            "Remedy restores multi-block viability "
+            "(mostly-ternary experts with the documented remedy is policy-ready).",
+            rationale,
+            compounding,
+        )
+    if _improved_vs_72(m, exit_drift):
+        return _decision_payload(
+            2,
+            "Remedy helps but needs further correction "
+            "(clear improvement vs #72; residual still compounds).",
+            rationale,
+            compounding,
+        )
+    return _decision_payload(
+        3,
+        "Experts need still-higher / full higher precision "
+        "(tested remedies fail to stop residual-driven routing collapse).",
+        rationale,
+        compounding,
+    )
+
+
+def decide_remedy(chain: dict) -> dict:
+    """Pick exactly one of #73's four decision outputs (vs cited #72 baseline)."""
+    rows = chain.get("per_block") or []
+    if not rows:
+        return _decision_payload(
+            4,
+            "Inconclusive — no blocks measured (activation-supply / harness gap).",
+            ["empty per_block"],
+            "unknown",
+        )
+    m = _metric_series(rows)
+    exit_drift = _exit_drift(chain, m["out_drift"])
+    compounding = _compounding_label(m["resid_in"], exit_drift)
+    rationale = _remedy_rationale(chain, m, compounding, exit_drift)
+    fp16_hit = _fp16_gate(chain, rows, rationale, compounding)
+    if fp16_hit is not None:
+        return fp16_hit
+    return _remedy_from_metrics(m, exit_drift, rationale, compounding)
+
+
+def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
+    return [
+        "# Expert higher-precision remedies for multi-block residual fidelity",
+        "",
+        f"**Agent:** {prov.get('agent', REMEDY_AGENT_LINE)}",
+        f"**Model:** {prov.get('model', 'Grok-4.5 (high)')}",
+        "**Issue:** GH [#73](https://github.com/rmems/grok-ozempic/issues/73) / "
+        "[RM-362](https://linear.app/rpd-34/issue/RM-362)",
+        "**Predecessor:** PR [#72](https://github.com/rmems/grok-ozempic/pull/72) / "
+        "#68 option 3 · **Baseline (#64):** Claude Fable 5",
+        f"**Implementation commit:** `{_fmt_commit(prov.get('implementation'))}`",
+        "",
+        "## Decision",
+        "",
+        f"**Option {dec} — {decision_text}**",
+        "",
+        "Rationale:",
+        "",
+    ]
+
+
+def _remedy_baseline_section() -> list[str]:
+    b = BASELINE_72
+    return [
+        "## #72 baseline (cited — bit-identical settings)",
+        "",
+        f"Source: `{b['source']}`.",
+        f"Tokens={b['tokens']}, seed={b['token_seed']}, blocks={b['blocks']}.",
+        f"Chain-exit residual drift **{b['chain_exit_residual_drift']:.6f}**; "
+        f"b3 top-1 **{b['router_top1'][-1]:.6f}**; "
+        f"b3 block_out cos **{b['block_output_cosine'][-1]:.6f}**.",
+        "Decision option **3** (single-scale ternary not multi-block viable).",
+        "Re-run only if packs or harness invalidate comparison; this report cites.",
+        "",
+    ]
+
+
+def write_remedy_results_md(path: Path, payload: dict) -> None:
+    """#73 human report: SpacexAI citation, #72 cite, arm C schedule prose."""
+    d = payload["decision"]
+    chain = payload["chain"]
+    rows = chain["per_block"]
+    top_k = int(chain.get("top_k") or 2)
+    prov = payload.get("provenance") or {}
+    lines = _remedy_header_lines(prov, int(d["decision"]), d["decision_text"])
+    lines += [f"- `{r}`" for r in d.get("rationale", [])]
+    note = prov.get("metrics_note")
+    if note:
+        lines += ["", f"**Metrics note:** {note}", ""]
+    lines += ["", "### Why not the other options", "", _remedy_why_not(int(d["decision"])), ""]
+    lines += _remedy_baseline_section()
+    lines += [
+        "## Method",
+        "",
+        f"- Arm: `{chain.get('expert_mode', 'unknown')}` / label `{chain.get('arm_label', '')}`.",
+    ]
+    if chain.get("hp_schedule_prose"):
+        lines.append(f"- {chain['hp_schedule_prose']}")
+    lines += [
+        "- Sequential chain with paired residual trajectories.",
+        "- Attention / routers / norms never ternaryized.",
+        f"- Tokens: {chain['tokens']}, seed {chain['token_seed']}, top_k={top_k}.",
+        "",
+        "## Per-block metrics (remedy arm vs FP reference)",
+        "",
+    ]
+    lines += _metrics_table(rows, top_k)
+    lines += _fp16_table(rows, top_k)
+    lines += [
+        "",
+        "## Provenance",
+        "",
+        "See `metrics.json` for pack SHA-256, scales, τ, and `scale_sources`.",
+        "Chain exit under `chain.end_of_chain.expert_only_chain_exit`.",
+        "Arm A uses `research_per_channel_side` (not pack_v2) when present.",
         "",
     ]
     path.write_text("\n".join(lines) + "\n")

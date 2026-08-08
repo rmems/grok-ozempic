@@ -14,10 +14,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from grok1_block_forward import ForwardError  # noqa: E402
 from grok1_multiblock_experiment import (  # noqa: E402
     decide,
+    decide_remedy,
     parse_blocks,
+    periodic_hp_blocks,
     require_pack_only_scales,
     residual_stream_metrics,
+    write_remedy_results_md,
     write_results_md,
+)
+from grok1_multiblock_lib import (  # noqa: E402
+    BASELINE_72,
+    channel_alpha_dequant,
 )
 
 
@@ -266,6 +273,131 @@ class ReportTests(unittest.TestCase):
         self.assertIn("grok-4.5", text)
         self.assertIn("#64", text)
         self.assertIn("Option 1", text)
+
+
+class PeriodicHpScheduleTests(unittest.TestCase):
+    def test_n2_on_0_3_is_hp_on_1_and_3(self) -> None:
+        blocks = [0, 1, 2, 3]
+        hp = periodic_hp_blocks(blocks, period=2)
+        self.assertEqual(hp, {1, 3})
+        ternary = set(blocks) - hp
+        self.assertEqual(ternary, {0, 2})
+
+    def test_n4_only_last(self) -> None:
+        self.assertEqual(periodic_hp_blocks([0, 1, 2, 3], period=4), {3})
+
+
+class ChannelAlphaDequantTests(unittest.TestCase):
+    def test_recovers_per_channel_scale(self) -> None:
+        rng = np.random.default_rng(0)
+        t = rng.choice([-1.0, 0.0, 1.0], size=(32, 4)).astype(np.float32)
+        alpha = np.array([0.5, 1.0, 1.5, 2.0], dtype=np.float32)
+        w = t * alpha
+        out = channel_alpha_dequant(w, t)
+        # On fired positions reconstruction should match w.
+        fired = t != 0
+        np.testing.assert_allclose(out[fired], w[fired], rtol=1e-5, atol=1e-5)
+
+
+class RemedyDecideTests(unittest.TestCase):
+    def _chain(self, rows, *, exit_drift: float, skip_fp16: bool = False) -> dict:
+        return {
+            "per_block": rows,
+            "top_k": 2,
+            "skip_fp16_control": skip_fp16,
+            "expert_mode": "periodic_hp",
+            "arm_label": "expert_periodic_hp_n2",
+            "hp_schedule_prose": "ternary on {0,2}, HP on {1,3}",
+            "end_of_chain": {
+                "expert_only_chain_exit": {
+                    "residual_drift_relative_norm": exit_drift,
+                }
+            },
+        }
+
+    def test_skip_fp16_forces_option_4(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.99, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+        ]
+        for r in rows:
+            r["fp16_control"] = None
+        d = decide_remedy(self._chain(rows, exit_drift=0.1, skip_fp16=True))
+        self.assertEqual(d["decision"], 4)
+
+    def test_strong_remedy_is_option_1(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.99, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.98, "resid_in_drift": 0.05, "top1": 0.99, "top2": 0.98}),
+            _expert_row(2, {"cos": 0.97, "resid_in_drift": 0.08, "top1": 0.98, "top2": 0.97}),
+            _expert_row(3, {"cos": 0.96, "resid_in_drift": 0.10, "top1": 0.97, "top2": 0.96}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.12))
+        self.assertEqual(d["decision"], 1)
+
+    def test_partial_help_is_option_2(self) -> None:
+        # Better than #72 b3 top1=0.528 but not option-1 viable.
+        rows = [
+            _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.15, "top1": 0.92, "top2": 0.85}),
+            _expert_row(2, {"cos": 0.90, "resid_in_drift": 0.25, "top1": 0.80, "top2": 0.70}),
+            _expert_row(3, {"cos": 0.87, "resid_in_drift": 0.35, "top1": 0.70, "top2": 0.55}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.45))
+        self.assertEqual(d["decision"], 2)
+        self.assertGreater(
+            rows[-1]["expert_only"]["router_top1_agreement"], BASELINE_72["router_top1"][-1]
+        )
+
+    def test_no_help_is_option_3(self) -> None:
+        rows = [
+            _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0, "top1": 1.0, "top2": 1.0}),
+            _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.28, "top1": 0.88, "top2": 0.68}),
+            _expert_row(2, {"cos": 0.88, "resid_in_drift": 0.34, "top1": 0.66, "top2": 0.54}),
+            _expert_row(3, {"cos": 0.83, "resid_in_drift": 0.50, "top1": 0.52, "top2": 0.28}),
+        ]
+        d = decide_remedy(self._chain(rows, exit_drift=0.66))
+        self.assertEqual(d["decision"], 3)
+
+
+class RemedyReportTests(unittest.TestCase):
+    def test_cites_spacexai_and_schedule_prose(self) -> None:
+        payload = {
+            "provenance": {
+                "agent": "SpacexAI · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362",
+                "model": "Grok-4.5 (high)",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+                "metrics_note": "cite #72",
+            },
+            "decision": {
+                "decision": 2,
+                "decision_text": "helps",
+                "rationale": ["ok"],
+            },
+            "chain": {
+                "tokens": 2048,
+                "token_seed": _DECISION_SEED,
+                "top_k": 2,
+                "expert_mode": "periodic_hp",
+                "arm_label": "expert_periodic_hp_n2",
+                "hp_schedule_prose": (
+                    "Arm C label `expert_periodic_hp_n2`: ternary on {0,2}, HP (FP16 experts) on {1,3}."
+                ),
+                "per_block": [
+                    _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
+                    _expert_row(1, {"cos": 0.94, "resid_in_drift": 0.1}),
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            write_remedy_results_md(path, payload)
+            text = path.read_text()
+        self.assertIn("SpacexAI", text)
+        self.assertIn("Grok-4.5 (high)", text)
+        self.assertIn("ternary on {0,2}", text)
+        self.assertIn("HP (FP16 experts) on {1,3}", text)
+        self.assertIn("#72", text)
+        self.assertIn("Option 2", text)
 
 
 if __name__ == "__main__":
