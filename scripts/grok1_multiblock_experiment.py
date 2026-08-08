@@ -30,6 +30,7 @@ from grok1_block_weights import implementation_commit  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     AGENT_LINE,
     BASELINE_64,
+    LegacyOracleError,
     decide,
     load_block_sources,
     pack_provenance_row,
@@ -266,12 +267,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
         return EXIT_UNRESOLVED
-    except ForwardError as exc:
+    except LegacyOracleError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        if "legacy_oracle" in str(exc) and hasattr(args, "out"):
+        if hasattr(args, "out"):
             args.out.mkdir(parents=True, exist_ok=True)
-            # decision option index 4, not a credential (bandit B105)
-            opt_inconclusive = 4
+            opt_inconclusive = 4  # #68 decision option index
             (args.out / "multiblock-legacy-oracle.json").write_text(
                 json.dumps(
                     {
@@ -284,7 +284,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 + "\n"
             )
-            return EXIT_LEGACY_ORACLE
+        return EXIT_LEGACY_ORACLE
+    except ForwardError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return EXIT_OP
     except (MetricsError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

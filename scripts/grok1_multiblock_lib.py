@@ -2,8 +2,8 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 
@@ -15,9 +15,12 @@ from grok1_block_weights import (
     MixedWeights,
     NpyWeights,
     PackWeights,
-    sha256_file,
 )
 from route_preservation_io import TENSOR_TERNARY
+
+
+class LegacyOracleError(ForwardError):
+    """Raised when a pack falls back to legacy oracle α (not v3 pack-only)."""
 
 AGENT_LINE = (
     "Grok Build: Grok 4.5 (xAI) · Model: grok-4.5 · Issue: #68 / Linear RM-255 · "
@@ -97,7 +100,9 @@ def _require_ternary_experts(pack: PackWeights, names: list[str]) -> None:
 def _assert_no_legacy(pack: PackWeights, sources: dict[str, str]) -> None:
     legacy = sorted(n for n, s in sources.items() if s == "legacy_oracle")
     if legacy:
-        raise ForwardError(f"{pack.pack.name}: legacy_oracle for {legacy}; rebuild GOZ1 v3")
+        raise LegacyOracleError(
+            f"{pack.pack.name}: legacy_oracle for {legacy}; rebuild GOZ1 v3"
+        )
 
 
 def _assert_pack_v3_scales(pack: PackWeights, names: list[str], sources: dict[str, str]) -> None:
@@ -153,16 +158,23 @@ def load_block_sources(
     return reference, pack, mixed, control
 
 
+def _host_safe_name(path: Path) -> str:
+    """Basename only — do not commit home-directory paths into reports."""
+    return Path(path).name
+
+
 def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWeights) -> dict:
     """Machine-readable pack provenance for one block."""
     names = pack.tensor_names()
+    versions = {pack.container_version(n) for n in names}
+    versions.discard(None)
     return {
         "block": block,
-        "pack": str(pack_path),
-        "pack_sha256": sha256_file(pack_path),
+        "pack": _host_safe_name(pack_path),
+        "pack_sha256": pack.pack_sha256(),
         "pack_bytes": pack_path.stat().st_size,
-        "npy_dir": str(npy_dir),
-        "container_versions": sorted({pack.container_version(n) for n in names}),
+        "npy_dir": _host_safe_name(npy_dir),
+        "container_versions": sorted(versions),
         "scale_sources": dict(pack.scale_sources),
         "ternary_scales": {
             n: {"alpha": s.alpha, "sparsity": s.sparsity, "fired": s.fired, "total": s.total}
@@ -528,6 +540,9 @@ def write_results_md(path: Path, payload: dict) -> None:
     lines = _report_header(payload, dec, d["decision_text"])
     for r in d.get("rationale", []):
         lines.append(f"- `{r}`")
+    note = (payload.get("provenance") or {}).get("metrics_note")
+    if note:
+        lines += ["", f"**Metrics note:** {note}", ""]
     lines += ["", "### Why not the other options", "", _why_not_others(dec), ""]
     lines += [
         "## #64 baseline (block 0 only — cite, not re-proved)",

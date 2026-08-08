@@ -102,6 +102,12 @@ class PackOnlyScaleTests(unittest.TestCase):
                 _FakePack(tensor_type=0), ["block_000.slot_00.moe_expert.gate"]
             )
 
+    def test_non_v3_container_aborts(self) -> None:
+        with self.assertRaisesRegex(ForwardError, "expected GOZ1 v3"):
+            require_pack_only_scales(
+                _FakePack(container_version=2), ["block_000.slot_00.moe_expert.gate"]
+            )
+
 
 def _expert_row(block: int, metrics: dict, *, with_fp16: bool = True) -> dict:
     """Build one per-block row; ``metrics`` holds cos/top1/top2/drift fields."""
@@ -243,7 +249,7 @@ class ReportTests(unittest.TestCase):
             },
             "chain": {
                 "tokens": 8,
-                "token_seed": 1,
+                "token_seed": 20260806,
                 "per_block": [_expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0})],
             },
         }

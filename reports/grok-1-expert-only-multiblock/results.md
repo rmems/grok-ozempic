@@ -4,7 +4,7 @@
 **Design:** Grok Build super-research · **Baseline (#64):** Claude Fable 5
 **Issue:** GH [#68](https://github.com/rmems/grok-ozempic/issues/68) / RM-255
 **Predecessor:** PR [#64](https://github.com/rmems/grok-ozempic/pull/64) / #61
-**Implementation commit:** `e48f996fbb609b1f65c27fb00bb58bc78b45dd30`
+**Implementation commit:** `a829f4bd45497dccb5dae511fc38bfbd52cd03e1`
 
 ## Decision
 
@@ -23,6 +23,9 @@ Rationale:
 - `last_block_residual_in_drift=0.4983081493750823`
 - `chain_exit_residual_drift=0.6538863846584987`
 - `#64 block0 expert-only block_output_cosine baseline=0.963572`
+
+**Metrics note:** Numeric chain metrics from the original 2048-token decision run; end_of_chain keys and decision rationale re-derived under the review-hardened harness (chain_exit residual naming + FP16 gates). Host paths stored as basenames only.
+
 
 ### Why not the other options
 

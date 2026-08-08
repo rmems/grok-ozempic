@@ -24,18 +24,18 @@
       }
     },
     "implementation": {
-      "commit": "e48f996fbb609b1f65c27fb00bb58bc78b45dd30",
+      "commit": "a829f4bd45497dccb5dae511fc38bfbd52cd03e1",
       "dirty": false
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "numpy": "2.5.1",
     "python": "3.14.6",
-    "embedding_shard": "/home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
     "skip_fp16_control": false,
     "activation_policy": "paired residual trajectories; block0=embed*EMBEDDING_MULTIPLIER; no Gaussian; no embedding rows for b!=0",
     "ternary_policy": "experts only; attention/routers/norms high precision",
     "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
-    "metrics_note": "Numeric chain metrics from the original 2048-token decision run; end_of_chain keys and decision rationale re-derived under the review-hardened harness (chain_exit residual naming + FP16 gates)."
+    "metrics_note": "Numeric chain metrics from the original 2048-token decision run; end_of_chain keys and decision rationale re-derived under the review-hardened harness (chain_exit residual naming + FP16 gates). Host paths stored as basenames only."
   },
   "chain": {
     "blocks": [
@@ -882,10 +882,10 @@
     "pack_provenance": [
       {
         "block": 0,
-        "pack": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68/block_000-attention_plus_expert.goz1",
+        "pack": "block_000-attention_plus_expert.goz1",
         "pack_sha256": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
         "pack_bytes": 1230128768,
-        "npy_dir": "/home/raulmc/.models/xai-grok-1/export-npy/goz68-block_000-attn",
+        "npy_dir": "goz68-block_000-attn",
         "container_versions": [
           3
         ],
@@ -953,10 +953,10 @@
       },
       {
         "block": 1,
-        "pack": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68/block_001-attention_plus_expert.goz1",
+        "pack": "block_001-attention_plus_expert.goz1",
         "pack_sha256": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
         "pack_bytes": 1230128768,
-        "npy_dir": "/home/raulmc/.models/xai-grok-1/export-npy/goz68-block_001-attn",
+        "npy_dir": "goz68-block_001-attn",
         "container_versions": [
           3
         ],
@@ -1024,10 +1024,10 @@
       },
       {
         "block": 2,
-        "pack": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68/block_002-attention_plus_expert.goz1",
+        "pack": "block_002-attention_plus_expert.goz1",
         "pack_sha256": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
         "pack_bytes": 1230128768,
-        "npy_dir": "/home/raulmc/.models/xai-grok-1/export-npy/goz68-block_002-attn",
+        "npy_dir": "goz68-block_002-attn",
         "container_versions": [
           3
         ],
@@ -1095,10 +1095,10 @@
       },
       {
         "block": 3,
-        "pack": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68/block_003-attention_plus_expert.goz1",
+        "pack": "block_003-attention_plus_expert.goz1",
         "pack_sha256": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
         "pack_bytes": 1230128768,
-        "npy_dir": "/home/raulmc/.models/xai-grok-1/export-npy/goz68-block_003-attn",
+        "npy_dir": "goz68-block_003-attn",
         "container_versions": [
           3
         ],
