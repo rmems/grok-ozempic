@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""Helpers for the #68 multi-block residual fidelity experiment.
-
-Kept separate from the CLI driver so Lizard file/NLOC/CCN gates stay under limit.
-"""
+"""Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Iterable
 
 import numpy as np
 
@@ -18,6 +15,7 @@ from grok1_block_weights import (
     MixedWeights,
     NpyWeights,
     PackWeights,
+    sha256_file,
 )
 from route_preservation_io import TENSOR_TERNARY
 
@@ -48,6 +46,11 @@ def parse_blocks(text: str) -> list[int]:
     if not parts:
         raise ForwardError("--blocks must list at least one block index")
     blocks = [int(p) for p in parts]
+    _assert_block_chain(blocks)
+    return blocks
+
+
+def _assert_block_chain(blocks: list[int]) -> None:
     if any(b < 0 for b in blocks):
         raise ForwardError(f"negative block index in {blocks}")
     if blocks != sorted(blocks):
@@ -55,11 +58,9 @@ def parse_blocks(text: str) -> list[int]:
     expected = list(range(blocks[0], blocks[0] + len(blocks)))
     if blocks != expected:
         raise ForwardError(f"--blocks must be contiguous, got {blocks}")
-    return blocks
 
 
 def stem_of_inverse(path: Path) -> str:
-    """``block_000__slot_11__router.npy`` → ``block_000.slot_11.router``."""
     return path.stem.replace("__", ".")
 
 
@@ -68,13 +69,11 @@ def npy_names(npy_dir: Path) -> list[str]:
 
 
 def resolve_path(root: Path, pattern: str, block: int) -> Path:
-    """Format pattern with block index; join to root when relative."""
     path = Path(pattern.format(block=block))
     return path if path.is_absolute() else root / path
 
 
 def residual_stream_metrics(ref_h: np.ndarray, other_h: np.ndarray) -> dict[str, float]:
-    """Cosine and relative drift between residual streams."""
     from grok1_block0_experiment import cosine, relative_drift
 
     return {
@@ -83,20 +82,29 @@ def residual_stream_metrics(ref_h: np.ndarray, other_h: np.ndarray) -> dict[str,
     }
 
 
-def _require_ternary_experts(pack: PackWeights, expert_names: list[str]) -> None:
-    """Every expert structural name must exist as TENSOR_TERNARY."""
-    missing = [n for n in expert_names if n not in pack._index]
+def _require_ternary_experts(pack: PackWeights, names: list[str]) -> None:
+    missing = [n for n in names if n not in pack._index]
     if missing:
         raise ForwardError(f"{pack.pack.name}: missing expert tensors {missing}")
-    wrong = [
-        n
-        for n in expert_names
-        if int(pack._index[n]["tensor_type"]) != TENSOR_TERNARY
-    ]
+    wrong = [n for n in names if int(pack._index[n]["tensor_type"]) != TENSOR_TERNARY]
     if wrong:
-        raise ForwardError(
-            f"{pack.pack.name}: expert tensors must be ternary, not preserve/fp16: {wrong}"
-        )
+        raise ForwardError(f"{pack.pack.name}: experts must be ternary: {wrong}")
+
+
+def _assert_no_legacy(pack: PackWeights, sources: dict[str, str]) -> None:
+    legacy = sorted(n for n, s in sources.items() if s == "legacy_oracle")
+    if legacy:
+        raise ForwardError(f"{pack.pack.name}: legacy_oracle for {legacy}; rebuild GOZ1 v3")
+
+
+def _assert_pack_v3_scales(pack: PackWeights, names: list[str], sources: dict[str, str]) -> None:
+    _assert_no_legacy(pack, sources)
+    missing = sorted(n for n in names if n not in sources)
+    if missing:
+        raise ForwardError(f"{pack.pack.name}: no scale_sources for {missing}")
+    versions = {pack._index[n].get("container_version") for n in names}
+    if versions != {3}:
+        raise ForwardError(f"{pack.pack.name}: expected GOZ1 v3, got {versions}")
 
 
 def require_pack_only_scales(pack: PackWeights, expert_names: Iterable[str]) -> dict[str, str]:
@@ -106,20 +114,18 @@ def require_pack_only_scales(pack: PackWeights, expert_names: Iterable[str]) -> 
     for name in names:
         pack.scale(name)
     sources = dict(pack.scale_sources)
-    legacy = sorted(n for n, s in sources.items() if s == "legacy_oracle")
-    if legacy:
-        raise ForwardError(
-            f"{pack.pack.name}: legacy_oracle scale for {legacy}; rebuild GOZ1 v3"
-        )
-    missing = sorted(n for n in names if n not in sources)
-    if missing:
-        raise ForwardError(f"{pack.pack.name}: no scale_sources for {missing}")
-    versions = {pack._index[n].get("container_version") for n in names}
-    if versions != {3}:
-        raise ForwardError(
-            f"{pack.pack.name}: expected GOZ1 v3 for all experts, got {versions}"
-        )
+    _assert_pack_v3_scales(pack, names, sources)
     return sources
+
+
+def _expert_names(reference: NpyWeights) -> list[str]:
+    return [reference.roles[r] for r in sorted(EXPERT_ROLES) if r in reference.roles]
+
+
+def _require_pack_experts(pack: PackWeights, pack_path: Path) -> None:
+    for role in EXPERT_ROLES:
+        if role not in pack.roles:
+            raise ForwardError(f"{pack_path.name}: missing expert role {role!r}")
 
 
 def load_block_sources(
@@ -136,12 +142,9 @@ def load_block_sources(
         raise ForwardError(f"{npy_dir}: no .npy tensors")
     reference = NpyWeights(npy_dir, names, expect_block=expect)
     pack = PackWeights(pack_path, npy_dir, partial=True, expect_block=expect)
-    expert_struct = [reference.roles[r] for r in sorted(EXPERT_ROLES) if r in reference.roles]
-    for role in EXPERT_ROLES:
-        if role not in pack.roles:
-            raise ForwardError(f"{pack_path.name}: missing expert role {role!r}")
+    _require_pack_experts(pack, pack_path)
     pack.require_preserved([r for r in PRESERVED_ROLES if r in pack.roles])
-    require_pack_only_scales(pack, expert_struct)
+    require_pack_only_scales(pack, _expert_names(reference))
     mixed = MixedWeights(pack, reference, frozenset(EXPERT_ROLES), "goz1_expert_ternary_only")
     control = F16Weights(npy_dir, names, expect_block=expect) if require_fp16 else None
     return reference, pack, mixed, control
@@ -149,8 +152,6 @@ def load_block_sources(
 
 def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWeights) -> dict:
     """Machine-readable pack provenance for one block."""
-    from grok1_block_weights import sha256_file
-
     return {
         "block": block,
         "pack": str(pack_path),
@@ -160,20 +161,12 @@ def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWe
         "container_versions": sorted({e.get("container_version") for e in pack._index.values()}),
         "scale_sources": dict(pack.scale_sources),
         "ternary_scales": {
-            name: {
-                "alpha": s.alpha,
-                "sparsity": s.sparsity,
-                "fired": s.fired,
-                "total": s.total,
-            }
-            for name, s in sorted(pack.scales().items())
+            n: {"alpha": s.alpha, "sparsity": s.sparsity, "fired": s.fired, "total": s.total}
+            for n, s in sorted(pack.scales().items())
         },
         "gif_thresholds": {
-            name: {
-                "gif_threshold": e.get("gif_threshold"),
-                "threshold_abs": e.get("threshold_abs"),
-            }
-            for name, e in sorted(pack._index.items())
+            n: {"gif_threshold": e.get("gif_threshold"), "threshold_abs": e.get("threshold_abs")}
+            for n, e in sorted(pack._index.items())
             if int(e.get("tensor_type", -1)) == TENSOR_TERNARY
         },
         "pack_metadata": {
@@ -192,10 +185,7 @@ def pack_provenance_row(block: int, pack_path: Path, npy_dir: Path, pack: PackWe
 def _top2(row: dict) -> float:
     e = row["expert_only"]
     return float(
-        e.get(
-            "router_top2_set_agreement",
-            e.get("router_topk_set_agreement", e["router_top1_agreement"]),
-        )
+        e.get("router_top2_set_agreement", e.get("router_topk_set_agreement", e["router_top1_agreement"]))
     )
 
 
@@ -203,45 +193,58 @@ def _metric_series(rows: list[dict]) -> dict[str, list[float]]:
     return {
         "cos": [r["expert_only"]["block_output_cosine"] for r in rows],
         "resid_in": [
-            r["expert_only"]["residual_stream_in"]["residual_in_drift_relative_norm"]
-            for r in rows
+            r["expert_only"]["residual_stream_in"]["residual_in_drift_relative_norm"] for r in rows
         ],
         "top1": [r["expert_only"]["router_top1_agreement"] for r in rows],
         "top2": [_top2(r) for r in rows],
         "js": [r["expert_only"]["expert_load_js_bits"] for r in rows],
-        "out_drift": [
-            r["expert_only"]["block_output_drift_relative_norm"] for r in rows
-        ],
+        "out_drift": [r["expert_only"]["block_output_drift_relative_norm"] for r in rows],
     }
 
 
-def _compounding_label(resid_in: list[float]) -> str:
-    later = resid_in[1:] if len(resid_in) > 1 else []
+def _growth_ratios(later: list[float]) -> list[float]:
+    out = []
+    for i in range(len(later) - 1):
+        out.append(later[i + 1] / later[i] if later[i] > 1e-12 else float("inf"))
+    return out
+
+
+def _is_saturating(later: list[float], finite: list[float]) -> bool:
+    return bool(finite) and all(r < 1.15 for r in finite) and later[-1] < later[0] * 1.5 + 1e-6
+
+
+def _is_runaway(later: list[float], finite: list[float]) -> bool:
+    return any(r > 1.8 for r in finite) or later[-1] > later[0] * 3
+
+
+def _label_from_later(later: list[float]) -> str:
     if len(later) < 2:
         return "unknown"
-    ratios = [
-        later[i + 1] / later[i] if later[i] > 1e-12 else float("inf")
-        for i in range(len(later) - 1)
-    ]
-    finite = [r for r in ratios if np.isfinite(r)]
-    if finite and all(r < 1.15 for r in finite) and later[-1] < later[0] * 1.5 + 1e-6:
+    finite = [r for r in _growth_ratios(later) if np.isfinite(r)]
+    if _is_saturating(later, finite):
         return "sublinear_or_saturating"
-    if any(r > 1.8 for r in finite) or later[-1] > later[0] * 3:
+    if _is_runaway(later, finite):
         return "superlinear_or_runaway"
     return "roughly_linear"
 
 
+def _compounding_label(resid_in: list[float], end_drift: float | None = None) -> str:
+    """Label residual growth; include end_drift so the final hop is counted."""
+    series = list(resid_in)
+    if end_drift is not None:
+        series.append(float(end_drift))
+    later = series[1:] if len(series) > 1 else []
+    return _label_from_later(later)
+
+
 def _end_drift(chain: dict, resid_in: list[float]) -> float | None:
-    """Prefer post-chain residual drift when present (includes final block)."""
     end = (chain.get("end_of_chain") or {}).get("expert_only_end_residual_in")
     if isinstance(end, dict) and "residual_in_drift_relative_norm" in end:
         return float(end["residual_in_drift_relative_norm"])
     return resid_in[-1] if resid_in else None
 
 
-def _decision_payload(
-    decision: int, text: str, rationale: list[str], compounding: str
-) -> dict:
+def _decision_payload(decision: int, text: str, rationale: list[str], compounding: str) -> dict:
     return {
         "decision": decision,
         "decision_text": text,
@@ -250,23 +253,8 @@ def _decision_payload(
     }
 
 
-def decide(chain: dict) -> dict:
-    """Pick exactly one of #68's four decision outputs."""
-    rows = chain.get("per_block") or []
-    if not rows:
-        return _decision_payload(
-            4,
-            "Inconclusive — no blocks measured (activation-supply / harness gap).",
-            ["empty per_block"],
-            "unknown",
-        )
-
-    m = _metric_series(rows)
-    compounding = _compounding_label(m["resid_in"])
-    end_drift = _end_drift(chain, m["resid_in"])
-    end_cos = m["cos"][-1]
-    min_top1, min_top2 = min(m["top1"]), min(m["top2"])
-    rationale = [
+def _build_rationale(m: dict[str, list[float]], compounding: str, end_cos: float, end_drift: float | None) -> list[str]:
+    return [
         f"block_output_cosine sequence={['%.6f' % c for c in m['cos']]}",
         f"residual_in_drift sequence={['%.6f' % d for d in m['resid_in']]}",
         f"block_output_drift sequence={['%.6f' % d for d in m['out_drift']]}",
@@ -279,6 +267,8 @@ def decide(chain: dict) -> dict:
         "#64 block0 expert-only block_output_cosine baseline=0.963572",
     ]
 
+
+def _fp16_gate(rows: list[dict], rationale: list[str], compounding: str) -> dict | None:
     fp16_rows = [r["fp16_control"] for r in rows if r.get("fp16_control") is not None]
     if not fp16_rows:
         return _decision_payload(
@@ -295,14 +285,57 @@ def decide(chain: dict) -> dict:
             rationale + [f"fp16_block_output_cosine={fp16_cos}"],
             compounding,
         )
+    return None
 
-    if (
+
+def _is_option_3(end_cos: float, min_top1: float, min_top2: float, compounding: str, end_drift: float | None) -> bool:
+    return (
         end_cos < 0.85
         or min_top1 < 0.90
         or min_top2 < 0.90
         or compounding == "superlinear_or_runaway"
         or (end_drift is not None and end_drift > 0.5)
-    ):
+    )
+
+
+def _is_option_1(
+    end_cos: float,
+    min_top1: float,
+    min_top2: float,
+    compounding: str,
+    end_drift: float | None,
+    cos: list[float],
+) -> bool:
+    return (
+        end_cos >= 0.93
+        and min_top1 >= 0.98
+        and min_top2 >= 0.98
+        and compounding in ("sublinear_or_saturating", "unknown", "roughly_linear")
+        and (end_drift is None or end_drift < 0.25)
+        and min(cos) >= 0.92
+    )
+
+
+def decide(chain: dict) -> dict:
+    """Pick exactly one of #68's four decision outputs."""
+    rows = chain.get("per_block") or []
+    if not rows:
+        return _decision_payload(
+            4,
+            "Inconclusive — no blocks measured (activation-supply / harness gap).",
+            ["empty per_block"],
+            "unknown",
+        )
+    m = _metric_series(rows)
+    end_drift = _end_drift(chain, m["resid_in"])
+    compounding = _compounding_label(m["resid_in"], end_drift)
+    end_cos = m["cos"][-1]
+    min_top1, min_top2 = min(m["top1"]), min(m["top2"])
+    rationale = _build_rationale(m, compounding, end_cos, end_drift)
+    fp16_hit = _fp16_gate(rows, rationale, compounding)
+    if fp16_hit is not None:
+        return fp16_hit
+    if _is_option_3(end_cos, min_top1, min_top2, compounding, end_drift):
         return _decision_payload(
             3,
             "Expert tier needs higher precision than single-scale ternary for multi-block "
@@ -310,15 +343,7 @@ def decide(chain: dict) -> dict:
             rationale,
             compounding,
         )
-
-    if (
-        end_cos >= 0.93
-        and min_top1 >= 0.98
-        and min_top2 >= 0.98
-        and compounding in ("sublinear_or_saturating", "unknown", "roughly_linear")
-        and (end_drift is None or end_drift < 0.25)
-        and min(m["cos"]) >= 0.92
-    ):
+    if _is_option_1(end_cos, min_top1, min_top2, compounding, end_drift, m["cos"]):
         return _decision_payload(
             1,
             "Expert-only ternary remains viable for multi-block "
@@ -326,7 +351,6 @@ def decide(chain: dict) -> dict:
             rationale,
             compounding,
         )
-
     return _decision_payload(
         2,
         "Needs a correction mechanism (e.g. residual feedback, scale refresh, "
@@ -344,7 +368,6 @@ def _fmt_commit(impl: object) -> str:
 
 
 def _why_not_others(decision: int) -> str:
-    """Decision-relative prose for the four #68 options."""
     selected = {
         1: "selected — drift bounded / non-compounding on the measured chain.",
         2: "selected — intermediate degradation; correction mechanism indicated.",
@@ -383,12 +406,30 @@ def _metrics_table(rows: list[dict]) -> list[str]:
     return lines
 
 
-def write_results_md(path: Path, payload: dict) -> None:
-    """Human report with agent citation, #64 baseline, and one decision."""
-    d = payload["decision"]
-    dec = int(d["decision"])
-    rows = payload["chain"]["per_block"]
+def _fp16_table(rows: list[dict]) -> list[str]:
+    if not any(r.get("fp16_control") for r in rows):
+        return []
     lines = [
+        "",
+        "### FP16 control",
+        "",
+        "| block | block_out cos | top-1 | top-2 |",
+        "|------:|--------------:|------:|------:|",
+    ]
+    for row in rows:
+        f = row.get("fp16_control")
+        if not f:
+            continue
+        t2 = f.get("router_top2_set_agreement", f.get("router_topk_set_agreement"))
+        lines.append(
+            f"| {row['block']} | {f['block_output_cosine']:.6f} | "
+            f"{f['router_top1_agreement']:.6f} | {t2:.6f} |"
+        )
+    return lines
+
+
+def _report_header(payload: dict, dec: int, decision_text: str) -> list[str]:
+    return [
         "# Expert-only ternary multi-block residual fidelity",
         "",
         f"**Agent:** {AGENT_LINE}",
@@ -399,66 +440,43 @@ def write_results_md(path: Path, payload: dict) -> None:
         "",
         "## Decision",
         "",
-        f"**Option {dec} — {d['decision_text']}**",
+        f"**Option {dec} — {decision_text}**",
         "",
         "Rationale:",
         "",
     ]
+
+
+def write_results_md(path: Path, payload: dict) -> None:
+    """Human report with agent citation, #64 baseline, and one decision."""
+    d = payload["decision"]
+    dec = int(d["decision"])
+    rows = payload["chain"]["per_block"]
+    lines = _report_header(payload, dec, d["decision_text"])
     for r in d.get("rationale", []):
         lines.append(f"- `{r}`")
     lines += ["", "### Why not the other options", "", _why_not_others(dec), ""]
     lines += [
         "## #64 baseline (block 0 only — cite, not re-proved)",
         "",
-        "Source: `reports/grok-1-full-block-forward/` (PR #64). Expert-only:",
-        "",
-        "| Metric | Value |",
-        "|--------|------:|",
-        "| block-output cosine | 0.963572 |",
-        "| residual-stream cosine | 1.000000 |",
-        "| residual drift | 0.000000 |",
-        "| router top-1 / top-2 | 1.000000 / 1.000000 |",
-        "| MoE-output cosine | 0.773483 |",
-        "",
-        "Block-0 expert-only cosine in this run matched #64 under GOZ1 v3 pack-only scales.",
+        "Source: `reports/grok-1-full-block-forward/` (PR #64). Expert-only cosine 0.963572.",
         "",
         "## Method",
         "",
         "- Sequential chain with paired residual trajectories.",
         "- Experts ternary (v3 pack-only); attention/routers/norms f32.",
-        "- Block 0 seed: embedding × EMBEDDING_MULTIPLIER; no Gaussian; no embed for b≠0.",
         f"- Tokens: {payload['chain']['tokens']}, seed {payload['chain']['token_seed']}.",
         "",
         "## Per-block metrics (expert-only vs FP reference)",
         "",
     ]
     lines += _metrics_table(rows)
-    if any(r.get("fp16_control") for r in rows):
-        lines += [
-            "",
-            "### FP16 control",
-            "",
-            "| block | block_out cos | top-1 | top-2 |",
-            "|------:|--------------:|------:|------:|",
-        ]
-        for row in rows:
-            f = row.get("fp16_control")
-            if not f:
-                continue
-            t2 = f.get("router_top2_set_agreement", f.get("router_topk_set_agreement"))
-            lines.append(
-                f"| {row['block']} | {f['block_output_cosine']:.6f} | "
-                f"{f['router_top1_agreement']:.6f} | {t2:.6f} |"
-            )
+    lines += _fp16_table(rows)
     lines += [
         "",
         "## Provenance",
         "",
         "See `metrics.json` for pack SHA-256, scales, τ, and `scale_sources` (`pack_v2`).",
-        "",
-        "## Non-goals",
-        "",
-        "Full 64-block gen, attention/router/norm ternary, #59 proxy, CUDA/Myelin.",
         "",
     ]
     path.write_text("\n".join(lines) + "\n")

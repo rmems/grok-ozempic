@@ -116,27 +116,19 @@ class PackOnlyScaleTests(unittest.TestCase):
             require_pack_only_scales(_FakePack(), ["block_000.slot_00.moe_expert.gate"])
 
 
-def _expert_row(
-    block: int,
-    *,
-    cos: float,
-    resid_in_drift: float,
-    top1: float = 1.0,
-    top2: float = 1.0,
-    js: float = 0.0,
-    moe: float = 0.9,
-    out_drift: float = 0.05,
-    with_fp16: bool = True,
-) -> dict:
+def _expert_row(block: int, metrics: dict, *, with_fp16: bool = True) -> dict:
+    """Build one per-block row; ``metrics`` holds cos/top1/top2/drift fields."""
+    cos = metrics["cos"]
+    resid_in_drift = metrics["resid_in_drift"]
     row = {
         "block": block,
         "expert_only": {
             "block_output_cosine": cos,
-            "block_output_drift_relative_norm": out_drift,
-            "moe_output_cosine": moe,
-            "router_top1_agreement": top1,
-            "router_top2_set_agreement": top2,
-            "expert_load_js_bits": js,
+            "block_output_drift_relative_norm": metrics.get("out_drift", 0.05),
+            "moe_output_cosine": metrics.get("moe", 0.9),
+            "router_top1_agreement": metrics.get("top1", 1.0),
+            "router_top2_set_agreement": metrics.get("top2", 1.0),
+            "expert_load_js_bits": metrics.get("js", 0.0),
             "residual_stream_in": {
                 "residual_in_cosine": max(0.0, 1.0 - resid_in_drift),
                 "residual_in_drift_relative_norm": resid_in_drift,
@@ -157,10 +149,10 @@ class DecideTests(unittest.TestCase):
     def test_bounded_chain_is_option_1(self) -> None:
         chain = {
             "per_block": [
-                _expert_row(0, cos=0.963, resid_in_drift=0.0),
-                _expert_row(1, cos=0.955, resid_in_drift=0.04),
-                _expert_row(2, cos=0.950, resid_in_drift=0.07),
-                _expert_row(3, cos=0.948, resid_in_drift=0.09),
+                _expert_row(0, {"cos": 0.963, "resid_in_drift": 0.0}),
+                _expert_row(1, {"cos": 0.955, "resid_in_drift": 0.04}),
+                _expert_row(2, {"cos": 0.950, "resid_in_drift": 0.07}),
+                _expert_row(3, {"cos": 0.948, "resid_in_drift": 0.09}),
             ],
             "end_of_chain": {
                 "expert_only_end_residual_in": {
@@ -174,10 +166,10 @@ class DecideTests(unittest.TestCase):
     def test_collapse_is_option_3(self) -> None:
         chain = {
             "per_block": [
-                _expert_row(0, cos=0.96, resid_in_drift=0.0),
-                _expert_row(1, cos=0.80, resid_in_drift=0.2, top1=0.85),
-                _expert_row(2, cos=0.60, resid_in_drift=0.45, top1=0.70),
-                _expert_row(3, cos=0.40, resid_in_drift=0.70, top1=0.50),
+                _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
+                _expert_row(1, {"cos": 0.80, "resid_in_drift": 0.2, "top1": 0.85}),
+                _expert_row(2, {"cos": 0.60, "resid_in_drift": 0.45, "top1": 0.70}),
+                _expert_row(3, {"cos": 0.40, "resid_in_drift": 0.70, "top1": 0.50}),
             ],
             "end_of_chain": {
                 "expert_only_end_residual_in": {
@@ -189,14 +181,14 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(decide(chain)["decision"], 3)
 
     def test_fp16_failure_is_option_4(self) -> None:
-        rows = [_expert_row(0, cos=0.96, resid_in_drift=0.0)]
+        rows = [_expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0})]
         rows[0]["fp16_control"]["block_output_cosine"] = 0.5
         self.assertEqual(decide({"per_block": rows})["decision"], 4)
 
     def test_missing_fp16_is_option_4(self) -> None:
         chain = {
             "per_block": [
-                _expert_row(0, cos=0.96, resid_in_drift=0.0, with_fp16=False),
+                _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}, with_fp16=False),
             ]
         }
         self.assertEqual(decide(chain)["decision"], 4)
@@ -204,10 +196,10 @@ class DecideTests(unittest.TestCase):
     def test_intermediate_is_option_2(self) -> None:
         chain = {
             "per_block": [
-                _expert_row(0, cos=0.96, resid_in_drift=0.0),
-                _expert_row(1, cos=0.91, resid_in_drift=0.10),
-                _expert_row(2, cos=0.89, resid_in_drift=0.16),
-                _expert_row(3, cos=0.87, resid_in_drift=0.22),
+                _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
+                _expert_row(1, {"cos": 0.91, "resid_in_drift": 0.10}),
+                _expert_row(2, {"cos": 0.89, "resid_in_drift": 0.16}),
+                _expert_row(3, {"cos": 0.87, "resid_in_drift": 0.22}),
             ],
             "end_of_chain": {
                 "expert_only_end_residual_in": {
@@ -217,6 +209,26 @@ class DecideTests(unittest.TestCase):
             },
         }
         self.assertEqual(decide(chain)["decision"], 2)
+
+    def test_final_hop_runaway_is_option_3(self) -> None:
+        """Greptile: end drift must enter compounding, not only resid_in series."""
+        chain = {
+            "per_block": [
+                _expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0}),
+                _expert_row(1, {"cos": 0.95, "resid_in_drift": 0.05}),
+                _expert_row(2, {"cos": 0.94, "resid_in_drift": 0.08}),
+                _expert_row(3, {"cos": 0.93, "resid_in_drift": 0.10}),
+            ],
+            "end_of_chain": {
+                "expert_only_end_residual_in": {
+                    "residual_in_cosine": 0.7,
+                    "residual_in_drift_relative_norm": 0.55,
+                }
+            },
+        }
+        d = decide(chain)
+        self.assertEqual(d["decision"], 3)
+        self.assertEqual(d["compounding"], "superlinear_or_runaway")
 
 
 class ReportTests(unittest.TestCase):
@@ -231,7 +243,7 @@ class ReportTests(unittest.TestCase):
             "chain": {
                 "tokens": 8,
                 "token_seed": 1,
-                "per_block": [_expert_row(0, cos=0.96, resid_in_drift=0.0)],
+                "per_block": [_expert_row(0, {"cos": 0.96, "resid_in_drift": 0.0})],
             },
         }
         with tempfile.TemporaryDirectory() as td:

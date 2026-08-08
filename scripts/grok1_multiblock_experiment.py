@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Expert-only ternary multi-block residual fidelity (GH #68 / RM-255).
-
-Sequential short chain with paired residual trajectories. Experts are GOZ1
-ternary (v3 pack-only); attention, routers, and norms stay high-precision.
-"""
+"""Expert-only ternary multi-block residual fidelity (GH #68 / RM-255)."""
 from __future__ import annotations
 
 import argparse
@@ -44,7 +40,6 @@ from grok1_multiblock_lib import (  # noqa: E402
 )
 from route_preservation_io import MetricsError  # noqa: E402
 
-# Re-export for unit tests that import from this module.
 __all__ = [
     "decide",
     "parse_blocks",
@@ -61,8 +56,6 @@ EXIT_OP = 1
 
 @dataclass(frozen=True)
 class ChainPaths:
-    """Path patterns for npy dirs and packs along the block chain."""
-
     npy_root: Path
     npy_pattern: str
     pack_root: Path
@@ -71,37 +64,37 @@ class ChainPaths:
 
 
 def _validate_embedding_shard(shard: Path, ids: np.ndarray) -> None:
-    """Fail closed if the embedding table is not a 2-D float matrix."""
     table = np.load(shard, mmap_mode="r")
     if table.ndim != 2:
         raise ForwardError(f"{shard}: expected 2-D embedding table, got shape {table.shape}")
     if table.shape[1] != 6144:
-        raise ForwardError(
-            f"{shard}: expected model width 6144, got {table.shape[1]}"
-        )
+        raise ForwardError(f"{shard}: expected model width 6144, got {table.shape[1]}")
     if ids.max(initial=0) >= table.shape[0]:
-        raise ForwardError(
-            f"{shard}: token id {int(ids.max())} exceeds vocab {table.shape[0]}"
-        )
+        raise ForwardError(f"{shard}: token id {int(ids.max())} exceeds vocab {table.shape[0]}")
 
 
-def _run_block(
-    b: int,
-    paths: ChainPaths,
-    h_ref: np.ndarray,
-    h_pilot: np.ndarray,
-    h_fp16: np.ndarray | None,
-    top_k: int,
-    skip_fp16: bool,
-) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray | None, dict]:
-    """Forward one block for ref / pilot / optional fp16; return metrics + new streams."""
+def _block_paths(paths: ChainPaths, b: int) -> tuple[Path, Path]:
     npy_dir = resolve_path(paths.npy_root, paths.npy_pattern, b)
     pack_path = resolve_path(paths.pack_root, paths.pack_pattern, b)
     if not npy_dir.is_dir():
         raise ForwardError(f"missing npy dir for block {b}: {npy_dir}")
     if not pack_path.is_file():
         raise ForwardError(f"missing pack for block {b}: {pack_path}")
+    return npy_dir, pack_path
 
+
+def _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k):
+    print("  fp16 control ...", flush=True)
+    fp16_trace = forward_block(h_fp16, control, top_k=top_k)
+    fp16_cmp = compare(ref_trace, fp16_trace)
+    fp16_cmp["residual_stream_in"] = stream_fp16
+    print(f"    {fp16_trace.seconds:.1f}s  block_out_cos={fp16_cmp['block_output_cosine']:.6f}", flush=True)
+    return fp16_cmp, fp16_trace.block_out
+
+
+def _run_block(b, paths, h_ref, h_pilot, h_fp16, top_k, skip_fp16):
+    """Forward one block; return metrics row and next residual streams."""
+    npy_dir, pack_path = _block_paths(paths, b)
     print(f"== block {b:03d}  residual_in shape={h_ref.shape}", flush=True)
     reference, pack, mixed, control = load_block_sources(
         b, npy_dir, pack_path, require_fp16=not skip_fp16
@@ -124,18 +117,9 @@ def _run_block(
         flush=True,
     )
 
-    fp16_cmp = None
-    next_fp16 = h_fp16
+    fp16_cmp, next_fp16 = None, h_fp16
     if control is not None and h_fp16 is not None:
-        print("  fp16 control ...", flush=True)
-        fp16_trace = forward_block(h_fp16, control, top_k=top_k)
-        fp16_cmp = compare(ref_trace, fp16_trace)
-        fp16_cmp["residual_stream_in"] = stream_fp16
-        print(
-            f"    {fp16_trace.seconds:.1f}s  block_out_cos={fp16_cmp['block_output_cosine']:.6f}",
-            flush=True,
-        )
-        next_fp16 = fp16_trace.block_out
+        fp16_cmp, next_fp16 = _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k)
 
     row = {
         "block": b,
@@ -143,43 +127,27 @@ def _run_block(
         "expert_only": pilot_cmp,
         "fp16_control": fp16_cmp,
     }
-    prov = pack_provenance_row(b, pack_path, npy_dir, pack)
-    return row, ref_trace.block_out, pilot_trace.block_out, next_fp16, prov
+    return row, ref_trace.block_out, pilot_trace.block_out, next_fp16, pack_provenance_row(b, pack_path, npy_dir, pack)
 
 
-def run_chain(
-    blocks: list[int],
-    paths: ChainPaths,
-    *,
-    tokens: int,
-    seed: int,
-    top_k: int,
-    skip_fp16: bool,
-) -> dict:
-    """Run FP reference, expert-only, and (unless skipped) FP16 control chains."""
+def run_chain(blocks, paths, *, tokens, seed, top_k, skip_fp16) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard, ids)
     h0 = embedding_rows(paths.embedding_shard, ids)
-
     h_ref, h_pilot = h0, h0.copy()
     h_fp16 = h0.copy() if not skip_fp16 else None
-    per_block: list[dict] = []
-    pack_provenance: list[dict] = []
-
+    per_block, pack_provenance = [], []
     for b in blocks:
         row, h_ref, h_pilot, h_fp16, prov = _run_block(
             b, paths, h_ref, h_pilot, h_fp16, top_k, skip_fp16
         )
         per_block.append(row)
         pack_provenance.append(prov)
-
     end = {
         "expert_only_end_residual_in": residual_stream_metrics(h_ref, h_pilot),
-        "fp16_end_residual_in": residual_stream_metrics(h_ref, h_fp16)
-        if h_fp16 is not None
-        else None,
+        "fp16_end_residual_in": residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None,
     }
     return {
         "blocks": blocks,
@@ -212,6 +180,25 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _provenance(paths: ChainPaths, skip_fp16: bool) -> dict:
+    return {
+        "issue": "GH #68 / Linear RM-255",
+        "agent": AGENT_LINE,
+        "model": "grok-4.5",
+        "design": "Grok Build super-research design (sequential chain, pack-only v3)",
+        "baseline_64": BASELINE_64,
+        "implementation": implementation_commit(),
+        "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+        "numpy": np.__version__,
+        "python": platform.python_version(),
+        "embedding_shard": str(paths.embedding_shard),
+        "skip_fp16_control": bool(skip_fp16),
+        "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+        "ternary_policy": "experts only; attention/routers/norms high precision",
+        "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
+    }
+
+
 def run(args: argparse.Namespace) -> int:
     if args.tokens < 1:
         raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
@@ -225,69 +212,18 @@ def run(args: argparse.Namespace) -> int:
     )
     args.out = args.out.expanduser()
     chain = run_chain(
-        blocks,
-        paths,
-        tokens=args.tokens,
-        seed=args.seed,
-        top_k=args.top_k,
-        skip_fp16=args.skip_fp16_control,
+        blocks, paths, tokens=args.tokens, seed=args.seed, top_k=args.top_k, skip_fp16=args.skip_fp16_control
     )
     decision = decide(chain)
-    payload = {
-        "provenance": {
-            "issue": "GH #68 / Linear RM-255",
-            "agent": AGENT_LINE,
-            "model": "grok-4.5",
-            "design": "Grok Build super-research design (sequential chain, pack-only v3)",
-            "baseline_64": BASELINE_64,
-            "implementation": implementation_commit(),
-            "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
-            "numpy": np.__version__,
-            "python": platform.python_version(),
-            "embedding_shard": str(paths.embedding_shard),
-            "skip_fp16_control": bool(args.skip_fp16_control),
-            "activation_policy": (
-                "paired residual trajectories; block0=embed*EMBEDDING_MULTIPLIER; "
-                "no Gaussian; no embedding rows for b!=0"
-            ),
-            "ternary_policy": "experts only; attention/routers/norms high precision",
-            "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
-        },
-        "chain": chain,
-        "decision": decision,
-    }
+    payload = {"provenance": _provenance(paths, args.skip_fp16_control), "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
-    out_json = args.out / "metrics.json"
-    out_json.write_text(json.dumps(payload, indent=2) + "\n")
-    print(f"wrote {out_json}")
+    (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"wrote {args.out / 'metrics.json'}")
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        md = args.out / "results.md"
-        write_results_md(md, payload)
-        print(f"wrote {md}")
+        write_results_md(args.out / "results.md", payload)
+        print(f"wrote {args.out / 'results.md'}")
     return EXIT_OK
-
-
-def _write_unresolved(out: Path, reason: str) -> Path:
-    out.mkdir(parents=True, exist_ok=True)
-    dest = out / "multiblock-unresolved.json"
-    dest.write_text(
-        json.dumps(
-            {
-                "provenance": {
-                    "issue": "GH #68 / Linear RM-255",
-                    "agent": AGENT_LINE,
-                    "implementation": implementation_commit(),
-                },
-                "decision": 4,
-                "decision_text": "Inconclusive — architectural element unresolved.",
-                "unresolved_reason": reason,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-    return dest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -296,23 +232,33 @@ def main(argv: list[str] | None = None) -> int:
         return run(args)
     except UnresolvedArchitectureError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        dest = _write_unresolved(args.out, str(exc))
-        print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
+        args.out.mkdir(parents=True, exist_ok=True)
+        dest = args.out / "multiblock-unresolved.json"
+        dest.write_text(
+            json.dumps(
+                {
+                    "provenance": {"issue": "GH #68 / Linear RM-255", "agent": AGENT_LINE, "implementation": implementation_commit()},
+                    "decision": 4,
+                    "decision_text": "Inconclusive — architectural element unresolved.",
+                    "unresolved_reason": str(exc),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
         return EXIT_UNRESOLVED
     except ForwardError as exc:
-        msg = str(exc)
         print(f"error: {exc}", file=sys.stderr)
-        if "legacy_oracle" in msg and hasattr(args, "out"):
+        if "legacy_oracle" in str(exc) and hasattr(args, "out"):
             args.out.mkdir(parents=True, exist_ok=True)
+            # decision option index 4, not a credential (bandit B105)
+            opt_inconclusive = 4
             (args.out / "multiblock-legacy-oracle.json").write_text(
                 json.dumps(
                     {
-                        "decision": 4,  # nosec B105 — decision option index, not a password
-                        "decision_text": (
-                            "Inconclusive — GOZ1 pack used legacy_oracle scale; "
-                            "rebuild v3 pack-only."
-                        ),
-                        "error": msg,
+                        "decision": opt_inconclusive,
+                        "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
+                        "error": str(exc),
                         "agent": AGENT_LINE,
                     },
                     indent=2,
