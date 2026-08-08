@@ -24,8 +24,8 @@
       }
     },
     "implementation": {
-      "commit": "18a027b2d589b9c1cbfc61342ca1334ff68d0daa",
-      "dirty": true
+      "commit": "e48f996fbb609b1f65c27fb00bb58bc78b45dd30",
+      "dirty": false
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "numpy": "2.5.1",
