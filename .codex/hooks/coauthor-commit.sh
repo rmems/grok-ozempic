@@ -42,7 +42,8 @@ esac
 head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0
 reported=$(printf '%s' "$payload" |
   jq -r '(.tool_response.stdout // "") + "\n" + (.tool_response.stderr // "")' 2>/dev/null |
-  sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' | head -n 1)
+  sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' |
+  sed -n '1p')
 
 if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
   :
