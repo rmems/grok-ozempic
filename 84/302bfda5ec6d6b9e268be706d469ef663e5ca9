@@ -1,0 +1,56 @@
+.codex/hooks/coauthor-record-head.sh
+  s_efe4d58ef9c244::t_15717a0a49dd81 1-39
+scripts/grok1_multiblock_experiment.py
+  s_efe4d58ef9c244::t_e43596672652f9 34,36,45,75-76,78-79,198-210,216-217,223-234,239-244,255-258,265-296,298-307,311-312,317,331-336,380-383,439,441-450,452-455,458,516,518-519
+  s_efe4d58ef9c244::t_f6dd34680a0e67 496,522-546,550-553,556-558,566-569,579,604
+  s_efe4d58ef9c244::t_a9d60b5d7959ee 38,41,52,60,67
+  s_efe4d58ef9c244::t_a4d44bf86995e8 245-253,384-396,404-436
+.beads/issues.jsonl
+  s_efe4d58ef9c244::t_5338c69cbee46d 13
+  s_efe4d58ef9c244::t_8e28ec56dbe3c8 1,9,14-15,17
+  ai_agent 10
+  s_efe4d58ef9c244::t_1b2b93f270bf06 8,11-12
+  s_efe4d58ef9c244::t_be78dd9a1251d8 16
+.codex/hooks/test-coauthor-hooks.sh
+  s_efe4d58ef9c244::t_15717a0a49dd81 1-101
+.codex/hooks/coauthor-commit.sh
+  s_efe4d58ef9c244::t_15717a0a49dd81 1-67
+AGENTS.md
+  s_efe4d58ef9c244::t_15717a0a49dd81 50-65,68-71
+scripts/grok1_multiblock_lib.py
+  s_efe4d58ef9c244::t_9f658df9e118ce 1348-1490
+  s_efe4d58ef9c244::t_74cafd40a0eb10 104-107,1012-1229
+  s_efe4d58ef9c244::t_1bccef8c347f38 35-38,69-86,120-133,316-331,350-353
+justfile
+  s_efe4d58ef9c244::t_c5fe2be53f3d0a 37,102-113,180
+.github/workflows/python-scripts.yml
+  s_efe4d58ef9c244::t_c5fe2be53f3d0a 44-52
+.codex/hooks.json
+  s_efe4d58ef9c244::t_15717a0a49dd81 1-31
+scripts/test_grok1_multiblock_experiment.py
+  s_efe4d58ef9c244::t_77e101f090f95b 660-662
+  s_efe4d58ef9c244::t_6cc1463dcaacf8 20-22,26,31,36-38,41,43
+  s_efe4d58ef9c244::t_7af655065029c2 39-40,615-659,663-673
+  s_efe4d58ef9c244::t_76457908670e16 567-569,571-614,674-857
+  s_efe4d58ef9c244::t_d81af38da484ca 6,11,17
+  s_efe4d58ef9c244::t_2c52f217b98ad3 5
+  s_efe4d58ef9c244::t_ecda961386e6ca 570
+docs/superpowers/specs/2026-08-08-gh-75-expert-remedy-v2-design.md
+  s_efe4d58ef9c244::t_cfd65cab83bb89 3-4,6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "84302bfda5ec6d6b9e268be706d469ef663e5ca9",
+  "prompts": {},
+  "sessions": {
+    "s_efe4d58ef9c244": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe4a5-fc60-7980-8a40-d626b13d8461",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
