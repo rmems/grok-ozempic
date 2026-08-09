@@ -83,7 +83,7 @@ Add two public arms and internal modes:
 | `stacked_hp_channel_alpha` | `periodic_hp_plus_channel_alpha` | FP16 control on HP blocks; `ChannelAlphaExperts` elsewhere |
 | `hp_ceiling` | `all_hp` | FP16 control on every block |
 
-The stacked decision run uses the unchanged N=2 derivation, giving HP blocks
+The stacked evidence run (secondary; no independent decision) uses the unchanged N=2 derivation, giving HP blocks
 `{1,3}` and channel-alpha blocks `{0,2}`. Its label is
 `expert_periodic_hp_n2_plus_channel_alpha`. Ternary-block scale provenance must
 say `research_per_channel_side`; HP blocks must say `fp16_control`.

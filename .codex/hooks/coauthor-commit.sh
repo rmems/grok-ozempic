@@ -48,11 +48,30 @@ reported=$(printf '%s' "$payload" |
 if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
   :
 else
+  # Fallback proof must show HEAD was just created by this tool call; a
+  # bare mention of "git commit" plus a branch checkout would otherwise
+  # change HEAD without a new commit and trigger a false amend.
   session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
   state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
   [ -r "$state" ] || exit 0
-  [ "$(cat "$state" 2>/dev/null)" = "$head" ] && exit 0
+  prev=$(cat "$state" 2>/dev/null)
+  [ -n "$prev" ] || exit 0
+  [ "$prev" = "$head" ] && exit 0
+  if ! git merge-base --is-ancestor "$prev" "$head" 2>/dev/null; then
+    exit 0
+  fi
+  if [ "$(git rev-list --count "$prev..$head" 2>/dev/null)" != "1" ]; then
+    exit 0
+  fi
 fi
+
+# Never amend a commit that was just pushed (including untracked remote refs).
+case "${payload:-}" in
+  *git\ push* ) exit 0 ;;
+esac
+case "${cmd:-}" in
+  *git\ push* ) exit 0 ;;
+esac
 
 # Never rewrite merges, in-progress history operations, or published history.
 [ "$(git log -1 --format=%P | wc -w)" -gt 1 ] && exit 0

@@ -1020,11 +1020,41 @@ def decide_remedy(chain: dict) -> dict:
     return _remedy_from_metrics(chain, m, exit_drift, rationale, compounding)
 
 
+def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
+    """Validate per_block row count, block IDs, and required nested metric fields."""
+    rows = chain.get("per_block")
+    if not isinstance(rows, list) or not rows:
+        return []
+    expected_blocks = list(BASELINE_72["blocks"])
+    if len(rows) != len(expected_blocks):
+        return [f"{label}:per_block_count={len(rows)} expected={len(expected_blocks)}"]
+    blocks = [r.get("block") for r in rows]
+    if sorted(blocks) != expected_blocks:
+        return [f"{label}:per_block_blocks={sorted(b for b in blocks if b is not None)} expected={expected_blocks}"]
+    for row in rows:
+        try:
+            expert = row.get("expert_only")
+            if not isinstance(expert, dict):
+                return [f"{label}:block_{row.get('block')}:missing_expert_only"]
+            _ = float(expert["block_output_cosine"])
+            _ = float(expert["residual_stream_in"]["residual_in_drift_relative_norm"])
+            _ = float(expert["router_top1_agreement"])
+            _ = float(expert.get("router_topk_set_agreement", expert.get("router_top2_set_agreement", expert["router_top1_agreement"])))
+            _ = float(expert["expert_load_js_bits"])
+            _ = float(expert["block_output_drift_relative_norm"])
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            return [f"{label}:block_{row.get('block')}:malformed_expert_only:{exc}"]
+    return []
+
+
 def _v2_chain_summary(chain: dict) -> dict:
     rows = chain.get("per_block") or []
     if not rows:
         return {"arm_label": chain.get("arm_label"), "empty": True}
-    metrics = _metric_series(rows)
+    try:
+        metrics = _metric_series(rows)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return {"arm_label": chain.get("arm_label"), "empty": True, "malformed": True}
     exit_drift = _exit_drift(chain, metrics["out_drift"])
     compounding = _compounding_label(metrics["resid_in"], exit_drift)
     viable = _remedy_option_1(
@@ -1072,7 +1102,14 @@ def _v2_control_error(chain: dict) -> str | None:
     controls, error = _v2_controls(chain)
     if error is not None:
         return error
-    cosines = [float(control["block_output_cosine"]) for control in controls]
+    cosines: list[float] = []
+    for control in controls:
+        try:
+            if not isinstance(control, dict) or "block_output_cosine" not in control:
+                return "fp16_control_malformed"
+            cosines.append(float(control["block_output_cosine"]))
+        except (TypeError, ValueError, KeyError):
+            return "fp16_control_malformed"
     if min(cosines) < 0.99:
         return f"fp16_control_cosine_below_0.99:{cosines}"
     return None
@@ -1137,6 +1174,7 @@ def _v2_chain_errors(chain: dict, expected_label: str) -> list[str]:
     if label != expected_label:
         return [f"arm_label={label!r} expected={expected_label!r}"]
     errors: list[str] = []
+    errors.extend(_v2_per_block_errors(chain, expected_label))
     mismatch = settings_mismatch_reason(chain)
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
