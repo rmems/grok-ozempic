@@ -93,7 +93,7 @@ Stacked C+A label `expert_periodic_hp_n2_plus_channel_alpha`: channel-α trits o
 | 2 | 0.927502 | 0.242170 | 0.769531 | 0.654297 | 0.004506 | 0.751475 |
 | 3 | 0.905379 | 0.384552 | 0.592285 | 0.376465 | 0.012466 | 0.791595 |
 
-### FP16 control
+#### FP16 control — `expert_periodic_hp_n2_plus_channel_alpha`
 
 | block | block_out cos | top-1 | top-2 |
 |------:|--------------:|------:|------:|
@@ -113,7 +113,7 @@ HP expert ceiling: FP16 experts on every measured block.
 | 2 | 0.999998 | 0.002299 | 1.000000 | 1.000000 | 0.000000 | 0.999994 |
 | 3 | 0.999984 | 0.001945 | 1.000000 | 0.999512 | 0.000000 | 0.999939 |
 
-### FP16 control
+#### FP16 control — `expert_hp_ceiling`
 
 | block | block_out cos | top-1 | top-2 |
 |------:|--------------:|------:|------:|

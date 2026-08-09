@@ -54,7 +54,7 @@ install a Git `post-commit` hook that would stamp commits made by the owner or
 other agents.
 
 - Review and trust new or changed project hooks with `/hooks` in Codex.
-- The default trailer is `Co-Authored-By: Codex <noreply@openai.com>`.
+- The default trailer identity is defined in `.codex/hooks/coauthor-commit.sh`.
 - Set `CODEX_COAUTHOR="Name <email>"` to override it or
   `CODEX_COAUTHOR=0` to disable it for a command/session.
 - In a session that started before the hook was added or trusted, pass the
@@ -66,9 +66,10 @@ Claude's `.claude/` attribution remains separate and unchanged.
 ## Issue tracking
 
 GitHub issues and their automatically synchronized Linear twins (`RM-*`) are
-canonical. Create new work in GitHub only; never manually dual-create a Linear
-twin. `.beads/issues.jsonl` is a committed offline mirror so agents can work
-without network access.
+canonical. Create new work in GitHub; manually dual-create a Linear twin only
+when a repository owner explicitly directs recovery from failed automatic
+synchronization. `.beads/issues.jsonl` is a committed offline mirror so agents
+can work without network access.
 
 **See [CLAUDE.md → Issue tracking](CLAUDE.md#issue-tracking-source-of-truth) for
 the full policy** -- what is tracked, how to resolve a JSONL conflict, and the

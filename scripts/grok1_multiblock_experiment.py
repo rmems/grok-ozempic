@@ -74,7 +74,7 @@ _ARM_TO_MODE = {
     "channel_alpha": "channel_alpha",
     "stacked_hp_channel_alpha": "periodic_hp_plus_channel_alpha",
     "hp_ceiling": "all_hp",
-}
+    }
 _REMEDY_ARMS = frozenset(_ARM_TO_MODE) - {"ternary_baseline"}
 _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 
@@ -201,6 +201,55 @@ def _explicit_schedule_label(hp_blocks: set[int]) -> str:
     return "".join(str(b) for b in sorted(hp_blocks))
 
 
+_SCHEDULED_MODES = frozenset({"periodic_hp", "periodic_hp_plus_channel_alpha"})
+
+
+def _schedule_label(hp_blocks: set[int], hp_period: int, explicit_hp: bool) -> str:
+    return _explicit_schedule_label(hp_blocks) if explicit_hp else f"n{hp_period}"
+
+
+def _block_set_text(blocks: list[int]) -> str:
+    return ",".join(map(str, blocks))
+
+
+def _arm_identity(
+    expert_mode: str,
+    schedule: str,
+    ternary_blocks: list[int],
+    hp_blocks: list[int],
+) -> tuple[str, str | None, list[int]]:
+    if expert_mode == "periodic_hp":
+        label = f"expert_periodic_hp_{schedule}"
+        prose = (
+            f"Arm C label `{label}`: ternary on {{{_block_set_text(ternary_blocks)}}}, "
+            f"HP (FP16 experts) on {{{_block_set_text(hp_blocks)}}}."
+        )
+        return label, prose, ternary_blocks
+    if expert_mode == "periodic_hp_plus_channel_alpha":
+        label = f"expert_periodic_hp_{schedule}_plus_channel_alpha"
+        prose = (
+            f"Stacked C+A label `{label}`: channel-α trits on "
+            f"{{{_block_set_text(ternary_blocks)}}}, HP (FP16 experts) on "
+            f"{{{_block_set_text(hp_blocks)}}}."
+        )
+        return label, prose, ternary_blocks
+    if expert_mode == "all_hp":
+        return "expert_hp_ceiling", "HP expert ceiling: FP16 experts on every measured block.", []
+    if expert_mode == "channel_alpha":
+        return "research_per_channel_side", None, ternary_blocks
+    return expert_mode, None, ternary_blocks
+
+
+def _schedule_metadata(expert_mode: str, hp_period: int, explicit_hp: bool) -> tuple[int | None, str]:
+    if expert_mode == "all_hp":
+        return None, "all"
+    if explicit_hp:
+        return None, "explicit"
+    if expert_mode in _SCHEDULED_MODES:
+        return int(hp_period), "periodic"
+    return None, "none"
+
+
 def _arm_meta(
     blocks,
     expert_mode: str,
@@ -210,58 +259,47 @@ def _arm_meta(
     *,
     explicit_hp: bool,
 ) -> dict:
-    ternary_set = sorted(set(blocks) - hp_blocks)
+    ternary_blocks = sorted(set(blocks) - hp_blocks)
     hp_list = sorted(hp_blocks)
-    prose = None
-    arm_label = expert_mode
-    if expert_mode == "periodic_hp":
-        schedule = _explicit_schedule_label(hp_blocks) if explicit_hp else f"n{hp_period}"
-        arm_label = f"expert_periodic_hp_{schedule}"
-        prose = (
-            f"Arm C label `{arm_label}`: "
-            f"ternary on {{{','.join(map(str, ternary_set))}}}, "
-            f"HP (FP16 experts) on {{{','.join(map(str, hp_list))}}}."
-        )
-    elif expert_mode == "periodic_hp_plus_channel_alpha":
-        schedule = _explicit_schedule_label(hp_blocks) if explicit_hp else f"n{hp_period}"
-        arm_label = f"expert_periodic_hp_{schedule}_plus_channel_alpha"
-        prose = (
-            f"Stacked C+A label `{arm_label}`: channel-α trits on "
-            f"{{{','.join(map(str, ternary_set))}}}, HP (FP16 experts) on "
-            f"{{{','.join(map(str, hp_list))}}}."
-        )
-    elif expert_mode == "all_hp":
-        arm_label = "expert_hp_ceiling"
-        ternary_set = []
-        prose = "HP expert ceiling: FP16 experts on every measured block."
-    elif expert_mode == "channel_alpha":
-        arm_label = "research_per_channel_side"
+    schedule = _schedule_label(hp_blocks, hp_period, explicit_hp)
+    arm_label, prose, ternary_blocks = _arm_identity(
+        expert_mode, schedule, ternary_blocks, hp_list
+    )
+    stored_period, schedule_kind = _schedule_metadata(expert_mode, hp_period, explicit_hp)
+    channel_blocks = ternary_blocks if expert_mode in {"channel_alpha", "periodic_hp_plus_channel_alpha"} else []
     return {
         "expert_mode": expert_mode,
-        "hp_period": int(hp_period)
-        if expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
-        and not explicit_hp
-        else None,
-        "hp_schedule_kind": "all"
-        if expert_mode == "all_hp"
-        else (
-            "explicit"
-            if explicit_hp
-            else (
-                "periodic"
-                if expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
-                else "none"
-            )
-        ),
+        "hp_period": stored_period,
+        "hp_schedule_kind": schedule_kind,
         "hp_blocks": hp_list,
-        "ternary_blocks": ternary_set,
-        "channel_alpha_blocks": ternary_set
-        if expert_mode in ("channel_alpha", "periodic_hp_plus_channel_alpha")
-        else [],
+        "ternary_blocks": ternary_blocks,
+        "channel_alpha_blocks": channel_blocks,
         "hp_schedule_prose": prose,
         "arm_label": arm_label,
         "pilot_labels_per_block": labels,
     }
+
+
+def _validate_explicit_hp_blocks(
+    blocks: list[int], explicit_hp_blocks: set[int] | None
+) -> set[int] | None:
+    if explicit_hp_blocks is None:
+        return None
+    outside = sorted(explicit_hp_blocks - set(blocks))
+    if outside:
+        raise ForwardError(
+            f"--hp-blocks contains blocks outside --blocks: {outside}; chain={blocks}"
+        )
+    return set(explicit_hp_blocks)
+
+
+def _resolve_ceiling_blocks(chain_blocks: set[int], explicit: set[int] | None) -> set[int]:
+    if explicit is not None and explicit != chain_blocks:
+        raise ForwardError(
+            "hp_ceiling requires every chain block in --hp-blocks "
+            f"(expected {sorted(chain_blocks)}, got {sorted(explicit)})"
+        )
+    return chain_blocks
 
 
 def _resolve_hp_blocks(
@@ -271,25 +309,14 @@ def _resolve_hp_blocks(
     explicit_hp_blocks: set[int] | None,
 ) -> set[int]:
     chain_blocks = set(blocks)
-    if explicit_hp_blocks is not None:
-        outside = sorted(explicit_hp_blocks - chain_blocks)
-        if outside:
-            raise ForwardError(
-                f"--hp-blocks contains blocks outside --blocks: {outside}; chain={blocks}"
-            )
+    explicit = _validate_explicit_hp_blocks(blocks, explicit_hp_blocks)
     if expert_mode == "all_hp":
-        if explicit_hp_blocks is not None and explicit_hp_blocks != chain_blocks:
-            raise ForwardError(
-                "hp_ceiling requires every chain block in --hp-blocks "
-                f"(expected {sorted(chain_blocks)}, got {sorted(explicit_hp_blocks)})"
-            )
-        return chain_blocks
-    scheduled_modes = {"periodic_hp", "periodic_hp_plus_channel_alpha"}
-    if expert_mode in scheduled_modes:
-        if explicit_hp_blocks is not None:
-            return set(explicit_hp_blocks)
+        return _resolve_ceiling_blocks(chain_blocks, explicit)
+    if expert_mode in _SCHEDULED_MODES:
+        if explicit is not None:
+            return explicit
         return periodic_hp_blocks(blocks, hp_period)
-    if explicit_hp_blocks is not None:
+    if explicit is not None:
         raise ForwardError(
             f"--hp-blocks is only valid for scheduled HP arms, got mode {expert_mode!r}"
         )

@@ -684,37 +684,43 @@ class RemedyV2ScheduleTests(unittest.TestCase):
         self.assertEqual({applied["gate"], applied["v1"], applied["v2"]}, {"fp16_control"})
 
 
-def _v2_chain(label: str, quality: str) -> dict:
-    schedules = {
-        V2_PRIMARY_ARM: ([1, 2, 3], [], "periodic_hp"),
-        V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
-        V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
-    }
-    metric_sets = {
-        "viable": {
-            "cos": [0.98, 0.97, 0.96, 0.95],
-            "top1": [1.0, 0.99, 0.98, 0.96],
-            "top2": [1.0, 0.98, 0.96, 0.94],
-            "drift": [0.0, 0.05, 0.08, 0.10],
-            "exit": 0.18,
-        },
-        "help": {
-            "cos": [0.96, 0.94, 0.92, 0.90],
-            "top1": [1.0, 0.90, 0.76, 0.65],
-            "top2": [1.0, 0.82, 0.70, 0.56],
-            "drift": [0.0, 0.18, 0.28, 0.36],
-            "exit": 0.42,
-        },
-        "failed": {
-            "cos": [0.95, 0.91, 0.87, 0.84],
-            "top1": [1.0, 0.82, 0.63, 0.50],
-            "top2": [1.0, 0.70, 0.50, 0.30],
-            "drift": [0.0, 0.27, 0.38, 0.49],
-            "exit": 0.58,
-        },
-    }
-    hp_blocks, channel_blocks, mode = schedules[label]
-    metrics = metric_sets[quality]
+_V2_FIXTURE_SCHEDULES = {
+    V2_PRIMARY_ARM: ([1, 2, 3], [], "periodic_hp"),
+    V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
+    V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
+}
+_V2_FIXTURE_METRICS = {
+    "viable": {
+        "cos": [0.98, 0.97, 0.96, 0.95],
+        "top1": [1.0, 0.99, 0.98, 0.96],
+        "top2": [1.0, 0.98, 0.96, 0.94],
+        "drift": [0.0, 0.05, 0.08, 0.10],
+        "exit": 0.18,
+    },
+    "help": {
+        "cos": [0.96, 0.94, 0.92, 0.90],
+        "top1": [1.0, 0.90, 0.76, 0.65],
+        "top2": [1.0, 0.82, 0.70, 0.56],
+        "drift": [0.0, 0.18, 0.28, 0.36],
+        "exit": 0.42,
+    },
+    "failed": {
+        "cos": [0.95, 0.91, 0.87, 0.84],
+        "top1": [1.0, 0.82, 0.63, 0.50],
+        "top2": [1.0, 0.70, 0.50, 0.30],
+        "drift": [0.0, 0.27, 0.38, 0.49],
+        "exit": 0.58,
+    },
+}
+
+
+def _v2_fixture_source(block: int, hp_blocks: list[int], channel_blocks: list[int]) -> str:
+    if block in channel_blocks:
+        return "research_per_channel_side"
+    return "fp16_control" if block in hp_blocks else "pack_v2"
+
+
+def _v2_fixture_rows(metrics: dict, hp_blocks: list[int], channel_blocks: list[int]):
     rows = []
     provenance = []
     for index, block in enumerate(BASELINE_72["blocks"]):
@@ -729,9 +735,7 @@ def _v2_chain(label: str, quality: str) -> dict:
                 },
             )
         )
-        applied_source = "fp16_control" if block in hp_blocks else "pack_v2"
-        if block in channel_blocks:
-            applied_source = "research_per_channel_side"
+        applied_source = _v2_fixture_source(block, hp_blocks, channel_blocks)
         provenance.append(
             {
                 "block": block,
@@ -741,6 +745,13 @@ def _v2_chain(label: str, quality: str) -> dict:
                 "scale_sources": {"expert": applied_source},
             }
         )
+    return rows, provenance
+
+
+def _v2_chain(label: str, quality: str) -> dict:
+    hp_blocks, channel_blocks, mode = _V2_FIXTURE_SCHEDULES[label]
+    metrics = _V2_FIXTURE_METRICS[quality]
+    rows, provenance = _v2_fixture_rows(metrics, hp_blocks, channel_blocks)
     return {
         "blocks": list(BASELINE_72["blocks"]),
         "tokens": BASELINE_72["tokens"],
@@ -870,6 +881,9 @@ class RemedyV2ReportTests(unittest.TestCase):
         self.assertIn("neither mostly-ternary candidate met every locked viability band", body)
         self.assertIn("clear improvement and a viable HP ceiling both hold", body)
         self.assertIn("Secondary `metrics.json` files are evidence-only", body)
+        self.assertEqual(body.splitlines().count("### FP16 control"), 1)
+        self.assertIn(f"#### FP16 control — `{V2_STACKED_ARM}`", body)
+        self.assertIn(f"#### FP16 control — `{V2_CEILING_ARM}`", body)
         self.assertFalse(body.endswith("\n\n"))
 
 
