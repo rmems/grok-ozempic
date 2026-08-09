@@ -867,6 +867,8 @@ class RemedyV2ReportTests(unittest.TestCase):
         self.assertIn("#74 baseline", body)
         self.assertIn(V2_STACKED_ARM, body)
         self.assertIn(V2_CEILING_ARM, body)
+        self.assertIn("neither mostly-ternary candidate met every locked viability band", body)
+        self.assertIn("clear improvement and a viable HP ceiling both hold", body)
         self.assertIn("Secondary `metrics.json` files are evidence-only", body)
 
 

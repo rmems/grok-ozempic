@@ -1429,15 +1429,34 @@ def _v2_comparison_table(comparison: dict) -> list[str]:
 
 
 def _v2_why_not(decision: int) -> str:
-    choices = {
-        1: "a mostly-ternary remedy reaches the locked viability bands.",
-        2: "the best remedy improves or the ceiling bounds the gap, but policy is not viable.",
-        3: "even the expert HP ceiling fails under the current non-expert policy.",
-        4: "required evidence, controls, packs, or provenance are incomplete.",
+    reasons = {
+        1: {
+            1: "selected — a mostly-ternary remedy reaches every locked viability band.",
+            2: "not chosen — the measured policy is already viable; further correction is not required.",
+            3: "not chosen — a viable mostly-ternary arm contradicts the failure outcome.",
+            4: "not chosen — the complete evidence resolves directly to viability.",
+        },
+        2: {
+            1: "not chosen — neither mostly-ternary candidate met every locked viability band.",
+            2: "selected — clear improvement and a viable HP ceiling both hold, but policy misses viability.",
+            3: "not chosen — clear improvement plus a viable ceiling contradict total failure.",
+            4: "not chosen — complete, comparable evidence satisfies the locked Option-2 pair.",
+        },
+        3: {
+            1: "not chosen — no mostly-ternary candidate met every locked viability band.",
+            2: "not chosen — improvement and a viable HP ceiling did not both hold.",
+            3: "selected — remedies do not improve #74 and even the expert HP ceiling fails.",
+            4: "not chosen — complete evidence resolves to the locked failure branch.",
+        },
+        4: {
+            1: "not chosen — viability is not established by the available evidence.",
+            2: "not chosen — the locked improvement-plus-ceiling pair is not established.",
+            3: "not chosen — the locked joint-failure condition is not established.",
+            4: "selected — evidence is incomplete/incomparable or outcomes miss every locked branch.",
+        },
     }
     return "\n".join(
-        f"- **Option {number} ({'selected' if number == decision else 'not chosen'}):** "
-        f"{choices[number]}"
+        f"- **Option {number}:** {reasons[decision][number]}"
         for number in (1, 2, 3, 4)
     )
 
