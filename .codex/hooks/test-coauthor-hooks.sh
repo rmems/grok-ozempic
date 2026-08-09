@@ -14,6 +14,14 @@ post_hook="$repo_root/.codex/hooks/coauthor-commit.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
+# Project hook commands must be harmless when Codex invokes Bash elsewhere.
+nonrepo="$test_root/nonrepo"
+mkdir -p "$nonrepo"
+for phase in PreToolUse PostToolUse; do
+  command=$(jq -r ".hooks.${phase}[0].hooks[0].command" "$repo_root/.codex/hooks.json")
+  (cd "$nonrepo" && bash -c "$command" </dev/null)
+done
+
 repo="$test_root/repo"
 git init -q -b main "$repo"
 git -C "$repo" config user.name Tester
@@ -90,6 +98,20 @@ git -C "$repo" push -q -u origin main
 run_hook "$post_hook" 'git commit -m published' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$published" ]
 assert_trailer_count 0
+
+# An explicit push refspec may publish HEAD without a local remote-tracking ref.
+git -C "$repo" switch -q -c untracked-push
+printf 'untracked push\n' >> "$repo/tracked.txt"
+git -C "$repo" add tracked.txt
+summary=$(git -C "$repo" commit -m untracked-push)
+published=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" push -q origin HEAD:refs/heads/untracked-push
+run_hook "$post_hook" \
+  'git commit -m untracked-push && git push origin HEAD:refs/heads/untracked-push' \
+  "$summary"
+[ "$(git -C "$repo" rev-parse HEAD)" = "$published" ]
+assert_trailer_count 0
+git -C "$repo" switch -q main
 
 # A merge commit is also immutable to the hook.
 git -C "$repo" switch -q -c side

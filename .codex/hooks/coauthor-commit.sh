@@ -36,7 +36,7 @@ case "$cmd" in
   *) exit 0 ;;
 esac
 case "$cmd" in
-  *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
+  *--dry-run* | *--help* | *' -h'* | *'git commit --amend'* | *'git push'*) exit 0 ;;
 esac
 
 head=$(git rev-parse --verify HEAD 2>/dev/null) || exit 0

@@ -569,6 +569,12 @@ class RemedyV2ScheduleTests(unittest.TestCase):
         self.assertEqual(parse_hp_blocks("3,1,2"), {1, 2, 3})
         self.assertEqual(parse_hp_blocks("1,1"), {1})
 
+    def test_multidigit_explicit_schedule_labels_do_not_collide(self) -> None:
+        self.assertEqual(multiblock._explicit_schedule_label({1, 2, 3}), "123")
+        self.assertEqual(multiblock._explicit_schedule_label({123}), "b123")
+        self.assertEqual(multiblock._explicit_schedule_label({1, 23}), "b1-23")
+        self.assertEqual(multiblock._explicit_schedule_label({3, 12}), "b3-12")
+
     def test_denser_primary_schedule_and_label(self) -> None:
         hp = _resolve_hp_blocks([0, 1, 2, 3], "periodic_hp", 2, {1, 2, 3})
         meta = _arm_meta(
@@ -612,6 +618,27 @@ class RemedyV2ScheduleTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ForwardError, "requires --evidence-only"):
             _validate_v2_cli(args)
+
+    def test_comparison_metrics_rejected_on_non_primary_run(self) -> None:
+        args = argparse.Namespace(
+            arm="periodic_hp",
+            hp_blocks={1, 3},
+            evidence_only=False,
+            comparison_metrics=[Path("stacked/metrics.json")],
+        )
+        with self.assertRaisesRegex(ForwardError, "--comparison-metrics is only valid"):
+            _validate_v2_cli(args)
+
+    def test_partial_explicit_ceiling_schedule_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ForwardError, "hp_ceiling requires every chain block"):
+            _resolve_hp_blocks([0, 1, 2, 3], "all_hp", 2, {1, 2})
+
+    def test_noncanonical_explicit_hp_run_uses_legacy_remedy_contract(self) -> None:
+        args = argparse.Namespace(arm="periodic_hp", hp_blocks={1, 3})
+        self.assertFalse(multiblock._is_v2_run(args))
+        issue, agent = multiblock._agent_for_args(args)
+        self.assertEqual(issue, "GH #73 / Linear RM-362")
+        self.assertEqual(agent, multiblock.REMEDY_AGENT_LINE)
 
     def test_stacked_and_ceiling_select_hp_control(self) -> None:
         pack = object()
@@ -859,6 +886,21 @@ class RemedyV2DecisionTests(unittest.TestCase):
     def test_option_4_when_only_one_option_2_condition_holds(self) -> None:
         comparison = _v2_comparison("help", "failed", "failed")
         self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_improvement_checks_both_mostly_ternary_arms(self) -> None:
+        comparison = _v2_comparison("failed", "failed", "failed")
+        primary = comparison["summaries"][V2_PRIMARY_ARM]
+        stacked = comparison["summaries"][V2_STACKED_ARM]
+        primary["router_top1"][-1] = 0.59
+        primary["block_output_cosine"][-1] = 0.90
+        primary["chain_exit_residual_drift"] = 0.50
+        stacked["router_top1"][-1] = 0.58
+        stacked["block_output_cosine"][-1] = 0.93
+        stacked["chain_exit_residual_drift"] = 0.50
+        decision = decide_remedy_v2(comparison)
+        self.assertEqual(decision["best_remedy_arm"], V2_PRIMARY_ARM)
+        self.assertEqual(decision["decision"], 4)
+        self.assertIn("any_mostly_ternary_improved_vs_74=True", decision["rationale"])
 
     def test_secondary_payload_written_without_decision(self) -> None:
         with tempfile.TemporaryDirectory() as td:

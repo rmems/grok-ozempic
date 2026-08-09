@@ -21,7 +21,7 @@ Rationale:
 - `#74_b3_cos=0.882308 (cited, not re-run)`
 - `#74_chain_exit_drift=0.529212 (cited, not re-run)`
 - `hp_ceiling_viable=True`
-- `best_improved_vs_74=True`
+- `any_mostly_ternary_improved_vs_74=True`
 - `locked_option_2_requires_improvement_and_ceiling=True`
 
 ### Why not the other options

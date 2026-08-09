@@ -1258,7 +1258,7 @@ def _v2_decision_rationale(
     best_label: str,
     best: dict,
     ceiling: dict,
-    improved: bool,
+    any_improved: bool,
     ceiling_viable: bool,
 ) -> list[str]:
     return [
@@ -1268,20 +1268,27 @@ def _v2_decision_rationale(
         f"best_chain_exit_drift={best['chain_exit_residual_drift']}",
         f"#74_b3_top1={BASELINE_74['router_top1'][-1]:.6f} (cited, not re-run)",
         f"#74_b3_cos={BASELINE_74['block_output_cosine'][-1]:.6f} (cited, not re-run)",
-        f"#74_chain_exit_drift={BASELINE_74['chain_exit_residual_drift']:.6f} "
-        "(cited, not re-run)",
+        (
+            f"#74_chain_exit_drift={BASELINE_74['chain_exit_residual_drift']:.6f} "
+            "(cited, not re-run)"
+        ),
         f"hp_ceiling_viable={ceiling['viable']}",
-        f"best_improved_vs_74={improved}",
-        f"locked_option_2_requires_improvement_and_ceiling={improved and ceiling_viable}",
+        f"any_mostly_ternary_improved_vs_74={any_improved}",
+        f"locked_option_2_requires_improvement_and_ceiling={any_improved and ceiling_viable}",
     ]
 
 
-def _v2_outcome(best: dict, improved: bool, ceiling_viable: bool) -> tuple[int, str]:
+def _v2_outcome(
+    best: dict,
+    *,
+    any_improved: bool,
+    ceiling_viable: bool,
+) -> tuple[int, str]:
     if best["viable"]:
         return 1, "A stronger expert remedy restores multi-block viability for the measured chain."
-    if improved and ceiling_viable:
+    if any_improved and ceiling_viable:
         return 2, "Stronger remedies help, but full-HP experts or another correction remain required."
-    if not improved and not ceiling_viable:
+    if not any_improved and not ceiling_viable:
         return 3, "Even denser, stacked, and HP-ceiling expert remedies fail under the current policy."
     return 4, "Inconclusive — measured outcomes do not satisfy a locked decision branch."
 
@@ -1299,12 +1306,19 @@ def decide_remedy_v2(comparison: dict) -> dict:
     summaries = comparison["summaries"]
     best_label, best = _v2_best_candidate(summaries)
     ceiling = summaries[V2_CEILING_ARM]
-    improved = _v2_improved_vs_74(best)
+    any_improved = any(
+        _v2_improved_vs_74(summaries[label])
+        for label in (V2_PRIMARY_ARM, V2_STACKED_ARM)
+    )
     ceiling_viable = bool(ceiling["viable"])
     rationale = _v2_decision_rationale(
-        best_label, best, ceiling, improved, ceiling_viable
+        best_label, best, ceiling, any_improved, ceiling_viable
     )
-    decision, text = _v2_outcome(best, improved, ceiling_viable)
+    decision, text = _v2_outcome(
+        best,
+        any_improved=any_improved,
+        ceiling_viable=ceiling_viable,
+    )
     result = _decision_payload(decision, text, rationale, best["compounding"])
     result["best_remedy_arm"] = best_label
     return result
@@ -1433,11 +1447,15 @@ def _v2_baseline_lines(number: int, baseline: dict) -> list[str]:
         f"## #{number} baseline (cited — bit-comparable settings and packs)",
         "",
         f"Source: `{baseline['source']}` (not re-run).",
-        f"Tokens={baseline['tokens']}, seed={baseline['token_seed']}, "
-        f"blocks={baseline['blocks']}, top_k={baseline['top_k']}.",
-        f"Chain-exit residual drift **{baseline['chain_exit_residual_drift']:.6f}**; "
-        f"b3 top-1 **{baseline['router_top1'][-1]:.6f}**; "
-        f"b3 block_out cos **{baseline['block_output_cosine'][-1]:.6f}**.",
+        (
+            f"Tokens={baseline['tokens']}, seed={baseline['token_seed']}, "
+            f"blocks={baseline['blocks']}, top_k={baseline['top_k']}."
+        ),
+        (
+            f"Chain-exit residual drift **{baseline['chain_exit_residual_drift']:.6f}**; "
+            f"b3 top-1 **{baseline['router_top1'][-1]:.6f}**; "
+            f"b3 block_out cos **{baseline['block_output_cosine'][-1]:.6f}**."
+        ),
         f"Prior decision: **{baseline['decision']}**.",
         "",
     ]
@@ -1596,8 +1614,10 @@ def _v2_provenance_lines() -> list[str]:
     return [
         "## Provenance",
         "",
-        "See `metrics.json` for the canonical decision, embedded secondary evidence, "
-        "pack SHA-256, thresholds, schedules, and applied scale-source tags.",
+        (
+            "See `metrics.json` for the canonical decision, embedded secondary evidence, "
+            "pack SHA-256, thresholds, schedules, and applied scale-source tags."
+        ),
         "Secondary `metrics.json` files are evidence-only and intentionally contain no decision.",
         "The HP ceiling is an expert-tier bound, not a product recommendation.",
     ]

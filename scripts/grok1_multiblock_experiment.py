@@ -74,7 +74,7 @@ _ARM_TO_MODE = {
     "channel_alpha": "channel_alpha",
     "stacked_hp_channel_alpha": "periodic_hp_plus_channel_alpha",
     "hp_ceiling": "all_hp",
-    }
+}
 _REMEDY_ARMS = frozenset(_ARM_TO_MODE) - {"ternary_baseline"}
 _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 
@@ -198,7 +198,10 @@ def _chain_exit_block(h_ref, h_pilot, h_fp16) -> dict:
 
 
 def _explicit_schedule_label(hp_blocks: set[int]) -> str:
-    return "".join(str(b) for b in sorted(hp_blocks))
+    ordered = sorted(hp_blocks)
+    if any(block >= 10 for block in ordered):
+        return "b" + "-".join(str(block) for block in ordered)
+    return "".join(str(block) for block in ordered)
 
 
 _SCHEDULED_MODES = frozenset({"periodic_hp", "periodic_hp_plus_channel_alpha"})
@@ -345,7 +348,7 @@ def run_chain(
         expert_mode=expert_mode,
         hp_blocks=frozenset(resolved_hp),
         hp_period=int(hp_period),
-        hp_label=_explicit_schedule_label(resolved_hp) if explicit_hp else f"n{hp_period}",
+        hp_label=_schedule_label(resolved_hp, hp_period, explicit_hp),
     )
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)
@@ -433,6 +436,10 @@ def _is_remedy_arm(arm: str) -> bool:
 
 def _is_v2_primary(args: argparse.Namespace) -> bool:
     return args.arm == "periodic_hp" and getattr(args, "hp_blocks", None) == {1, 2, 3}
+
+
+def _is_v2_run(args: argparse.Namespace) -> bool:
+    return args.arm in _V2_REMEDY_ARMS or _is_v2_primary(args)
 
 
 def _validate_v2_cli(args: argparse.Namespace) -> None:
@@ -545,7 +552,7 @@ def run(args: argparse.Namespace) -> int:
         hp_period=args.hp_period,
         hp_blocks=args.hp_blocks,
     )
-    is_v2 = args.arm in _V2_REMEDY_ARMS or args.hp_blocks is not None
+    is_v2 = _is_v2_run(args)
     prov = _provenance(paths, args.skip_fp16_control, args.arm, v2=is_v2)
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
@@ -596,7 +603,7 @@ def run(args: argparse.Namespace) -> int:
 
 def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
     arm = getattr(args, "arm", None)
-    if arm in _V2_REMEDY_ARMS or getattr(args, "hp_blocks", None) is not None:
+    if _is_v2_run(args):
         return "GH #75 / Linear RM-462 / beads goz-rvk", REMEDY_V2_AGENT_LINE
     remedy = _is_remedy_arm(arm or "ternary_baseline")
     if remedy:

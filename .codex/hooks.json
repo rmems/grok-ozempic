@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/coauthor-record-head.sh\"",
+            "command": "repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$repo_root/.codex/hooks/coauthor-record-head.sh\"; [ -f \"$hook\" ] || exit 0; bash \"$hook\"",
             "timeout": 3,
             "statusMessage": "Recording the pre-commit HEAD for Codex attribution"
           }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/coauthor-commit.sh\"",
+            "command": "repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$repo_root/.codex/hooks/coauthor-commit.sh\"; [ -f \"$hook\" ] || exit 0; bash \"$hook\"",
             "timeout": 10,
             "statusMessage": "Adding the Codex co-author trailer"
           }
