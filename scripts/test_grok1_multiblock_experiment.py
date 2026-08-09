@@ -626,6 +626,17 @@ class RemedyV2ScheduleTests(unittest.TestCase):
             hp_blocks={1, 3},
         )
         self.assertIs(primary, control)
+        primary, label = _expert_primary(
+            "periodic_hp",
+            pack,
+            reference,
+            control,
+            block=2,
+            hp_blocks={1, 2, 3},
+            hp_label="123",
+        )
+        self.assertIs(primary, control)
+        self.assertEqual(label, V2_PRIMARY_ARM)
         primary, _ = _expert_primary(
             "all_hp",
             pack,
@@ -779,7 +790,7 @@ class RemedyV2DecisionTests(unittest.TestCase):
         self.assertEqual(decision["best_remedy_arm"], V2_PRIMARY_ARM)
 
     def test_option_2_when_remedy_helps_but_is_not_viable(self) -> None:
-        decision = decide_remedy_v2(_v2_comparison("help", "failed", "failed"))
+        decision = decide_remedy_v2(_v2_comparison("help", "failed", "viable"))
         self.assertEqual(decision["decision"], 2)
 
     def test_option_3_when_even_ceiling_fails(self) -> None:
@@ -791,6 +802,10 @@ class RemedyV2DecisionTests(unittest.TestCase):
             _v2_chain(V2_PRIMARY_ARM, "help"),
             [],
         )
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_option_4_when_only_one_option_2_condition_holds(self) -> None:
+        comparison = _v2_comparison("help", "failed", "failed")
         self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
 
     def test_secondary_payload_written_without_decision(self) -> None:

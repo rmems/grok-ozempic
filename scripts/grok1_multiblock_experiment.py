@@ -127,6 +127,7 @@ class _BlockRunCfg:
     expert_mode: str
     hp_blocks: frozenset[int]
     hp_period: int
+    hp_label: str
 
 
 def _run_block(b, paths, streams, cfg: _BlockRunCfg):
@@ -142,6 +143,7 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         expert_mode=cfg.expert_mode,
         hp_blocks=set(cfg.hp_blocks),
         hp_period=cfg.hp_period,
+        hp_label=cfg.hp_label,
     )
     stream_pilot = residual_stream_metrics(h_ref, h_pilot)
     stream_fp16 = residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None
@@ -316,6 +318,7 @@ def run_chain(
         expert_mode=expert_mode,
         hp_blocks=frozenset(resolved_hp),
         hp_period=int(hp_period),
+        hp_label=_explicit_schedule_label(resolved_hp) if explicit_hp else f"n{hp_period}",
     )
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)

@@ -300,6 +300,7 @@ def _expert_primary(
     block: int,
     hp_blocks: set[int],
     hp_period: int = 2,
+    hp_label: str | None = None,
 ) -> tuple[object, str]:
     """Return (primary WeightSource for experts, arm label)."""
     if mode == "ternary":
@@ -311,7 +312,8 @@ def _expert_primary(
                     f"block {block}: periodic HP needs FP16 expert source "
                     "(do not --skip-fp16-control on decision runs)"
                 )
-            return control, f"expert_periodic_hp_n{int(hp_period)}"
+            schedule = hp_label or f"n{int(hp_period)}"
+            return control, f"expert_periodic_hp_{schedule}"
         return pack, "goz1_expert_ternary_only"
     if mode == "periodic_hp_plus_channel_alpha":
         if block in hp_blocks:
@@ -320,7 +322,8 @@ def _expert_primary(
                     f"block {block}: stacked HP+channel-alpha needs FP16 expert source "
                     "(do not --skip-fp16-control on decision runs)"
                 )
-            return control, f"expert_periodic_hp_n{int(hp_period)}_plus_channel_alpha"
+            schedule = hp_label or f"n{int(hp_period)}"
+            return control, f"expert_periodic_hp_{schedule}_plus_channel_alpha"
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
     if mode == "all_hp":
         if control is None:
@@ -365,6 +368,7 @@ def load_block_sources(
     expert_mode: str = "ternary",
     hp_blocks: set[int] | None = None,
     hp_period: int = 2,
+    hp_label: str | None = None,
 ) -> tuple[NpyWeights, PackWeights, MixedWeights, F16Weights | None]:
     """Load reference, pack, expert mix (arm-aware), optional fp16 control."""
     expect = f"block_{block:03d}"
@@ -379,7 +383,14 @@ def load_block_sources(
     require_pack_only_scales(pack, _expert_names(reference))
     control = F16Weights(npy_dir, names, expect_block=expect) if require_fp16 else None
     primary, label = _expert_primary(
-        expert_mode, pack, reference, control, block=block, hp_blocks=hp, hp_period=hp_period
+        expert_mode,
+        pack,
+        reference,
+        control,
+        block=block,
+        hp_blocks=hp,
+        hp_period=hp_period,
+        hp_label=hp_label,
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
     mixed.applied_scale_sources = _applied_expert_scale_sources(  # type: ignore[attr-defined]
@@ -1204,6 +1215,14 @@ def decide_remedy_v2(comparison: dict) -> dict:
         "(cited, not re-run)",
         f"hp_ceiling_viable={ceiling['viable']}",
     ]
+    improved = _v2_improved_vs_74(best)
+    ceiling_viable = bool(ceiling["viable"])
+    rationale.extend(
+        [
+            f"best_improved_vs_74={improved}",
+            f"locked_option_2_requires_improvement_and_ceiling={improved and ceiling_viable}",
+        ]
+    )
     if best["viable"]:
         result = _decision_payload(
             1,
@@ -1211,17 +1230,24 @@ def decide_remedy_v2(comparison: dict) -> dict:
             rationale,
             best["compounding"],
         )
-    elif _v2_improved_vs_74(best) or ceiling["viable"]:
+    elif improved and ceiling_viable:
         result = _decision_payload(
             2,
             "Stronger remedies help, but full-HP experts or another correction remain required.",
             rationale,
             best["compounding"],
         )
-    else:
+    elif not improved and not ceiling_viable:
         result = _decision_payload(
             3,
             "Even denser, stacked, and HP-ceiling expert remedies fail under the current policy.",
+            rationale,
+            best["compounding"],
+        )
+    else:
+        result = _decision_payload(
+            4,
+            "Inconclusive — measured outcomes do not satisfy a locked decision branch.",
             rationale,
             best["compounding"],
         )
