@@ -30,6 +30,14 @@ payload() {
     '{session_id:$session_id,tool_input:{command:$command},tool_response:{stdout:$stdout,stderr:""}}'
 }
 
+run_hook() {
+  hook=$1
+  command=$2
+  stdout=${3:-}
+  payload "$command" "$stdout" > "$test_root/payload.json"
+  (cd "$repo" && bash "$hook" < "$test_root/payload.json")
+}
+
 assert_trailer_count() {
   expected=$1
   actual=$(git -C "$repo" log -1 --format=%B | grep -cF 'Co-Authored-By: Codex <noreply@openai.com>' || true)
@@ -43,10 +51,10 @@ assert_trailer_count() {
 printf 'reported\n' >> "$repo/tracked.txt"
 git -C "$repo" add tracked.txt
 summary=$(git -C "$repo" commit -m reported)
-(cd "$repo" && payload 'git commit -m reported' "$summary" | bash "$post_hook")
+run_hook "$post_hook" 'git commit -m reported' "$summary"
 assert_trailer_count 1
 once=$(git -C "$repo" rev-parse HEAD)
-(cd "$repo" && payload 'git commit -m reported' "$summary" | bash "$post_hook")
+run_hook "$post_hook" 'git commit -m reported' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$once" ]
 assert_trailer_count 1
 
@@ -55,9 +63,9 @@ assert_trailer_count 1
 printf 'partial\n' > "$repo/partial.txt"
 printf 'still staged\n' > "$repo/staged.txt"
 git -C "$repo" add partial.txt staged.txt
-(cd "$repo" && payload 'git commit -q --only -m partial -- partial.txt' | bash "$pre_hook")
+run_hook "$pre_hook" 'git commit -q --only -m partial -- partial.txt'
 git -C "$repo" commit -q --only -m partial -- partial.txt
-(cd "$repo" && payload 'git commit -q --only -m partial -- partial.txt' | bash "$post_hook")
+run_hook "$post_hook" 'git commit -q --only -m partial -- partial.txt'
 assert_trailer_count 1
 [ "$(git -C "$repo" diff --cached --name-only)" = staged.txt ]
 git -C "$repo" commit -q -m staged
@@ -66,7 +74,8 @@ git -C "$repo" commit -q -m staged
 printf 'disabled\n' >> "$repo/tracked.txt"
 git -C "$repo" add tracked.txt
 summary=$(git -C "$repo" commit -m disabled)
-(cd "$repo" && payload 'git commit -m disabled' "$summary" | CODEX_COAUTHOR=0 bash "$post_hook")
+payload 'git commit -m disabled' "$summary" > "$test_root/payload.json"
+(cd "$repo" && CODEX_COAUTHOR=0 bash "$post_hook" < "$test_root/payload.json")
 assert_trailer_count 0
 
 # A published commit is immutable to the hook even if the payload names it.
@@ -78,7 +87,7 @@ git -C "$repo" add tracked.txt
 summary=$(git -C "$repo" commit -m published)
 published=$(git -C "$repo" rev-parse HEAD)
 git -C "$repo" push -q -u origin main
-(cd "$repo" && payload 'git commit -m published' "$summary" | bash "$post_hook")
+run_hook "$post_hook" 'git commit -m published' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$published" ]
 assert_trailer_count 0
 
@@ -94,7 +103,7 @@ git -C "$repo" commit -q -m main
 git -C "$repo" merge -q --no-commit side
 summary=$(git -C "$repo" commit -m merge)
 merged=$(git -C "$repo" rev-parse HEAD)
-(cd "$repo" && payload 'git commit -m merge' "$summary" | bash "$post_hook")
+run_hook "$post_hook" 'git commit -m merge' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$merged" ]
 assert_trailer_count 0
 
