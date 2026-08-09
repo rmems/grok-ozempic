@@ -34,6 +34,7 @@ _python-tests:
       scripts.test_export_grok1_int8_select
       scripts.test_route_preservation_surface
       scripts.test_route_preservation_io
+      scripts.test_grok1_multiblock_experiment
     )
     for m in "${mods[@]}"; do
       echo "+ python3 -m unittest ${m} -v"
@@ -97,6 +98,18 @@ _py-compile:
     fi
     echo "+ python3 -m py_compile ${scripts[*]}"
     python3 -m py_compile "${scripts[@]}"
+
+_codex-hook-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo '+ jq empty .codex/hooks.json'
+    jq empty .codex/hooks.json
+    for hook in .codex/hooks/*.sh; do
+      echo "+ bash -n ${hook}"
+      bash -n "${hook}"
+    done
+    echo '+ bash .codex/hooks/test-coauthor-hooks.sh'
+    bash .codex/hooks/test-coauthor-hooks.sh
 
 _optional-linters:
     #!/usr/bin/env bash
@@ -164,6 +177,7 @@ ci:
     @cargo doc --no-deps --all-features --locked
     @just _python-tests
     @just _bash-n-scripts
+    @just _codex-hook-tests
     @just _optional-linters
 
 # Pre-push quality gate (REVIEW.md + .githooks/pre-push). No Qodana/Docker/weights.

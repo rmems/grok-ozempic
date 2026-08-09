@@ -1,0 +1,31 @@
+{
+  "description": "Repository-local Codex commit attribution hooks.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/coauthor-record-head.sh\"",
+            "timeout": 3,
+            "statusMessage": "Recording the pre-commit HEAD for Codex attribution"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/coauthor-commit.sh\"",
+            "timeout": 10,
+            "statusMessage": "Adding the Codex co-author trailer"
+          }
+        ]
+      }
+    ]
+  }
+}

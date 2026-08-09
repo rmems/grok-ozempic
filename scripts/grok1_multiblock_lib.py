@@ -32,6 +32,10 @@ REMEDY_AGENT_LINE = (
     "Grok Build: Grok 4.5 (xAI) · Model: Grok-4.5 (high) · Issue: #73 / Linear RM-362"
 )
 
+REMEDY_V2_AGENT_LINE = (
+    "OpenAI Codex · Model: GPT-5.6 Sol · Issue: #75 / Linear RM-462 · beads goz-rvk"
+)
+
 # Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
 # settings: tokens=2048, seed=20260806, blocks=0..3, pack-only v3 experts.
 BASELINE_72 = {
@@ -62,6 +66,26 @@ BASELINE_72 = {
     },
 }
 
+# Cited from reports/grok-1-expert-precision-remedy/metrics.json (PR #74).
+# The #74 Arm C run used the same samples and packs as #72.
+BASELINE_74 = {
+    "source": "reports/grok-1-expert-precision-remedy/ (PR #74 / #73 / RM-362)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "decision": 2,
+    "block_output_cosine": [0.963572, 0.963211, 0.905360, 0.882308],
+    "residual_in_drift": [0.0, 0.277351, 0.279321, 0.449088],
+    "router_top1": [1.0, 0.887695, 0.729004, 0.547852],
+    "router_top2": [1.0, 0.680664, 0.592773, 0.317383],
+    "expert_load_js_bits": [0.0, 0.005559, 0.008548, 0.025243],
+    "chain_exit_residual_drift": 0.5292121735722244,
+    "arm_label": "expert_periodic_hp_n2",
+    "pack_sha256": dict(BASELINE_72["pack_sha256"]),
+    "pack_names": dict(BASELINE_72["pack_names"]),
+}
+
 BASELINE_64 = {
     "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
     # Cite the published report only — do not attribute this PR's agent line to Fable.
@@ -77,6 +101,11 @@ BASELINE_64 = {
     },
 }
 
+V2_PRIMARY_ARM = "expert_periodic_hp_123"
+V2_STACKED_ARM = "expert_periodic_hp_n2_plus_channel_alpha"
+V2_CEILING_ARM = "expert_hp_ceiling"
+V2_SECONDARY_ARMS = frozenset({V2_STACKED_ARM, V2_CEILING_ARM})
+
 
 def parse_blocks(text: str) -> list[int]:
     """Parse ``0,1,2,3`` into a contiguous ascending chain."""
@@ -85,6 +114,20 @@ def parse_blocks(text: str) -> list[int]:
         raise ForwardError("--blocks must list at least one block index")
     blocks = [int(p) for p in parts]
     _assert_block_chain(blocks)
+    return blocks
+
+
+def parse_hp_blocks(text: str) -> set[int]:
+    """Parse an explicit, unordered HP block set such as ``1,2,3``."""
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if not parts:
+        raise ForwardError("--hp-blocks must list at least one block index")
+    try:
+        blocks = {int(p) for p in parts}
+    except ValueError as exc:
+        raise ForwardError(f"--hp-blocks must contain integers, got {text!r}") from exc
+    if any(b < 0 for b in blocks):
+        raise ForwardError(f"negative HP block index in {sorted(blocks)}")
     return blocks
 
 
@@ -270,6 +313,22 @@ def _expert_primary(
                 )
             return control, f"expert_periodic_hp_n{int(hp_period)}"
         return pack, "goz1_expert_ternary_only"
+    if mode == "periodic_hp_plus_channel_alpha":
+        if block in hp_blocks:
+            if control is None:
+                raise ForwardError(
+                    f"block {block}: stacked HP+channel-alpha needs FP16 expert source "
+                    "(do not --skip-fp16-control on decision runs)"
+                )
+            return control, f"expert_periodic_hp_n{int(hp_period)}_plus_channel_alpha"
+        return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
+    if mode == "all_hp":
+        if control is None:
+            raise ForwardError(
+                f"block {block}: HP expert ceiling needs FP16 expert source "
+                "(do not --skip-fp16-control on decision runs)"
+            )
+        return control, "expert_hp_ceiling"
     if mode == "channel_alpha":
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
     raise ForwardError(f"unknown expert mode {mode!r}")
@@ -288,7 +347,10 @@ def _applied_expert_scale_sources(
     applied = dict(pack.scale_sources)
     if hasattr(primary, "scale_sources"):
         applied.update(dict(primary.scale_sources))
-    elif expert_mode == "periodic_hp" and block in hp_blocks:
+    elif expert_mode == "all_hp" or (
+        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
+        and block in hp_blocks
+    ):
         for name in _expert_names(reference):
             applied[name] = "fp16_control"
     return applied
@@ -947,6 +1009,226 @@ def decide_remedy(chain: dict) -> dict:
     return _remedy_from_metrics(chain, m, exit_drift, rationale, compounding)
 
 
+def _v2_chain_summary(chain: dict) -> dict:
+    rows = chain.get("per_block") or []
+    if not rows:
+        return {"arm_label": chain.get("arm_label"), "empty": True}
+    metrics = _metric_series(rows)
+    exit_drift = _exit_drift(chain, metrics["out_drift"])
+    compounding = _compounding_label(metrics["resid_in"], exit_drift)
+    viable = _remedy_option_1(
+        metrics["cos"][-1],
+        min(metrics["top1"]),
+        min(metrics["topk"]),
+        exit_drift,
+        metrics["cos"],
+    )
+    return {
+        "arm_label": chain.get("arm_label"),
+        "block_output_cosine": metrics["cos"],
+        "residual_in_drift": metrics["resid_in"],
+        "router_top1": metrics["top1"],
+        "router_top2": metrics["topk"],
+        "expert_load_js_bits": metrics["js"],
+        "chain_exit_residual_drift": exit_drift,
+        "compounding": compounding,
+        "viable": viable,
+    }
+
+
+def _v2_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
+    schedules = {
+        V2_PRIMARY_ARM: ([1, 2, 3], [], "periodic_hp"),
+        V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
+        V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
+    }
+    return schedules[label]
+
+
+def _v2_control_error(chain: dict) -> str | None:
+    rows = chain.get("per_block") or []
+    if chain.get("skip_fp16_control"):
+        return "fp16_control_skipped"
+    controls = [row.get("fp16_control") for row in rows]
+    if not rows or any(control is None for control in controls):
+        return "fp16_control_absent"
+    cosines = [float(control["block_output_cosine"]) for control in controls]
+    if min(cosines) < 0.99:
+        return f"fp16_control_cosine_below_0.99:{cosines}"
+    return None
+
+
+def _v2_scale_source_errors(chain: dict, label: str) -> list[str]:
+    hp_blocks, channel_blocks, _ = _v2_expected_schedule(label)
+    errors: list[str] = []
+    packs = chain.get("pack_provenance") or []
+    if len(packs) != len(BASELINE_72["blocks"]):
+        return [f"{label}:missing_pack_provenance"]
+    for row in packs:
+        block = int(row.get("block", -1))
+        if set(row.get("container_versions") or []) != {3}:
+            errors.append(f"{label}:block_{block}:container_not_v3")
+        pack_sources = set((row.get("pack_scale_sources") or {}).values())
+        if not pack_sources or pack_sources != {"pack_v2"}:
+            errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
+        applied = set((row.get("scale_sources") or {}).values())
+        expected = "fp16_control" if block in hp_blocks else "pack_v2"
+        if block in channel_blocks:
+            expected = "research_per_channel_side"
+        if not applied or applied != {expected}:
+            errors.append(
+                f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
+                f"expected={expected}"
+            )
+    return errors
+
+
+def _v2_chain_errors(chain: dict, expected_label: str) -> list[str]:
+    errors: list[str] = []
+    label = chain.get("arm_label")
+    if label != expected_label:
+        errors.append(f"arm_label={label!r} expected={expected_label!r}")
+        return errors
+    mismatch = settings_mismatch_reason(chain)
+    if mismatch is not None:
+        errors.append(f"{label}:{mismatch}")
+    hp_blocks, channel_blocks, mode = _v2_expected_schedule(expected_label)
+    if list(chain.get("hp_blocks") or []) != hp_blocks:
+        errors.append(f"{label}:hp_blocks={chain.get('hp_blocks')} expected={hp_blocks}")
+    if list(chain.get("channel_alpha_blocks") or []) != channel_blocks:
+        errors.append(
+            f"{label}:channel_alpha_blocks={chain.get('channel_alpha_blocks')} "
+            f"expected={channel_blocks}"
+        )
+    if chain.get("expert_mode") != mode:
+        errors.append(f"{label}:expert_mode={chain.get('expert_mode')!r} expected={mode!r}")
+    control_error = _v2_control_error(chain)
+    if control_error is not None:
+        errors.append(f"{label}:{control_error}")
+    errors.extend(_v2_scale_source_errors(chain, expected_label))
+    return errors
+
+
+def _v2_secondary_map(payloads: list[dict], errors: list[str]) -> dict[str, dict]:
+    mapped: dict[str, dict] = {}
+    for payload in payloads:
+        if "decision" in payload:
+            errors.append("secondary evidence contains a decision")
+        chain = payload.get("chain")
+        if not isinstance(chain, dict):
+            errors.append("secondary evidence missing chain object")
+            continue
+        label = chain.get("arm_label")
+        if label in mapped:
+            errors.append(f"duplicate secondary arm {label!r}")
+            continue
+        if label not in V2_SECONDARY_ARMS:
+            errors.append(f"unexpected secondary arm {label!r}")
+            continue
+        mapped[label] = payload
+    missing = sorted(V2_SECONDARY_ARMS - set(mapped))
+    if missing:
+        errors.append(f"missing secondary arms {missing}")
+    return mapped
+
+
+def assemble_remedy_v2_comparison(
+    primary_chain: dict,
+    secondary_payloads: list[dict],
+    *,
+    load_errors: list[str] | None = None,
+) -> dict:
+    """Validate #75 evidence and return a decision-ready comparison payload."""
+    errors = list(load_errors or [])
+    secondary = _v2_secondary_map(secondary_payloads, errors)
+    errors.extend(_v2_chain_errors(primary_chain, V2_PRIMARY_ARM))
+    for label, payload in secondary.items():
+        errors.extend(_v2_chain_errors(payload["chain"], label))
+    summaries = {V2_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
+    summaries.update(
+        {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
+    )
+    return {
+        "primary_arm": V2_PRIMARY_ARM,
+        "secondary_arms": secondary,
+        "summaries": summaries,
+        "validation_errors": errors,
+    }
+
+
+def _v2_improved_vs_74(summary: dict) -> bool:
+    if summary.get("empty"):
+        return False
+    top1_gain = summary["router_top1"][-1] - BASELINE_74["router_top1"][-1]
+    cos_gain = summary["block_output_cosine"][-1] - BASELINE_74["block_output_cosine"][-1]
+    exit_drift = summary.get("chain_exit_residual_drift")
+    drift_gain = 0.0 if exit_drift is None else BASELINE_74["chain_exit_residual_drift"] - exit_drift
+    return top1_gain >= 0.05 or cos_gain >= 0.03 or drift_gain >= 0.08
+
+
+def _v2_candidate_rank(summary: dict) -> tuple:
+    if summary.get("empty"):
+        return (False, float("-inf"), float("-inf"), float("-inf"))
+    drift = summary.get("chain_exit_residual_drift")
+    return (
+        bool(summary["viable"]),
+        float(summary["router_top1"][-1]),
+        float(summary["block_output_cosine"][-1]),
+        -float(drift if drift is not None else float("inf")),
+    )
+
+
+def decide_remedy_v2(comparison: dict) -> dict:
+    """Pick exactly one #75 decision across denser, stacked, and ceiling arms."""
+    errors = list(comparison.get("validation_errors") or [])
+    if errors:
+        return _decision_payload(
+            4,
+            "Inconclusive — required multi-arm evidence is incomplete or incomparable.",
+            errors,
+            "unknown",
+        )
+    summaries = comparison["summaries"]
+    candidates = {label: summaries[label] for label in (V2_PRIMARY_ARM, V2_STACKED_ARM)}
+    best_label = max(candidates, key=lambda label: _v2_candidate_rank(candidates[label]))
+    best = candidates[best_label]
+    ceiling = summaries[V2_CEILING_ARM]
+    rationale = [
+        f"best_mostly_ternary_arm={best_label}",
+        f"best_b3_top1={best['router_top1'][-1]:.6f}",
+        f"best_b3_cos={best['block_output_cosine'][-1]:.6f}",
+        f"best_chain_exit_drift={best['chain_exit_residual_drift']}",
+        f"#74_b3_top1={BASELINE_74['router_top1'][-1]:.6f} (cited, not re-run)",
+        f"#74_b3_cos={BASELINE_74['block_output_cosine'][-1]:.6f} (cited, not re-run)",
+        f"#74_chain_exit_drift={BASELINE_74['chain_exit_residual_drift']:.6f} "
+        "(cited, not re-run)",
+        f"hp_ceiling_viable={ceiling['viable']}",
+    ]
+    if best["viable"]:
+        result = _decision_payload(
+            1,
+            "A stronger expert remedy restores multi-block viability for the measured chain.",
+            rationale,
+            best["compounding"],
+        )
+    elif _v2_improved_vs_74(best) or ceiling["viable"]:
+        result = _decision_payload(
+            2,
+            "Stronger remedies help, but full-HP experts or another correction remain required.",
+            rationale,
+            best["compounding"],
+        )
+    else:
+        result = _decision_payload(
+            3,
+            "Even denser, stacked, and HP-ceiling expert remedies fail under the current policy.",
+            rationale,
+            best["compounding"],
+        )
+    result["best_remedy_arm"] = best_label
+    return result
+
+
 def _remedy_header_lines(prov: dict, dec: int, decision_text: str) -> list[str]:
     return [
         "# Expert higher-precision remedies for multi-block residual fidelity",
@@ -1060,6 +1342,149 @@ def write_remedy_results_md(path: Path, payload: dict) -> None:
         f"See `{metrics_name}` for pack SHA-256, scales, τ, and applied `scale_sources`.",
         "Chain exit under `chain.end_of_chain.expert_only_chain_exit`.",
         "Arm A applied scales use `research_per_channel_side` (pack row may still be `pack_v2`).",
+        "",
+    ]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _v2_baseline_lines(number: int, baseline: dict) -> list[str]:
+    return [
+        f"## #{number} baseline (cited — bit-comparable settings and packs)",
+        "",
+        f"Source: `{baseline['source']}` (not re-run).",
+        f"Tokens={baseline['tokens']}, seed={baseline['token_seed']}, "
+        f"blocks={baseline['blocks']}, top_k={baseline['top_k']}.",
+        f"Chain-exit residual drift **{baseline['chain_exit_residual_drift']:.6f}**; "
+        f"b3 top-1 **{baseline['router_top1'][-1]:.6f}**; "
+        f"b3 block_out cos **{baseline['block_output_cosine'][-1]:.6f}**.",
+        f"Prior decision: **{baseline['decision']}**.",
+        "",
+    ]
+
+
+def _v2_table_value(value: float, best: float) -> str:
+    rendered = f"{value:.6f}"
+    return f"**{rendered}**" if abs(value - best) <= 1e-12 else rendered
+
+
+def _v2_comparison_table(comparison: dict) -> list[str]:
+    summaries = comparison["summaries"]
+    columns = [
+        ("#72 ternary", BASELINE_72),
+        ("#74 N=2", BASELINE_74),
+        ("C denser", summaries[V2_PRIMARY_ARM]),
+        ("N=2+C+A", summaries[V2_STACKED_ARM]),
+        ("HP ceiling", summaries[V2_CEILING_ARM]),
+    ]
+    rows = [
+        ("b3 top-1", "router_top1", True),
+        ("b3 top-2", "router_top2", True),
+        ("b3 block_out cos", "block_output_cosine", True),
+        ("chain-exit drift", "chain_exit_residual_drift", False),
+    ]
+    lines = [
+        "| Signal | " + " | ".join(name for name, _ in columns) + " |",
+        "|---|" + "|".join("---:" for _ in columns) + "|",
+    ]
+    for label, key, higher_is_better in rows:
+        values = []
+        for _, source in columns:
+            value = source[key]
+            if isinstance(value, list):
+                value = value[-1]
+            values.append(float(value))
+        best = (max if higher_is_better else min)(values)
+        lines.append(
+            f"| {label} | "
+            + " | ".join(_v2_table_value(value, best) for value in values)
+            + " |"
+        )
+    return lines
+
+
+def _v2_why_not(decision: int) -> str:
+    choices = {
+        1: "a mostly-ternary remedy reaches the locked viability bands.",
+        2: "the best remedy improves or the ceiling bounds the gap, but policy is not viable.",
+        3: "even the expert HP ceiling fails under the current non-expert policy.",
+        4: "required evidence, controls, packs, or provenance are incomplete.",
+    }
+    return "\n".join(
+        f"- **Option {number} ({'selected' if number == decision else 'not chosen'}):** "
+        f"{choices[number]}"
+        for number in (1, 2, 3, 4)
+    )
+
+
+def _v2_appendix_lines(label: str, payload: dict) -> list[str]:
+    chain = payload["chain"]
+    top_k = int(chain.get("top_k") or 2)
+    lines = [
+        f"### `{label}`",
+        "",
+        chain.get("hp_schedule_prose") or "No periodic schedule.",
+        "",
+    ]
+    lines += _metrics_table(chain["per_block"], top_k)
+    lines += _fp16_table(chain["per_block"], top_k)
+    lines.append("")
+    return lines
+
+
+def write_remedy_v2_results_md(path: Path, payload: dict) -> None:
+    """Write #75's sole decision plus all three measured-arm comparisons."""
+    decision = payload["decision"]
+    comparison = payload["comparison"]
+    chain = payload["chain"]
+    prov = payload.get("provenance") or {}
+    dec = int(decision["decision"])
+    lines = [
+        "# Stacked and denser expert remedies for multi-block fidelity",
+        "",
+        f"**Agent:** {prov.get('agent', REMEDY_V2_AGENT_LINE)}",
+        f"**Issue:** {prov.get('issue', 'GH #75 / Linear RM-462')}",
+        "**Predecessor:** PR #74 / #73 / RM-362 (decision 2)",
+        f"**Implementation commit:** `{_fmt_commit(prov.get('implementation'))}`",
+        "",
+        "## Decision",
+        "",
+        f"**Option {dec} — {decision['decision_text']}**",
+        "",
+        f"**Best mostly-ternary remedy:** `{decision.get('best_remedy_arm', 'unresolved')}`",
+        "",
+        "Rationale:",
+        "",
+    ]
+    lines += [f"- `{item}`" for item in decision.get("rationale", [])]
+    lines += ["", "### Why not the other options", "", _v2_why_not(dec), ""]
+    lines += _v2_baseline_lines(72, BASELINE_72)
+    lines += _v2_baseline_lines(74, BASELINE_74)
+    lines += ["## Multi-arm comparison", ""]
+    if comparison.get("validation_errors"):
+        lines += [
+            "Comparison validation failed:",
+            "",
+            *[f"- `{error}`" for error in comparison["validation_errors"]],
+            "",
+        ]
+    else:
+        lines += _v2_comparison_table(comparison)
+        lines.append("")
+    lines += _remedy_method_lines(chain, int(chain.get("top_k") or 2))
+    lines += _metrics_table(chain["per_block"], int(chain.get("top_k") or 2))
+    lines += _fp16_table(chain["per_block"], int(chain.get("top_k") or 2))
+    lines += ["", "## Secondary-arm appendices", ""]
+    for label in (V2_STACKED_ARM, V2_CEILING_ARM):
+        secondary = comparison.get("secondary_arms", {}).get(label)
+        if secondary is not None:
+            lines += _v2_appendix_lines(label, secondary)
+    lines += [
+        "## Provenance",
+        "",
+        "See `metrics.json` for the canonical decision, embedded secondary evidence, "
+        "pack SHA-256, thresholds, schedules, and applied scale-source tags.",
+        "Secondary `metrics.json` files are evidence-only and intentionally contain no decision.",
+        "The HP ceiling is an expert-tier bound, not a product recommendation.",
         "",
     ]
     path.write_text("\n".join(lines) + "\n")

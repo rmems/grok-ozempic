@@ -31,19 +31,25 @@ from grok1_multiblock_lib import (  # noqa: E402
     AGENT_LINE,
     BASELINE_64,
     BASELINE_72,
+    BASELINE_74,
     REMEDY_AGENT_LINE,
+    REMEDY_V2_AGENT_LINE,
     LegacyOracleError,
+    assemble_remedy_v2_comparison,
     decide,
     decide_remedy,
+    decide_remedy_v2,
     load_block_sources,
     pack_provenance_row,
     parse_blocks,
+    parse_hp_blocks,
     periodic_hp_blocks,
     require_pack_only_scales,
     residual_stream_metrics,
     resolve_path,
     remedy_metrics_note,
     write_remedy_results_md,
+    write_remedy_v2_results_md,
     write_results_md,
 )
 from route_preservation_io import MetricsError  # noqa: E402
@@ -51,12 +57,14 @@ from route_preservation_io import MetricsError  # noqa: E402
 __all__ = [
     "decide",
     "decide_remedy",
+    "decide_remedy_v2",
     "parse_blocks",
     "periodic_hp_blocks",
     "require_pack_only_scales",
     "residual_stream_metrics",
     "write_results_md",
     "write_remedy_results_md",
+    "write_remedy_v2_results_md",
     "main",
 ]
 
@@ -64,8 +72,11 @@ _ARM_TO_MODE = {
     "ternary_baseline": "ternary",
     "periodic_hp": "periodic_hp",
     "channel_alpha": "channel_alpha",
+    "stacked_hp_channel_alpha": "periodic_hp_plus_channel_alpha",
+    "hp_ceiling": "all_hp",
 }
-_REMEDY_ARMS = frozenset({"periodic_hp", "channel_alpha"}) & frozenset(_ARM_TO_MODE)
+_REMEDY_ARMS = frozenset(_ARM_TO_MODE) - {"ternary_baseline"}
+_V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -184,43 +195,126 @@ def _chain_exit_block(h_ref, h_pilot, h_fp16) -> dict:
     }
 
 
-def _arm_meta(blocks, expert_mode: str, hp_period: int, hp_blocks: set[int], labels: list) -> dict:
+def _explicit_schedule_label(hp_blocks: set[int]) -> str:
+    return "".join(str(b) for b in sorted(hp_blocks))
+
+
+def _arm_meta(
+    blocks,
+    expert_mode: str,
+    hp_period: int,
+    hp_blocks: set[int],
+    labels: list,
+    *,
+    explicit_hp: bool,
+) -> dict:
     ternary_set = sorted(set(blocks) - hp_blocks)
     hp_list = sorted(hp_blocks)
     prose = None
     arm_label = expert_mode
     if expert_mode == "periodic_hp":
-        arm_label = f"expert_periodic_hp_n{hp_period}"
+        schedule = _explicit_schedule_label(hp_blocks) if explicit_hp else f"n{hp_period}"
+        arm_label = f"expert_periodic_hp_{schedule}"
         prose = (
             f"Arm C label `{arm_label}`: "
             f"ternary on {{{','.join(map(str, ternary_set))}}}, "
             f"HP (FP16 experts) on {{{','.join(map(str, hp_list))}}}."
         )
+    elif expert_mode == "periodic_hp_plus_channel_alpha":
+        schedule = _explicit_schedule_label(hp_blocks) if explicit_hp else f"n{hp_period}"
+        arm_label = f"expert_periodic_hp_{schedule}_plus_channel_alpha"
+        prose = (
+            f"Stacked C+A label `{arm_label}`: channel-α trits on "
+            f"{{{','.join(map(str, ternary_set))}}}, HP (FP16 experts) on "
+            f"{{{','.join(map(str, hp_list))}}}."
+        )
+    elif expert_mode == "all_hp":
+        arm_label = "expert_hp_ceiling"
+        ternary_set = []
+        prose = "HP expert ceiling: FP16 experts on every measured block."
     elif expert_mode == "channel_alpha":
         arm_label = "research_per_channel_side"
-        ternary_set = []  # experts use channel-α side scales, not pack ternary path
     return {
         "expert_mode": expert_mode,
-        "hp_period": int(hp_period) if expert_mode == "periodic_hp" else None,
+        "hp_period": int(hp_period)
+        if expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
+        and not explicit_hp
+        else None,
+        "hp_schedule_kind": "all"
+        if expert_mode == "all_hp"
+        else (
+            "explicit"
+            if explicit_hp
+            else (
+                "periodic"
+                if expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
+                else "none"
+            )
+        ),
         "hp_blocks": hp_list,
-        "ternary_blocks": ternary_set if expert_mode in ("periodic_hp", "channel_alpha") else list(blocks),
+        "ternary_blocks": ternary_set,
+        "channel_alpha_blocks": ternary_set
+        if expert_mode in ("channel_alpha", "periodic_hp_plus_channel_alpha")
+        else [],
         "hp_schedule_prose": prose,
         "arm_label": arm_label,
         "pilot_labels_per_block": labels,
     }
 
 
+def _resolve_hp_blocks(
+    blocks: list[int],
+    expert_mode: str,
+    hp_period: int,
+    explicit_hp_blocks: set[int] | None,
+) -> set[int]:
+    chain_blocks = set(blocks)
+    if explicit_hp_blocks is not None:
+        outside = sorted(explicit_hp_blocks - chain_blocks)
+        if outside:
+            raise ForwardError(
+                f"--hp-blocks contains blocks outside --blocks: {outside}; chain={blocks}"
+            )
+    if expert_mode == "all_hp":
+        if explicit_hp_blocks is not None and explicit_hp_blocks != chain_blocks:
+            raise ForwardError(
+                "hp_ceiling requires every chain block in --hp-blocks "
+                f"(expected {sorted(chain_blocks)}, got {sorted(explicit_hp_blocks)})"
+            )
+        return chain_blocks
+    scheduled_modes = {"periodic_hp", "periodic_hp_plus_channel_alpha"}
+    if expert_mode in scheduled_modes:
+        if explicit_hp_blocks is not None:
+            return set(explicit_hp_blocks)
+        return periodic_hp_blocks(blocks, hp_period)
+    if explicit_hp_blocks is not None:
+        raise ForwardError(
+            f"--hp-blocks is only valid for scheduled HP arms, got mode {expert_mode!r}"
+        )
+    return set()
+
+
 def run_chain(
-    blocks, paths, *, tokens, seed, top_k, skip_fp16, expert_mode="ternary", hp_period=2
+    blocks,
+    paths,
+    *,
+    tokens,
+    seed,
+    top_k,
+    skip_fp16,
+    expert_mode="ternary",
+    hp_period=2,
+    hp_blocks: set[int] | None = None,
 ) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
-    hp_blocks = periodic_hp_blocks(blocks, hp_period) if expert_mode == "periodic_hp" else set()
+    explicit_hp = hp_blocks is not None
+    resolved_hp = _resolve_hp_blocks(blocks, expert_mode, hp_period, hp_blocks)
     cfg = _BlockRunCfg(
         top_k=top_k,
         skip_fp16=skip_fp16,
         expert_mode=expert_mode,
-        hp_blocks=frozenset(hp_blocks),
+        hp_blocks=frozenset(resolved_hp),
         hp_period=int(hp_period),
     )
     ids = token_ids(tokens, seed, vocab=131072)
@@ -234,7 +328,12 @@ def run_chain(
         pack_provenance.append(prov)
     h_ref, h_pilot, h_fp16 = streams
     meta = _arm_meta(
-        blocks, expert_mode, hp_period, hp_blocks, [r.get("pilot_label") for r in per_block]
+        blocks,
+        expert_mode,
+        hp_period,
+        resolved_hp,
+        [r.get("pilot_label") for r in per_block],
+        explicit_hp=explicit_hp,
     )
     return {
         "blocks": blocks,
@@ -278,6 +377,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=2,
         help="Arm C: period N (N=2 → ternary {0,2}, HP {1,3} on chain 0..3)",
     )
+    p.add_argument(
+        "--hp-blocks",
+        type=parse_hp_blocks,
+        help="Explicit comma-separated HP block set; overrides --hp-period",
+    )
+    p.add_argument(
+        "--evidence-only",
+        action="store_true",
+        help="Write a #75 secondary-arm metrics payload without a decision",
+    )
+    p.add_argument(
+        "--comparison-metrics",
+        action="append",
+        default=[],
+        type=Path,
+        help="Secondary evidence metrics.json; repeat for stacked and ceiling arms",
+    )
     return p
 
 
@@ -285,15 +401,61 @@ def _is_remedy_arm(arm: str) -> bool:
     return arm in _REMEDY_ARMS
 
 
-def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str) -> dict:
+def _is_v2_primary(args: argparse.Namespace) -> bool:
+    return args.arm == "periodic_hp" and getattr(args, "hp_blocks", None) == {1, 2, 3}
+
+
+def _validate_v2_cli(args: argparse.Namespace) -> None:
+    evidence_only = bool(getattr(args, "evidence_only", False))
+    comparison_paths = list(getattr(args, "comparison_metrics", []))
+    if args.arm in _V2_REMEDY_ARMS and not evidence_only:
+        raise ForwardError(f"--arm {args.arm} requires --evidence-only")
+    if evidence_only and args.arm not in _V2_REMEDY_ARMS:
+        raise ForwardError("--evidence-only is reserved for #75 stacked and HP-ceiling arms")
+    if comparison_paths and not _is_v2_primary(args):
+        raise ForwardError(
+            "--comparison-metrics is only valid for the #75 primary run "
+            "(--arm periodic_hp --hp-blocks 1,2,3)"
+        )
+
+
+def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]:
+    payloads: list[dict] = []
+    errors: list[str] = []
+    for raw_path in paths:
+        path = raw_path.expanduser()
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"could not load secondary evidence {path}: {exc}")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"secondary evidence {path} must contain a JSON object")
+            continue
+        payloads.append(payload)
+    return payloads, errors
+
+
+def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str, *, v2: bool = False) -> dict:
     if _is_remedy_arm(arm):
+        if v2:
+            issue = "GH #75 / Linear RM-462 / beads goz-rvk"
+            agent = REMEDY_V2_AGENT_LINE
+            model = "GPT-5.6 Sol"
+            design = "Codex design lock: C denser, N=2+C+A, and HP expert ceiling"
+        else:
+            issue = "GH #73 / Linear RM-362"
+            agent = REMEDY_AGENT_LINE
+            model = "Grok-4.5 (high)"
+            design = "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)"
         return {
-            "issue": "GH #73 / Linear RM-362",
-            "agent": REMEDY_AGENT_LINE,
-            "model": "Grok-4.5 (high)",
-            "design": "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)",
+            "issue": issue,
+            "agent": agent,
+            "model": model,
+            "design": design,
             "baseline_64": BASELINE_64,
             "baseline_72": BASELINE_72,
+            "baseline_74": BASELINE_74 if v2 else None,
             "implementation": implementation_commit(),
             "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
             "numpy": np.__version__,
@@ -331,6 +493,7 @@ def run(args: argparse.Namespace) -> int:
         raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
     if args.hp_period < 1:
         raise ForwardError(f"--hp-period must be >= 1, got {args.hp_period}")
+    _validate_v2_cli(args)
     blocks = parse_blocks(args.blocks)
     paths = ChainPaths(
         npy_root=args.npy_root.expanduser(),
@@ -350,18 +513,49 @@ def run(args: argparse.Namespace) -> int:
         skip_fp16=args.skip_fp16_control,
         expert_mode=expert_mode,
         hp_period=args.hp_period,
+        hp_blocks=args.hp_blocks,
     )
-    decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
-    prov = _provenance(paths, args.skip_fp16_control, args.arm)
+    is_v2 = args.arm in _V2_REMEDY_ARMS or args.hp_blocks is not None
+    prov = _provenance(paths, args.skip_fp16_control, args.arm, v2=is_v2)
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
-    payload = {"provenance": prov, "chain": chain, "decision": decision}
+    evidence_only = bool(getattr(args, "evidence_only", False))
+    if evidence_only:
+        prov["evidence_role"] = "secondary; no independent decision"
+        payload = {"provenance": prov, "chain": chain}
+        decision = None
+    elif _is_v2_primary(args):
+        secondary, load_errors = _load_comparison_payloads(
+            list(getattr(args, "comparison_metrics", []))
+        )
+        comparison = assemble_remedy_v2_comparison(
+            chain,
+            secondary,
+            load_errors=load_errors,
+        )
+        decision = decide_remedy_v2(comparison)
+        prov["evidence_role"] = "primary; sole canonical #75 decision"
+        payload = {
+            "provenance": prov,
+            "chain": chain,
+            "comparison": comparison,
+            "decision": decision,
+        }
+    else:
+        decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
+        payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
     print(f"wrote {args.out / 'metrics.json'}")
+    if evidence_only:
+        print("EVIDENCE ONLY: no decision emitted")
+        return EXIT_OK
+    assert decision is not None
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        if _is_remedy_arm(args.arm):
+        if _is_v2_primary(args):
+            write_remedy_v2_results_md(args.out / "results.md", payload)
+        elif _is_remedy_arm(args.arm):
             write_remedy_results_md(args.out / "results.md", payload)
         else:
             write_results_md(args.out / "results.md", payload)
@@ -369,7 +563,10 @@ def run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _agent_for_arm(arm: str | None) -> tuple[str, str]:
+def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
+    arm = getattr(args, "arm", None)
+    if arm in _V2_REMEDY_ARMS or getattr(args, "hp_blocks", None) is not None:
+        return "GH #75 / Linear RM-462 / beads goz-rvk", REMEDY_V2_AGENT_LINE
     remedy = _is_remedy_arm(arm or "ternary_baseline")
     if remedy:
         return "GH #73 / Linear RM-362", REMEDY_AGENT_LINE
@@ -379,7 +576,7 @@ def _agent_for_arm(arm: str | None) -> tuple[str, str]:
 def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     dest = args.out / "multiblock-unresolved.json"
-    issue, agent = _agent_for_arm(getattr(args, "arm", None))
+    issue, agent = _agent_for_args(args)
     dest.write_text(
         json.dumps(
             {
@@ -404,7 +601,7 @@ def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
 def _write_legacy(args: argparse.Namespace, exc: Exception) -> int:
     if hasattr(args, "out"):
         args.out.mkdir(parents=True, exist_ok=True)
-        _, agent = _agent_for_arm(getattr(args, "arm", None))
+        _, agent = _agent_for_args(args)
         (args.out / "multiblock-legacy-oracle.json").write_text(
             json.dumps(
                 {
