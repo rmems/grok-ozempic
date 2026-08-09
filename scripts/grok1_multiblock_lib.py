@@ -1532,4 +1532,4 @@ def write_remedy_v2_results_md(path: Path, payload: dict) -> None:
         "The HP ceiling is an expert-tier bound, not a product recommendation.",
         "",
     ]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines).rstrip() + "\n")

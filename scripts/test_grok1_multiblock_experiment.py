@@ -870,6 +870,7 @@ class RemedyV2ReportTests(unittest.TestCase):
         self.assertIn("neither mostly-ternary candidate met every locked viability band", body)
         self.assertIn("clear improvement and a viable HP ceiling both hold", body)
         self.assertIn("Secondary `metrics.json` files are evidence-only", body)
+        self.assertFalse(body.endswith("\n\n"))
 
 
 if __name__ == "__main__":
