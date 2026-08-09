@@ -33,7 +33,7 @@ REMEDY_AGENT_LINE = (
 )
 
 REMEDY_V2_AGENT_LINE = (
-    "OpenAI Codex · Model: GPT-5.6 Sol · Issue: #75 / Linear RM-462 · beads goz-rvk"
+    "OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75 / Linear RM-462 · beads goz-rvk"
 )
 
 # Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
@@ -1148,7 +1148,30 @@ def _v2_chain_errors(chain: dict, expected_label: str) -> list[str]:
     return errors
 
 
-def _v2_secondary_map(payloads: list[dict], errors: list[str]) -> dict[str, dict]:
+_V2_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
+
+
+def _v2_secondary_provenance_errors(
+    payload: dict,
+    label: str,
+    expected_implementation: dict,
+) -> list[str]:
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        return [f"{label}:secondary evidence missing provenance object"]
+    errors = []
+    if provenance.get("evidence_role") != _V2_SECONDARY_EVIDENCE_ROLE:
+        errors.append(f"{label}:secondary evidence role is not locked")
+    if provenance.get("implementation") != expected_implementation:
+        errors.append(f"{label}:secondary implementation differs from primary")
+    return errors
+
+
+def _v2_secondary_map(
+    payloads: list[dict],
+    errors: list[str],
+    expected_implementation: dict,
+) -> dict[str, dict]:
     mapped: dict[str, dict] = {}
     for payload in payloads:
         if "decision" in payload:
@@ -1164,6 +1187,9 @@ def _v2_secondary_map(payloads: list[dict], errors: list[str]) -> dict[str, dict
         if label not in V2_SECONDARY_ARMS:
             errors.append(f"unexpected secondary arm {label!r}")
             continue
+        errors.extend(
+            _v2_secondary_provenance_errors(payload, label, expected_implementation)
+        )
         mapped[label] = payload
     missing = sorted(V2_SECONDARY_ARMS - set(mapped))
     if missing:
@@ -1175,11 +1201,16 @@ def assemble_remedy_v2_comparison(
     primary_chain: dict,
     secondary_payloads: list[dict],
     *,
+    primary_provenance: dict,
     load_errors: list[str] | None = None,
 ) -> dict:
     """Validate #75 evidence and return a decision-ready comparison payload."""
     errors = list(load_errors or [])
-    secondary = _v2_secondary_map(secondary_payloads, errors)
+    implementation = primary_provenance.get("implementation")
+    if not isinstance(implementation, dict):
+        errors.append("primary evidence missing implementation provenance")
+        implementation = {}
+    secondary = _v2_secondary_map(secondary_payloads, errors, implementation)
     errors.extend(_v2_chain_errors(primary_chain, V2_PRIMARY_ARM))
     for label, payload in secondary.items():
         errors.extend(_v2_chain_errors(payload["chain"], label))

@@ -471,7 +471,7 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str, *, v2: bool = Fals
         if v2:
             issue = "GH #75 / Linear RM-462 / beads goz-rvk"
             agent = REMEDY_V2_AGENT_LINE
-            model = "GPT-5.6 Sol"
+            model = "GPT-5.6 Sol (xhigh)"
             design = "Codex design lock: C denser, N=2+C+A, and HP expert ceiling"
         else:
             issue = "GH #73 / Linear RM-362"
@@ -561,6 +561,7 @@ def run(args: argparse.Namespace) -> int:
         comparison = assemble_remedy_v2_comparison(
             chain,
             secondary,
+            primary_provenance=prov,
             load_errors=load_errors,
         )
         decision = decide_remedy_v2(comparison)

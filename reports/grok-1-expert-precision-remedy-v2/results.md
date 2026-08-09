@@ -1,6 +1,6 @@
 # Stacked and denser expert remedies for multi-block fidelity
 
-**Agent:** OpenAI Codex · Model: GPT-5.6 Sol · Issue: #75 / Linear RM-462 · beads goz-rvk
+**Agent:** OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75 / Linear RM-462 · beads goz-rvk
 **Issue:** GH #75 / Linear RM-462 / beads goz-rvk
 **Predecessor:** PR #74 / #73 / RM-362 (decision 2)
 **Implementation commit:** `07f0a697dc04002f78b222362149ff9a2a7c7892`

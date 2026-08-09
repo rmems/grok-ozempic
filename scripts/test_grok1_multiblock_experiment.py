@@ -712,6 +712,21 @@ _V2_FIXTURE_METRICS = {
         "exit": 0.58,
     },
 }
+_V2_FIXTURE_IMPLEMENTATION = {"commit": "f" * 40, "dirty": False}
+
+
+def _v2_provenance(role: str) -> dict:
+    return {
+        "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+        "evidence_role": role,
+    }
+
+
+def _v2_secondary(label: str, quality: str) -> dict:
+    return {
+        "provenance": _v2_provenance("secondary; no independent decision"),
+        "chain": _v2_chain(label, quality),
+    }
 
 
 def _v2_fixture_source(block: int, hp_blocks: list[int], channel_blocks: list[int]) -> str:
@@ -777,9 +792,10 @@ def _v2_comparison(primary: str, stacked: str, ceiling: str) -> dict:
     return assemble_remedy_v2_comparison(
         _v2_chain(V2_PRIMARY_ARM, primary),
         [
-            {"chain": _v2_chain(V2_STACKED_ARM, stacked)},
-            {"chain": _v2_chain(V2_CEILING_ARM, ceiling)},
+            _v2_secondary(V2_STACKED_ARM, stacked),
+            _v2_secondary(V2_CEILING_ARM, ceiling),
         ],
+        primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
     )
 
 
@@ -791,7 +807,14 @@ class RemedyV2DecisionTests(unittest.TestCase):
         bad["pack_provenance"][0]["scale_sources"]["expert"] = "pack_v2"
         comparison = assemble_remedy_v2_comparison(
             _v2_chain(V2_PRIMARY_ARM, "help"),
-            [{"chain": bad}, {"chain": _v2_chain(V2_CEILING_ARM, "viable")}],
+            [
+                {
+                    "provenance": _v2_provenance("secondary; no independent decision"),
+                    "chain": bad,
+                },
+                _v2_secondary(V2_CEILING_ARM, "viable"),
+            ],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
         )
         self.assertTrue(any("research_per_channel_side" in e for e in comparison["validation_errors"]))
 
@@ -812,7 +835,25 @@ class RemedyV2DecisionTests(unittest.TestCase):
         comparison = assemble_remedy_v2_comparison(
             _v2_chain(V2_PRIMARY_ARM, "help"),
             [],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
         )
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_rejects_secondary_decision_or_provenance_mismatch(self) -> None:
+        stacked = _v2_secondary(V2_STACKED_ARM, "help")
+        stacked["decision"] = {"decision": 1}
+        stacked["provenance"]["implementation"]["commit"] = "0" * 40
+        ceiling = _v2_secondary(V2_CEILING_ARM, "viable")
+        ceiling["provenance"]["evidence_role"] = "primary"
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [stacked, ceiling],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(any("contains a decision" in error for error in errors))
+        self.assertTrue(any("implementation differs" in error for error in errors))
+        self.assertTrue(any("role is not locked" in error for error in errors))
         self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
 
     def test_option_4_when_only_one_option_2_condition_holds(self) -> None:
@@ -861,7 +902,7 @@ class RemedyV2ReportTests(unittest.TestCase):
         comparison = _v2_comparison("help", "failed", "viable")
         payload = {
             "provenance": {
-                "agent": "OpenAI Codex · Model: GPT-5.6 Sol · Issue: #75",
+                "agent": "OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75",
                 "issue": "GH #75 / Linear RM-462 / beads goz-rvk",
                 "implementation": {"commit": "deadbeef", "dirty": False},
             },

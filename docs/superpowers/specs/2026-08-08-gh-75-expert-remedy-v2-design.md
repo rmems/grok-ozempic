@@ -2,7 +2,7 @@
 
 **Issue:** [GH #75](https://github.com/rmems/grok-ozempic/issues/75) / Linear RM-462
 
-**Agent:** OpenAI Codex (GPT-5.6 Sol xhigh)
+**Agent:** OpenAI Codex: GPT-5.6 Sol (xhigh)
 
 **Status:** Approved on 2026-08-08
 
