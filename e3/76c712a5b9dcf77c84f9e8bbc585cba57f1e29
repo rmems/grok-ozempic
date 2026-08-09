@@ -1,0 +1,26 @@
+.beads/issues.jsonl
+  ai_agent 9,11
+  s_efe4d58ef9c244::t_cac78bcd895a85 8,10,15-16
+  s_efe4d58ef9c244::t_46ea27baa20eeb 12,14
+  s_efe4d58ef9c244::t_56ea33b08233fd 1
+  s_efe4d58ef9c244::t_b18a9eeb4f8746 13
+docs/superpowers/specs/2026-08-08-gh-75-expert-remedy-v2-design.md
+  s_efe4d58ef9c244::t_2a05db813d50d6 1-143,146,149-233
+  s_efe4d58ef9c244::t_443f16ccb6d64a 144-145,147-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e376c712a5b9dcf77c84f9e8bbc585cba57f1e29",
+  "prompts": {},
+  "sessions": {
+    "s_efe4d58ef9c244": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe4a5-fc60-7980-8a40-d626b13d8461",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
