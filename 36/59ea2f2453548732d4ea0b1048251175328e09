@@ -1,0 +1,13 @@
+docs/superpowers/specs/2026-08-08-gh-75-expert-remedy-v2-design.md
+  ai_agent 86
+reports/grok-1-expert-precision-remedy-v2/hp-ceiling/metrics.json
+  ai_agent 166,168
+scripts/grok1_multiblock_lib.py
+  ai_agent 1023-1049,1054-1057,1105-1114,1151-1153,1181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3659ea2f2453548732d4ea0b1048251175328e09",
+  "prompts": {}
+}
