@@ -21,16 +21,15 @@ read_payload() {
   fi
 }
 
+has_git_commit_command() {
+  printf '%s\n' "${1:-}" |
+    sed "s/'[^']*'//g; s/\"[^\"]*\"//g" |
+    grep -Eq '(^|[;&|][;&|]?)[[:space:]]*(command[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)' 2>/dev/null
+}
+
 payload=$(read_payload)
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
-# Guard: command merely mentioning git commit (e.g., echo "git commit") should not record
-if printf '%s' "$cmd" | grep -Eq 'echo[^;]*git commit|printf[^;]*git commit' 2>/dev/null; then
-  exit 0
-fi
+has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac

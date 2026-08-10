@@ -31,16 +31,21 @@ read_payload() {
   fi
 }
 
+has_git_commit_command() {
+  printf '%s\n' "${1:-}" |
+    sed "s/'[^']*'//g; s/\"[^\"]*\"//g" |
+    grep -Eq '(^|[;&|][;&|]?)[[:space:]]*(command[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)' 2>/dev/null
+}
+
 TRAILER_NAME='Co-Authored-By'
 COAUTHOR="${CODEX_COAUTHOR-Codex <noreply@openai.com>}"
 case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 
 payload=$(read_payload)
+session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
+state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
+has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'* | *'git push'*) exit 0 ;;
 esac
@@ -50,9 +55,6 @@ reported=$(printf '%s' "$payload" |
   jq -r '(.tool_response.stdout // "") + "\n" + (.tool_response.stderr // "")' 2>/dev/null |
   sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' |
   sed -n '1p')
-
-session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
-state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
 
 if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
   :

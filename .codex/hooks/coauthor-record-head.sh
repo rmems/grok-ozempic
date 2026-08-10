@@ -21,19 +21,17 @@ read_payload() {
   fi
 }
 
+has_git_commit_command() {
+  # Match an executable command segment, not text inside an echo/printf or a
+  # quoted string. Separators are included so compound commands remain valid.
+  printf '%s\n' "${1:-}" |
+    sed "s/'[^']*'//g; s/\"[^\"]*\"//g" |
+    grep -Eq '(^|[;&|][;&|]?)[[:space:]]*(command[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)' 2>/dev/null
+}
+
 payload=$(read_payload)
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
-# Guard: a standalone echo/printf that merely mentions "git commit" should not record
-# HEAD. Compound commands such as `echo "git commit" && git commit ...` contain a
-# real commit and must record state so the fallback proof can attribute them.
-if printf '%s' "$cmd" |
-   grep -Eq '^[[:space:]]*(echo|printf)([[:space:]]|$)[^;&|]*git[[:space:]]+commit[^;&|]*[[:space:]]*$' 2>/dev/null; then
-  exit 0
-fi
+has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac

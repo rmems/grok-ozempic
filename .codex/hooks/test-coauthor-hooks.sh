@@ -11,6 +11,8 @@ done
 repo_root=$(git rev-parse --show-toplevel)
 pre_hook="$repo_root/.codex/hooks/coauthor-record-head.sh"
 post_hook="$repo_root/.codex/hooks/coauthor-commit.sh"
+muse_pre_hook="$repo_root/.muse/hooks/coauthor-record-head.sh"
+muse_post_hook="$repo_root/.muse/hooks/coauthor-commit.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
@@ -59,8 +61,9 @@ assert_trailer_count() {
 }
 
 assert_state_clean() {
-  if [ -d "$TMPDIR/codex-coauthor" ]; then
-    remaining=$(find "$TMPDIR/codex-coauthor" -type f -name '*.head' 2>/dev/null || true)
+  state_dir=${1:-codex-coauthor}
+  if [ -d "$TMPDIR/$state_dir" ]; then
+    remaining=$(find "$TMPDIR/$state_dir" -type f -name '*.head' 2>/dev/null || true)
     [ -z "$remaining" ] || {
       echo "stale state files remain after attribution: $remaining" >&2
       exit 1
@@ -80,6 +83,28 @@ run_hook "$post_hook" 'git commit -m reported' "$summary"
 assert_trailer_count 1
 assert_state_clean
 
+# Quoted text is not proof of a commit command. Even if HEAD subsequently moves
+# by one commit, the fallback must not attribute the checked-out descendant.
+base=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q -c quoted-descendant
+printf 'descendant\n' > "$repo/descendant.txt"
+git -C "$repo" add descendant.txt
+git -C "$repo" commit -q -m descendant
+descendant=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$base"
+run_hook "$pre_hook" 'echo "git commit" && git checkout quoted-descendant'
+git -C "$repo" checkout -q "$descendant"
+run_hook "$post_hook" 'echo "git commit" && git checkout quoted-descendant'
+[ "$(git -C "$repo" rev-parse HEAD)" = "$descendant" ]
+assert_trailer_count 0
+assert_state_clean
+# A separator inside quoted output is text too, not a command boundary.
+run_hook "$pre_hook" 'printf "; git commit -m fake"'
+run_hook "$post_hook" 'printf "; git commit -m fake"'
+assert_trailer_count 0
+assert_state_clean
+git -C "$repo" switch -q main
+
 # A compound command may echo "git commit" and still perform a real commit.
 # The record-head guard must not confuse the two.
 printf 'compound\n' > "$repo/compound.txt"
@@ -89,6 +114,14 @@ summary=$(git -C "$repo" commit -q -m compound)
 run_hook "$post_hook" 'echo "git commit" && git commit -q -m compound' "$summary"
 assert_trailer_count 1
 assert_state_clean
+
+# A skipped commit-and-push payload still consumes both agents' state tokens.
+run_hook "$pre_hook" 'git commit -m skipped && git push origin HEAD'
+run_hook "$post_hook" 'git commit -m skipped && git push origin HEAD'
+assert_state_clean
+run_hook "$muse_pre_hook" 'git commit -m skipped && git push origin HEAD'
+run_hook "$muse_post_hook" 'git commit -m skipped && git push origin HEAD'
+assert_state_clean muse-coauthor
 
 # A later command that only echoes "git commit" must not reattribute HEAD.
 run_hook "$pre_hook" 'echo "git commit"'
