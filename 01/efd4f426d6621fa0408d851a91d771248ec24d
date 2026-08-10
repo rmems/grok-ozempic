@@ -1,0 +1,33 @@
+.codex/hooks/has_git_commit_command.awk
+  s_069966c0fb0bd6::t_d7a831259ea196 61
+  s_069966c0fb0bd6::t_c8178bf53a4332 62-65,67-73
+  s_069966c0fb0bd6::t_4e134f52990c27 11-17,19-25,27-33,35,37-40,43-53
+.codex/hooks/coauthor-record-head.sh
+  s_069966c0fb0bd6::t_2facc92dc4f876 28-30
+.muse/hooks/coauthor-record-head.sh
+  s_069966c0fb0bd6::t_ded855454358eb 28-30
+.codex/hooks/coauthor-commit.sh
+  s_069966c0fb0bd6::t_305cc211c686e9 38-40
+.muse/hooks/coauthor-commit.sh
+  s_069966c0fb0bd6::t_c9f7964912cb42 35-37
+.muse/hooks/has_git_commit_command.awk
+  s_069966c0fb0bd6::t_a2970bec896a5c 61
+  s_069966c0fb0bd6::t_640cefc45541bd 62-65,67-73
+  s_069966c0fb0bd6::t_452d60b0f99026 11-17,19-25,27-33,35,37-40,43-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "01efd4f426d6621fa0408d851a91d771248ec24d",
+  "prompts": {},
+  "sessions": {
+    "s_069966c0fb0bd6": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "solid-forger",
+        "model": "unknown"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
