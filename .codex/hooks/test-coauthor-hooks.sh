@@ -14,6 +14,9 @@ post_hook="$repo_root/.codex/hooks/coauthor-commit.sh"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 
+# Keep per-test coauthor state isolated so stale .head tokens are detectable.
+export TMPDIR="$test_root"
+
 # Project hook commands must be harmless when Codex invokes Bash elsewhere.
 nonrepo="$test_root/nonrepo"
 mkdir -p "$nonrepo"
@@ -55,6 +58,16 @@ assert_trailer_count() {
   }
 }
 
+assert_state_clean() {
+  if [ -d "$TMPDIR/codex-coauthor" ]; then
+    remaining=$(find "$TMPDIR/codex-coauthor" -type f -name '*.head' 2>/dev/null || true)
+    [ -z "$remaining" ] || {
+      echo "stale state files remain after attribution: $remaining" >&2
+      exit 1
+    }
+  fi
+}
+
 # Git's reported commit id is the strongest proof that this call made HEAD.
 printf 'reported\n' >> "$repo/tracked.txt"
 git -C "$repo" add tracked.txt
@@ -65,6 +78,23 @@ once=$(git -C "$repo" rev-parse HEAD)
 run_hook "$post_hook" 'git commit -m reported' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$once" ]
 assert_trailer_count 1
+assert_state_clean
+
+# A compound command may echo "git commit" and still perform a real commit.
+# The record-head guard must not confuse the two.
+printf 'compound\n' > "$repo/compound.txt"
+git -C "$repo" add compound.txt
+run_hook "$pre_hook" 'echo "git commit" && git commit -q -m compound'
+summary=$(git -C "$repo" commit -q -m compound)
+run_hook "$post_hook" 'echo "git commit" && git commit -q -m compound' "$summary"
+assert_trailer_count 1
+assert_state_clean
+
+# A later command that only echoes "git commit" must not reattribute HEAD.
+run_hook "$pre_hook" 'echo "git commit"'
+run_hook "$post_hook" 'echo "git commit"'
+assert_trailer_count 1
+assert_state_clean
 
 # A quiet partial commit exercises the recorded-HEAD fallback and proves that
 # message-only amend leaves the unrelated staged path intact.

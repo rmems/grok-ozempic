@@ -8,6 +8,12 @@
 # Env: CODEX_COAUTHOR overrides the identity; CODEX_COAUTHOR=0 disables.
 set -u
 
+# State file is a one-time token written by the PreToolUse recorder. Consume it
+# on every exit so a later tool call whose command merely mentions git commit
+# cannot reuse a stale fallback proof.
+state=""
+trap 'rm -f "$state" 2>/dev/null || true' EXIT
+
 state_key() {
   _sess=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-64)
   [ -n "$_sess" ] || _sess=nosession
@@ -45,14 +51,15 @@ reported=$(printf '%s' "$payload" |
   sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' |
   sed -n '1p')
 
+session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
+state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
+
 if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
   :
 else
   # Fallback proof must show HEAD was just created by this tool call; a
   # bare mention of "git commit" plus a branch checkout would otherwise
   # change HEAD without a new commit and trigger a false amend.
-  session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
-  state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
   [ -r "$state" ] || exit 0
   prev=$(cat "$state" 2>/dev/null)
   [ -n "$prev" ] || exit 0

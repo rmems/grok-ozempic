@@ -27,8 +27,11 @@ case "$cmd" in
   *"git commit"*) ;;
   *) exit 0 ;;
 esac
-# Guard: command merely mentioning git commit (e.g., echo "git commit") should not record
-if printf '%s' "$cmd" | grep -Eq 'echo[^;]*git commit|printf[^;]*git commit' 2>/dev/null; then
+# Guard: a standalone echo/printf that merely mentions "git commit" should not record
+# HEAD. Compound commands such as `echo "git commit" && git commit ...` contain a
+# real commit and must record state so the fallback proof can attribute them.
+if printf '%s' "$cmd" |
+   grep -Eq '^[[:space:]]*(echo|printf)([[:space:]]|$)[^;&|]*git[[:space:]]+commit[^;&|]*[[:space:]]*$' 2>/dev/null; then
   exit 0
 fi
 case "$cmd" in
