@@ -1,0 +1,31 @@
+{
+  "description": "Repository-local Muse commit attribution hooks.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$repo_root/.muse/hooks/coauthor-record-head.sh\"; [ -f \"$hook\" ] || exit 0; bash \"$hook\"",
+            "timeout": 3,
+            "statusMessage": "Recording the pre-commit HEAD for Muse attribution"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$repo_root/.muse/hooks/coauthor-commit.sh\"; [ -f \"$hook\" ] || exit 0; bash \"$hook\"",
+            "timeout": 10,
+            "statusMessage": "Checking Muse co-author trailer"
+          }
+        ]
+      }
+    ]
+  }
+}
