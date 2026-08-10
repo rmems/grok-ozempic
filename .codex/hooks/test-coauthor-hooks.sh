@@ -192,4 +192,54 @@ run_hook "$post_hook" 'git commit -m merge' "$summary"
 [ "$(git -C "$repo" rev-parse HEAD)" = "$merged" ]
 assert_trailer_count 0
 
+# Disabled attribution still consumes the PreToolUse token so a later quiet
+# one-commit advance cannot reuse it as a fallback proof.
+printf 'consume\n' >> "$repo/tracked.txt"
+git -C "$repo" add tracked.txt
+run_hook "$pre_hook" 'git commit -q -m consume'
+git -C "$repo" commit -q -m consume
+(cd "$repo" && CODEX_COAUTHOR=0 bash "$post_hook" < "$test_root/payload.json")
+assert_trailer_count 0
+assert_state_clean
+printf 'after-disabled\n' > "$repo/after-disabled.txt"
+git -C "$repo" add after-disabled.txt
+git -C "$repo" commit -q -m after-disabled
+run_hook "$post_hook" 'git commit -q -m after-disabled'
+assert_trailer_count 0
+assert_state_clean
+
+# An escaped quote inside a double-quoted string does not end the string, so
+# the following "; git commit" text is not treated as a real commit.
+base=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q -c escaped-descendant
+printf 'escaped\n' > "$repo/escaped.txt"
+git -C "$repo" add escaped.txt
+git -C "$repo" commit -q -m escaped
+escaped=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$base"
+run_hook "$pre_hook" 'printf "foo\\\" ; git commit -m fake" && git checkout escaped-descendant'
+git -C "$repo" checkout -q "$escaped"
+run_hook "$post_hook" 'printf "foo\\\" ; git commit -m fake" && git checkout escaped-descendant'
+[ "$(git -C "$repo" rev-parse HEAD)" = "$escaped" ]
+assert_trailer_count 0
+assert_state_clean
+git -C "$repo" switch -q main
+
+# git global options, env assignments, and command wrappers still trigger
+# attribution because the parser looks past them to the commit subcommand.
+for wrapped in \
+  'git -C . commit -m optioned' \
+  'git -c core.editor=true commit -m configed' \
+  'env GIT_AUTHOR_NAME=Tester git commit -m enved' \
+  'command git commit -m command'; do
+  file=$(printf '%s' "$wrapped" | sed 's/[^a-zA-Z0-9]/-/g')
+  printf '%s\n' "$file" > "$repo/$file.txt"
+  git -C "$repo" add "$file.txt"
+  run_hook "$pre_hook" "$wrapped"
+  summary=$(git -C "$repo" commit -m "$file")
+  run_hook "$post_hook" "$wrapped" "$summary"
+  assert_trailer_count 1
+  assert_state_clean
+done
+
 echo "Codex co-author hook tests passed"

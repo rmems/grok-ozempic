@@ -32,19 +32,24 @@ read_payload() {
 }
 
 has_git_commit_command() {
-  printf '%s\n' "${1:-}" |
-    sed "s/'[^']*'//g; s/\"[^\"]*\"//g" |
-    grep -Eq '(^|[;&|][;&|]?)[[:space:]]*(command[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)' 2>/dev/null
+  # Match an executable git commit command, ignoring text inside quoted or
+  # escaped strings and allowing wrappers like env/command and git globals
+  # such as -C, -c, --git-dir, --work-tree, --no-pager, etc.
+  printf '%s\n' "${1:-}" | awk -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
 }
 
 TRAILER_NAME='Co-Authored-By'
 COAUTHOR="${CODEX_COAUTHOR-Codex <noreply@openai.com>}"
-case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 
+# Read the payload and materialise the one-time state token path before the
+# identity/disable guard so a disabled PostToolUse call still consumes a
+# PreToolUse token that would otherwise be left for a future fallback.
 payload=$(read_payload)
 session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
 state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
+
+case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'* | *'git push'*) exit 0 ;;

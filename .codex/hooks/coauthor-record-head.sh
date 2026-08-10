@@ -22,11 +22,10 @@ read_payload() {
 }
 
 has_git_commit_command() {
-  # Match an executable command segment, not text inside an echo/printf or a
-  # quoted string. Separators are included so compound commands remain valid.
-  printf '%s\n' "${1:-}" |
-    sed "s/'[^']*'//g; s/\"[^\"]*\"//g" |
-    grep -Eq '(^|[;&|][;&|]?)[[:space:]]*(command[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)' 2>/dev/null
+  # Match an executable git commit command, ignoring text inside quoted or
+  # escaped strings and allowing wrappers like env/command and git globals
+  # such as -C, -c, --git-dir, --work-tree, --no-pager, etc.
+  printf '%s\n' "${1:-}" | awk -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
 }
 
 payload=$(read_payload)
