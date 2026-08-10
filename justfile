@@ -104,7 +104,7 @@ _codex-hook-tests:
     set -euo pipefail
     if ! command -v jq >/dev/null 2>&1; then
       echo "error: jq not on PATH — required for _codex-hook-tests (jq empty .codex/hooks.json)" >&2
-      echo "       install: https://jqlang.org/download/ or apt-get install jq / brew install jq" >&2
+      echo "       install: https://jqlang.org/download/ or apt-get -y install jq / brew install jq" >&2
       exit 1
     fi
     echo '+ jq empty .codex/hooks.json'

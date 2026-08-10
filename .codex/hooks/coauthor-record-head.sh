@@ -27,6 +27,10 @@ case "$cmd" in
   *"git commit"*) ;;
   *) exit 0 ;;
 esac
+# Guard: command merely mentioning git commit (e.g., echo "git commit") should not record
+if printf '%s' "$cmd" | grep -Eq 'echo[^;]*git commit|printf[^;]*git commit' 2>/dev/null; then
+  exit 0
+fi
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac

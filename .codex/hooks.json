@@ -22,7 +22,7 @@
             "type": "command",
             "command": "repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; hook=\"$repo_root/.codex/hooks/coauthor-commit.sh\"; [ -f \"$hook\" ] || exit 0; bash \"$hook\"",
             "timeout": 10,
-            "statusMessage": "Adding the Codex co-author trailer"
+            "statusMessage": "Checking Codex co-author trailer"
           }
         ]
       }

@@ -1110,6 +1110,8 @@ def _v2_control_error(chain: dict) -> str | None:
             cosines.append(float(control["block_output_cosine"]))
         except (TypeError, ValueError, KeyError):
             return "fp16_control_malformed"
+    if not cosines:
+        return "fp16_control_malformed"
     if min(cosines) < 0.99:
         return f"fp16_control_cosine_below_0.99:{cosines}"
     return None
@@ -1146,7 +1148,9 @@ def _v2_pack_row_errors(
 
 def _v2_scale_source_errors(chain: dict, label: str) -> list[str]:
     hp_blocks, channel_blocks, _ = _v2_expected_schedule(label)
-    packs = chain.get("pack_provenance") or []
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list):
+        return [f"{label}:missing_pack_provenance"]
     if len(packs) != len(BASELINE_72["blocks"]):
         return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
