@@ -4,28 +4,53 @@ function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
     if (esc) {
-      if (in_s || in_d || in_b) out = out " "
-      else out = out c
       esc = 0
     } else if (c == "\\") {
       esc = 1
     } else if (c == "'" && !in_d && !in_b) {
-      in_s = !in_s
+      if (in_s) {
+        in_s = 0
+        out = out "__Q__"
+      } else {
+        in_s = 1
+      }
+      continue
     } else if (c == "\"" && !in_s && !in_b) {
-      in_d = !in_d
+      if (in_d) {
+        in_d = 0
+        out = out "__Q__"
+      } else {
+        in_d = 1
+      }
+      continue
     } else if (c == "`" && !in_s) {
-      in_b = !in_b
-    } else if (!in_s && !in_d && !in_b) {
-      out = out c
-    } else {
-      out = out " "
+      if (in_b) {
+        in_b = 0
+        out = out "__Q__"
+      } else {
+        in_b = 1
+      }
+      continue
     }
+    if (!in_s && !in_d && !in_b) out = out c
   }
-  gsub(/[ \t]+/, " ", out)
+  # Close any unterminated quoted region with a placeholder so the rest of
+  # the command does not leak out as unquoted text.
+  if (in_s || in_d || in_b) out = out "__Q__"
+  gsub(/[ \t\n]+/, " ", out)
   return out
 }
-{
-  line = strip_quotes($0)
+
+BEGIN {
+  if (cmd == "") {
+    while ((getline x) > 0) {
+      if (line == "") line = x
+      else line = line "\n" x
+    }
+  } else {
+    line = cmd
+  }
+  line = strip_quotes(line)
   n = split(line, segs, /[;&|]+|&&|\|\|/)
   for (i = 1; i <= n; i++) {
     gsub(/^[ \t]+|[ \t]+$/, "", segs[i])
@@ -33,8 +58,19 @@ function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
     m = split(segs[i], toks, /[ \t]+/)
     k = 1
     while (k <= m) {
-      if (toks[k] == "command") {
+      if (toks[k] == "command" || toks[k] ~ /^(sudo|nice|time|if|then|else|elif|do|while|until|for|\!|\()$/) {
+        # Shell wrappers/control-flow keywords (or a subshell open paren) that
+        # precede the actual command. This intentionally does not consume
+        # option-argument pairs (e.g. "sudo -u x"); callers should write
+        # "sudo -u x git commit" for now.
         k++
+      } else if (toks[k] ~ /^\(/) {
+        # A parenthesised command like (git commit) where the ( is attached to
+        # the command word. Strip the leading paren and re-evaluate the token.
+        toks[k] = substr(toks[k], 2)
+        if (toks[k] == "") { k++; continue }
+        # if the token also ends with ) (e.g. "(git)"), remove it too
+        if (toks[k] ~ /\)$/) toks[k] = substr(toks[k], 1, length(toks[k]) - 1)
       } else if (toks[k] == "env") {
         k++
         while (k <= m && (toks[k] ~ /^-/ || toks[k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
