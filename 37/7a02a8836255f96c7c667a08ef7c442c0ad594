@@ -4,21 +4,21 @@ reports/grok-1-expert-precision-remedy-v2/results.md
   s_efe4d58ef9c244::t_aa1c533af4d280 24
 .beads/issues.jsonl
   s_efe4d58ef9c244::t_5a86d5b09c2c03 1
-.codex/hooks/coauthor-commit.sh
-  s_efe4d58ef9c244::t_aa1c533af4d280 39
-.codex/hooks/test-coauthor-hooks.sh
-  s_efe4d58ef9c244::t_15717a0a49dd81 115
-  s_efe4d58ef9c244::t_aa1c533af4d280 17-24,102-114
-scripts/test_grok1_multiblock_experiment.py
-  s_efe4d58ef9c244::t_28f2d2ad4b4090 574-576
-  s_efe4d58ef9c244::t_aa1c533af4d280 572-573,577,622-642,890-903
 .codex/hooks.json
   s_efe4d58ef9c244::t_aa1c533af4d280 10,23
-scripts/grok1_multiblock_lib.py
-  s_efe4d58ef9c244::t_aa1c533af4d280 1261,1271-1274,1276-1277,1281-1286,1289,1291,1309-1312,1315-1320,1450-1458,1617-1620
 scripts/grok1_multiblock_experiment.py
   s_efe4d58ef9c244::t_28f2d2ad4b4090 202-204
   s_efe4d58ef9c244::t_aa1c533af4d280 77,201,351,441-444,555,606
+scripts/test_grok1_multiblock_experiment.py
+  s_efe4d58ef9c244::t_28f2d2ad4b4090 574-576
+  s_efe4d58ef9c244::t_aa1c533af4d280 572-573,577,622-642,890-903
+.codex/hooks/coauthor-commit.sh
+  s_efe4d58ef9c244::t_aa1c533af4d280 39
+scripts/grok1_multiblock_lib.py
+  s_efe4d58ef9c244::t_aa1c533af4d280 1261,1271-1274,1276-1277,1281-1286,1289,1291,1309-1312,1315-1320,1450-1458,1617-1620
+.codex/hooks/test-coauthor-hooks.sh
+  s_efe4d58ef9c244::t_aa1c533af4d280 17-24,102-114
+  s_efe4d58ef9c244::t_15717a0a49dd81 115
 ---
 {
   "schema_version": "authorship/3.0.0",
