@@ -1,3 +1,54 @@
+function remove_heredocs(s,    out, i, st, en, rest, marr, word, esc_word, redir_len, next_nl, body_start, rstart, rlen, pat) {
+  out = ""
+  i = 1
+  while (i <= length(s)) {
+    st = index(substr(s, i), "<<")
+    if (st == 0) {
+      out = out substr(s, i)
+      break
+    }
+    st = i + st - 1
+    rest = substr(s, st)
+    # Match <<[-][']WORD["] and capture the delimiter word (alphanumeric/underscore
+    # so we can safely embed it in a regex for the closing line).
+    if (match(rest, /^<<-?[ \t]*[\"']?([A-Za-z_][A-Za-z0-9_]+)[\"']?/, marr)) {
+      redir_len = RLENGTH
+      word = marr[1]
+      en = st + redir_len
+      # The rest of the command line (if any) is kept so that a trailing
+      # "; git commit" after the heredoc is still parsed.
+      next_nl = index(substr(s, en), "\n")
+      if (next_nl == 0) {
+        # No body; not a real heredoc we can strip.
+        out = out substr(s, i, st - i + 2)
+        i = st + 2
+        continue
+      }
+      body_start = en + next_nl
+      # Closing delimiter line: optional leading whitespace/tabs (for <<-) then
+      # the word, then optional trailing whitespace and a newline or end-of-string.
+      esc_word = word
+      gsub(/[.*+?|^$(){}[\]\\]/, "\\\\&", esc_word)
+      pat = "\n[ \\t]*" esc_word "[ \\t]*(\n|$)"
+      if (match(substr(s, body_start), pat, marr)) {
+        rstart = RSTART
+        rlen = RLENGTH
+        # Keep everything up through the redirect token and the rest of the
+        # first line, then jump past the heredoc body and its closing line.
+        out = out substr(s, i, st - i)            # text before <<
+        out = out substr(s, st, redir_len)        # the <<DELIM token
+        if (next_nl > 1) out = out substr(s, en, next_nl - 1)  # after redirect on same line
+        i = body_start + rstart + rlen - 1
+        continue
+      }
+    }
+    # Not a heredoc we can handle; keep the << and continue.
+    out = out substr(s, i, st - i + 2)
+    i = st + 2
+  }
+  return out
+}
+
 function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
   out = ""
   in_s = 0; in_d = 0; in_b = 0
@@ -50,6 +101,7 @@ BEGIN {
   } else {
     line = cmd
   }
+  line = remove_heredocs(line)
   line = strip_quotes(line)
   n = split(line, segs, /[;&|]+|&&|\|\|/)
   for (i = 1; i <= n; i++) {
