@@ -1,18 +1,21 @@
-function strip_quotes(s,    out, i, c, in_s, in_d, esc) {
+function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
   out = ""
-  in_s = 0; in_d = 0
+  in_s = 0; in_d = 0; in_b = 0
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
     if (esc) {
-      if (in_s || in_d) out = out " "
+      if (in_s || in_d || in_b) out = out " "
+      else out = out c
       esc = 0
     } else if (c == "\\") {
       esc = 1
-    } else if (c == "'" && !in_d) {
+    } else if (c == "'" && !in_d && !in_b) {
       in_s = !in_s
-    } else if (c == "\"" && !in_s) {
+    } else if (c == "\"" && !in_s && !in_b) {
       in_d = !in_d
-    } else if (!in_s && !in_d) {
+    } else if (c == "`" && !in_s) {
+      in_b = !in_b
+    } else if (!in_s && !in_d && !in_b) {
       out = out c
     } else {
       out = out " "
