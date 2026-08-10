@@ -1,0 +1,32 @@
+.codex/hooks.json
+  ai_agent 25
+.codex/hooks/coauthor-record-head.sh
+  s_069966c0fb0bd6::t_85ec6610f0aa21 30-34
+.codex/hooks/coauthor-commit.sh
+  s_069966c0fb0bd6::t_11e0e19e25229f 54-56
+  s_069966c0fb0bd6::t_a5bd806ad1a17c 11-16
+.beads/issues.jsonl
+  ai_agent 40
+justfile
+  ai_agent 105-109
+.codex/hooks/test-coauthor-hooks.sh
+  s_069966c0fb0bd6::t_bc5d5ea5f7d58c 61-70
+  s_069966c0fb0bd6::t_29755900b3a647 81-97
+  s_069966c0fb0bd6::t_1e2bd9734e4d6c 17-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "43192b2a34eaf9659fc36159660309ca8b38c0f7",
+  "prompts": {},
+  "sessions": {
+    "s_069966c0fb0bd6": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "solid-forger",
+        "model": "unknown"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
