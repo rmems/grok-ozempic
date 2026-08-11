@@ -9,9 +9,10 @@ function remove_heredocs(s,    out, i, st, en, rest, marr, word, esc_word, redir
     }
     st = i + st - 1
     rest = substr(s, st)
-    # Match <<[-][']WORD["] and capture the delimiter word (alphanumeric/underscore
-    # so we can safely embed it in a regex for the closing line).
-    if (match(rest, /^<<-?[ \t]*[\"']?([^ \t\n\"';|&<>()]+)[\"']?/, marr)) {
+    # Match <<[-][']WORD["] and capture the delimiter word.  It is constrained to
+    # non-quote/non-separator characters and is escaped before embedding in the
+    # closing-line regex, so punctuation in delimiters like "EOF.1" is safe.
+    if (match(rest, /^<<-?[ \t]*["']?([^ \t\n"';|&<>()]+)["']?/, marr)) {
       redir_len = RLENGTH
       word = marr[1]
       en = st + redir_len
@@ -49,16 +50,16 @@ function remove_heredocs(s,    out, i, st, en, rest, marr, word, esc_word, redir
   return out
 }
 
-function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
+function strip_quotes(s,    out, i, c, in_s, in_d, esc) {
   out = ""
-  in_s = 0; in_d = 0; in_b = 0
+  in_s = 0; in_d = 0
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
     if (esc) {
       esc = 0
     } else if (c == "\\") {
       esc = 1
-    } else if (c == "'" && !in_d && !in_b) {
+    } else if (c == "'" && !in_d) {
       if (in_s) {
         in_s = 0
         out = out "__Q__"
@@ -66,7 +67,7 @@ function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
         in_s = 1
       }
       continue
-    } else if (c == "\"" && !in_s && !in_b) {
+    } else if (c == "\"" && !in_s) {
       if (in_d) {
         in_d = 0
         out = out "__Q__"
@@ -74,21 +75,16 @@ function strip_quotes(s,    out, i, c, in_s, in_d, in_b, esc) {
         in_d = 1
       }
       continue
-    } else if (c == "`" && !in_s) {
-      if (in_b) {
-        in_b = 0
-        out = out "__Q__"
-      } else {
-        in_b = 1
-      }
-      continue
     }
-    if (!in_s && !in_d && !in_b) out = out c
+    if (!in_s && !in_d) out = out c
   }
   # Close any unterminated quoted region with a placeholder so the rest of
   # the command does not leak out as unquoted text.
-  if (in_s || in_d || in_b) out = out "__Q__"
-  gsub(/[ \t\n]+/, " ", out)
+  if (in_s || in_d) out = out "__Q__"
+  # Strip shell comments (only outside quotes; quoted text is already __Q__).
+  gsub(/(^|[ \t\n])#[^\n]*/, "", out)
+  # Collapse spaces/tabs but keep newlines so they can split shell commands.
+  gsub(/[ \t]+/, " ", out)
   return out
 }
 
@@ -103,7 +99,7 @@ BEGIN {
   }
   line = remove_heredocs(line)
   line = strip_quotes(line)
-  n = split(line, segs, /[;&|]+|&&|\|\|/)
+  n = split(line, segs, /[\n;&|]+|&&|\|\|/)
   for (i = 1; i <= n; i++) {
     gsub(/^[ \t]+|[ \t]+$/, "", segs[i])
     if (segs[i] == "") continue
@@ -116,6 +112,11 @@ BEGIN {
         # option-argument pairs (e.g. "sudo -u x"); callers should write
         # "sudo -u x git commit" for now.
         k++
+      } else if (toks[k] ~ /^\$\(/) {
+        # Command substitution $(...) where the $( is attached to the command.
+        toks[k] = substr(toks[k], 3)
+        if (toks[k] == "") { k++; continue }
+        continue
       } else if (toks[k] ~ /^\(/) {
         # A parenthesised command like (git commit) where the ( is attached to
         # the command word. Strip the leading paren and re-evaluate the token.
@@ -123,6 +124,15 @@ BEGIN {
         if (toks[k] == "") { k++; continue }
         # if the token also ends with ) (e.g. "(git)"), remove it too
         if (toks[k] ~ /\)$/) toks[k] = substr(toks[k], 1, length(toks[k]) - 1)
+      } else if (toks[k] ~ /^`/) {
+        # Backtick command substitution; strip the leading backtick and let the
+        # command inside be parsed.  A bare backtick becomes an empty token.
+        toks[k] = substr(toks[k], 2)
+        if (toks[k] == "") { k++; continue }
+        continue
+      } else if (toks[k] ~ /`$/) {
+        # Trailing backtick on the same token (e.g. "commit`").
+        toks[k] = substr(toks[k], 1, length(toks[k]) - 1)
       } else if (toks[k] == "env") {
         k++
         while (k <= m && (toks[k] ~ /^-/ || toks[k] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {

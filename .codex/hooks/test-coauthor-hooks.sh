@@ -281,4 +281,29 @@ EOF' "$summary"
 assert_trailer_count 1
 assert_state_clean
 
+# Shell comments and trailing "#; git commit" must not be parsed as commands.
+base=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q -c commented-descendant
+printf 'commented\n' > "$repo/commented.txt"
+git -C "$repo" add commented.txt
+git -C "$repo" commit -q -m commented
+commented=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$base"
+run_hook "$pre_hook" 'git checkout commented-descendant #; git commit'
+git -C "$repo" checkout -q "$commented"
+run_hook "$post_hook" 'git checkout commented-descendant #; git commit'
+[ "$(git -C "$repo" rev-parse HEAD)" = "$commented" ]
+assert_trailer_count 0
+assert_state_clean
+git -C "$repo" switch -q main
+
+# A commit executed through backtick command substitution still attributes.
+printf 'backtick\n' > "$repo/backtick.txt"
+git -C "$repo" add backtick.txt
+run_hook "$pre_hook" '`git commit -q -m backtick`'
+summary=$(git -C "$repo" commit -q -m backtick)
+run_hook "$post_hook" '`git commit -q -m backtick`' "$summary"
+assert_trailer_count 1
+assert_state_clean
+
 echo "Codex co-author hook tests passed"
