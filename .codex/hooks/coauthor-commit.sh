@@ -31,16 +31,28 @@ read_payload() {
   fi
 }
 
+has_git_commit_command() {
+  # Match an executable git commit command, ignoring text inside quoted or
+  # escaped strings and allowing wrappers like env/command and git globals
+  # such as -C, -c, --git-dir, --work-tree, --no-pager, etc.
+  # Pass the whole command through stdin so AWK does not interpret backslash
+  # escapes in the command string; the AWK script reassembles multi-line input.
+  printf '%s' "${1:-}" | awk -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
+}
+
 TRAILER_NAME='Co-Authored-By'
 COAUTHOR="${CODEX_COAUTHOR-Codex <noreply@openai.com>}"
-case "$COAUTHOR" in 0 | "") exit 0 ;; esac
 
+# Read the payload and materialise the one-time state token path before the
+# identity/disable guard so a disabled PostToolUse call still consumes a
+# PreToolUse token that would otherwise be left for a future fallback.
 payload=$(read_payload)
+session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
+state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
+
+case "$COAUTHOR" in 0 | "") exit 0 ;; esac
+has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'* | *'git push'*) exit 0 ;;
 esac
@@ -50,9 +62,6 @@ reported=$(printf '%s' "$payload" |
   jq -r '(.tool_response.stdout // "") + "\n" + (.tool_response.stderr // "")' 2>/dev/null |
   sed -n 's/^\[[^]]* \([0-9a-f]\{7,40\}\)\].*/\1/p' |
   sed -n '1p')
-
-session=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null || true)
-state="${TMPDIR:-/tmp}/codex-coauthor/$(state_key "$session").head"
 
 if [ -n "$reported" ] && [ "$(git rev-parse --verify "$reported^{commit}" 2>/dev/null)" = "$head" ]; then
   :

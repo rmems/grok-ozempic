@@ -21,16 +21,18 @@ read_payload() {
   fi
 }
 
+has_git_commit_command() {
+  # Match an executable git commit command, ignoring text inside quoted or
+  # escaped strings and allowing wrappers like env/command and git globals
+  # such as -C, -c, --git-dir, --work-tree, --no-pager, etc.
+  # Pass the whole command through stdin so AWK does not interpret backslash
+  # escapes in the command string; the AWK script reassembles multi-line input.
+  printf '%s' "${1:-}" | awk -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
+}
+
 payload=$(read_payload)
 cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null || true)
-case "$cmd" in
-  *"git commit"*) ;;
-  *) exit 0 ;;
-esac
-# Guard: command merely mentioning git commit (e.g., echo "git commit") should not record
-if printf '%s' "$cmd" | grep -Eq 'echo[^;]*git commit|printf[^;]*git commit' 2>/dev/null; then
-  exit 0
-fi
+has_git_commit_command "$cmd" || exit 0
 case "$cmd" in
   *--dry-run* | *--help* | *' -h'* | *'git commit --amend'*) exit 0 ;;
 esac
