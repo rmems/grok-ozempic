@@ -242,4 +242,43 @@ for wrapped in \
   assert_state_clean
 done
 
+# Heredoc body containing "; git commit" must not be parsed as a real commit,
+# even when the delimiter contains punctuation like EOF.1 or EOF!.
+base=$(git -C "$repo" rev-parse HEAD)
+for delim in EOF EOF.1 'EOF!' ; do
+  git -C "$repo" switch -q -c "heredoc-$delim"
+  printf '%s\n' "$delim" > "$repo/heredoc-$delim.txt"
+  git -C "$repo" add "heredoc-$delim.txt"
+  git -C "$repo" commit -q -m "heredoc-$delim"
+  heredoc=$(git -C "$repo" rev-parse HEAD)
+  git -C "$repo" switch -q --detach "$base"
+  cmd="cat <<$delim
+; git commit -m fake
+$delim"
+  run_hook "$pre_hook" "$cmd"
+  git -C "$repo" checkout -q "$heredoc"
+  run_hook "$post_hook" "$cmd"
+  [ "$(git -C "$repo" rev-parse HEAD)" = "$heredoc" ]
+  assert_trailer_count 0
+  assert_state_clean
+done
+git -C "$repo" switch -q main
+
+# A real git commit that uses a heredoc for its message still attributes.
+msg_file="$test_root/heredoc-commit-msg"
+cat > "$msg_file" <<'EOF'
+message from heredoc
+EOF
+printf 'heredoc-commit\n' > "$repo/heredoc-commit.txt"
+git -C "$repo" add heredoc-commit.txt
+run_hook "$pre_hook" 'git commit -F - <<EOF
+message from heredoc
+EOF'
+summary=$(git -C "$repo" commit -F "$msg_file")
+run_hook "$post_hook" 'git commit -F - <<EOF
+message from heredoc
+EOF' "$summary"
+assert_trailer_count 1
+assert_state_clean
+
 echo "Codex co-author hook tests passed"
