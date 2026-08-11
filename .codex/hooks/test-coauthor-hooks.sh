@@ -300,9 +300,9 @@ git -C "$repo" switch -q main
 # A commit executed through backtick command substitution still attributes.
 printf 'backtick\n' > "$repo/backtick.txt"
 git -C "$repo" add backtick.txt
-run_hook "$pre_hook" '`git commit -q -m backtick`'
+run_hook "$pre_hook" "\`git commit -q -m backtick\`"
 summary=$(git -C "$repo" commit -q -m backtick)
-run_hook "$post_hook" '`git commit -q -m backtick`' "$summary"
+run_hook "$post_hook" "\`git commit -q -m backtick\`" "$summary"
 assert_trailer_count 1
 assert_state_clean
 
