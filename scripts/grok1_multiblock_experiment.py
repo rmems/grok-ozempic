@@ -239,7 +239,9 @@ def _arm_identity(
     if expert_mode == "all_hp":
         return "expert_hp_ceiling", "HP expert ceiling: FP16 experts on every measured block.", []
     if expert_mode == "channel_alpha":
-        return "research_per_channel_side", None, ternary_blocks
+        # Channel-α is not pack ternary: keep ternary_blocks empty and record
+        # the non-HP set only under channel_alpha_blocks in _arm_meta.
+        return "research_per_channel_side", None, []
     return expert_mode, None, ternary_blocks
 
 
@@ -262,14 +264,19 @@ def _arm_meta(
     *,
     explicit_hp: bool,
 ) -> dict:
-    ternary_blocks = sorted(set(blocks) - hp_blocks)
+    non_hp_blocks = sorted(set(blocks) - hp_blocks)
     hp_list = sorted(hp_blocks)
     schedule = _schedule_label(hp_blocks, hp_period, explicit_hp)
     arm_label, prose, ternary_blocks = _arm_identity(
-        expert_mode, schedule, ternary_blocks, hp_list
+        expert_mode, schedule, non_hp_blocks, hp_list
     )
     stored_period, schedule_kind = _schedule_metadata(expert_mode, hp_period, explicit_hp)
-    channel_blocks = ternary_blocks if expert_mode in {"channel_alpha", "periodic_hp_plus_channel_alpha"} else []
+    if expert_mode == "channel_alpha":
+        channel_blocks = non_hp_blocks
+    elif expert_mode == "periodic_hp_plus_channel_alpha":
+        channel_blocks = ternary_blocks
+    else:
+        channel_blocks = []
     return {
         "expert_mode": expert_mode,
         "hp_period": stored_period,

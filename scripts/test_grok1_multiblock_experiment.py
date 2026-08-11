@@ -609,6 +609,13 @@ class RemedyV2ScheduleTests(unittest.TestCase):
         self.assertEqual(ceiling["hp_blocks"], blocks)
         self.assertEqual(ceiling["ternary_blocks"], [])
 
+    def test_channel_alpha_does_not_label_blocks_as_ternary(self) -> None:
+        blocks = [0, 1, 2, 3]
+        meta = _arm_meta(blocks, "channel_alpha", 2, set(), [], explicit_hp=False)
+        self.assertEqual(meta["arm_label"], "research_per_channel_side")
+        self.assertEqual(meta["ternary_blocks"], [])
+        self.assertEqual(meta["channel_alpha_blocks"], blocks)
+
     def test_secondary_arms_require_evidence_only(self) -> None:
         args = argparse.Namespace(
             arm="hp_ceiling",
@@ -863,6 +870,60 @@ class RemedyV2DecisionTests(unittest.TestCase):
             _v2_chain(V2_PRIMARY_ARM, "help"),
             [],
             primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_option_4_when_secondary_per_block_is_empty(self) -> None:
+        stacked = _v2_secondary(V2_STACKED_ARM, "help")
+        stacked["chain"]["per_block"] = []
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [stacked, _v2_secondary(V2_CEILING_ARM, "viable")],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        self.assertTrue(
+            any("per_block_missing_or_empty" in error for error in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_malformed_pack_provenance_rows_are_validation_errors(self) -> None:
+        bad = _v2_chain(V2_CEILING_ARM, "viable")
+        bad["pack_provenance"] = [
+            bad["pack_provenance"][0],
+            "not-a-mapping",
+            bad["pack_provenance"][2],
+            {**bad["pack_provenance"][3], "block": "x"},
+        ]
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [
+                _v2_secondary(V2_STACKED_ARM, "help"),
+                {
+                    "provenance": _v2_provenance("secondary; no independent decision"),
+                    "chain": bad,
+                },
+            ],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(any("not_a_mapping" in error for error in errors))
+        self.assertTrue(any("invalid_block_id" in error for error in errors))
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_non_mapping_per_block_row_is_validation_error(self) -> None:
+        bad = _v2_chain(V2_PRIMARY_ARM, "help")
+        bad["per_block"] = list(bad["per_block"])
+        bad["per_block"][1] = "row-not-dict"
+        comparison = assemble_remedy_v2_comparison(
+            bad,
+            [
+                _v2_secondary(V2_STACKED_ARM, "help"),
+                _v2_secondary(V2_CEILING_ARM, "viable"),
+            ],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        self.assertTrue(
+            any("not_a_mapping" in error for error in comparison["validation_errors"])
         )
         self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
 
