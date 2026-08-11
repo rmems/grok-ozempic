@@ -1,0 +1,21 @@
+.codex/hooks/has_git_commit_command.awk
+  s_069966c0fb0bd6::t_8915275e81c688 14
+.muse/hooks/has_git_commit_command.awk
+  s_069966c0fb0bd6::t_87de306e5d3ffb 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1f1dff6a9e2c234d31930960ac68bbdd2b76afa7",
+  "prompts": {},
+  "sessions": {
+    "s_069966c0fb0bd6": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "solid-forger",
+        "model": "unknown"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
