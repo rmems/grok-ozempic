@@ -104,12 +104,25 @@ _codex-hook-tests:
     set -euo pipefail
     if ! command -v jq >/dev/null 2>&1; then
       echo "error: jq not on PATH — required for _codex-hook-tests (jq empty .codex/hooks.json)" >&2
-      echo "       install: https://jqlang.org/download/ or apt-get -y install jq / brew install jq" >&2
+      echo "       install: https://jqlang.org/download/ or apt-get -y install jq / HOMEBREW_NO_AUTO_UPDATE=1 brew install jq" >&2
       exit 1
     fi
     echo '+ jq empty .codex/hooks.json'
     jq empty .codex/hooks.json
-    for hook in .codex/hooks/*.sh; do
+    if [[ -f .muse/hooks.json ]]; then
+      echo '+ jq empty .muse/hooks.json'
+      jq empty .muse/hooks.json
+    else
+      echo 'skip: .muse/hooks.json not present'
+    fi
+    shopt -s nullglob
+    hooks=(.codex/hooks/*.sh .muse/hooks/*.sh)
+    shopt -u nullglob
+    if [[ ${#hooks[@]} -eq 0 ]]; then
+      echo 'error: no coauthor hook scripts under .codex/hooks or .muse/hooks' >&2
+      exit 1
+    fi
+    for hook in "${hooks[@]}"; do
       echo "+ bash -n ${hook}"
       bash -n "${hook}"
     done
@@ -335,6 +348,11 @@ doctor:
       status ok "shellcheck present"
     else
       status warn "shellcheck not installed (optional for just ci)"
+    fi
+    if command -v jq >/dev/null 2>&1; then
+      status ok "jq $(jq --version 2>/dev/null | head -1)"
+    else
+      status missing "jq not on PATH (required for just ci coauthor hook tests)"
     fi
 
     echo "=== crate / CLI ==="

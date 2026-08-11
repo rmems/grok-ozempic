@@ -847,14 +847,33 @@ def _schedule_match_72(chain: dict) -> bool:
     return observed == expected
 
 
+def _canonical_block_id(value: object) -> int | None:
+    """Accept only a real int block id (reject bool, float, and numeric strings)."""
+    # bool is a subclass of int; reject it before the int check.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
+
+
 def _pack_identity_match_72(chain: dict) -> bool:
     """When pack_provenance is present, require #72 pack SHA-256 identity."""
     packs = chain.get("pack_provenance")
     if not packs:
         # Unit tests / dry metrics without packs: schedule settings only.
         return True
+    if not isinstance(packs, list):
+        return False
     expected = BASELINE_72["pack_sha256"]
-    observed = {int(r["block"]): r.get("pack_sha256") for r in packs}
+    observed: dict[int, object] = {}
+    for row in packs:
+        if not isinstance(row, dict):
+            return False
+        block = _canonical_block_id(row.get("block"))
+        if block is None:
+            return False
+        observed[block] = row.get("pack_sha256")
     return observed == expected
 
 
@@ -1023,14 +1042,24 @@ def decide_remedy(chain: dict) -> dict:
 def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
     """Validate per_block row count, block IDs, and required nested metric fields."""
     rows = chain.get("per_block")
-    if not isinstance(rows, list) or not rows:
-        return []
+    if not isinstance(rows, list):
+        return [f"{label}:per_block_missing_or_empty"]
+    if not rows:
+        return [f"{label}:per_block_missing_or_empty"]
     expected_blocks = list(BASELINE_72["blocks"])
     if len(rows) != len(expected_blocks):
         return [f"{label}:per_block_count={len(rows)} expected={len(expected_blocks)}"]
-    blocks = [r.get("block") for r in rows]
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            return [f"{label}:per_block[{index}]:not_a_mapping"]
+    blocks: list[int] = []
+    for index, row in enumerate(rows):
+        block = _canonical_block_id(row.get("block"))
+        if block is None:
+            return [f"{label}:per_block[{index}]:invalid_block_id"]
+        blocks.append(block)
     if sorted(blocks) != expected_blocks:
-        return [f"{label}:per_block_blocks={sorted(b for b in blocks if b is not None)} expected={expected_blocks}"]
+        return [f"{label}:per_block_blocks={sorted(blocks)} expected={expected_blocks}"]
     for row in rows:
         try:
             expert = row.get("expert_only")
@@ -1090,8 +1119,10 @@ def _v2_controls(chain: dict) -> tuple[list[dict], str | None]:
     if chain.get("skip_fp16_control"):
         return [], "fp16_control_skipped"
     rows = chain.get("per_block") or []
-    if not rows:
+    if not isinstance(rows, list) or not rows:
         return [], "fp16_control_absent"
+    if any(not isinstance(row, dict) for row in rows):
+        return [], "fp16_control_malformed"
     controls = [row.get("fp16_control") for row in rows]
     if any(control is None for control in controls):
         return [], "fp16_control_absent"
@@ -1124,19 +1155,45 @@ def _v2_applied_source(block: int, hp_blocks: list[int], channel_blocks: list[in
 
 
 def _v2_pack_row_errors(
-    row: dict,
+    row: object,
     label: str,
     hp_blocks: list[int],
     channel_blocks: list[int],
+    *,
+    index: int | None = None,
 ) -> list[str]:
-    block = int(row.get("block", -1))
+    row_tag = f"pack_provenance[{index}]" if index is not None else "pack_provenance"
+    if not isinstance(row, dict):
+        return [f"{label}:{row_tag}:not_a_mapping"]
+    block = _canonical_block_id(row.get("block"))
+    if block is None:
+        return [f"{label}:{row_tag}:invalid_block_id"]
     errors: list[str] = []
-    if set(row.get("container_versions") or []) != {3}:
+    versions = row.get("container_versions")
+    if not isinstance(versions, list):
+        return [f"{label}:block_{block}:container_versions_not_list"]
+    try:
+        version_set = set(versions)
+    except TypeError:
+        return [f"{label}:block_{block}:container_versions_unhashable"]
+    if version_set != {3}:
         errors.append(f"{label}:block_{block}:container_not_v3")
-    pack_sources = set((row.get("pack_scale_sources") or {}).values())
+    pack_scale_sources = row.get("pack_scale_sources")
+    if not isinstance(pack_scale_sources, dict):
+        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
+    try:
+        pack_sources = set(pack_scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:pack_scale_sources_unhashable"]
     if pack_sources != {"pack_v2"}:
         errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
-    applied = set((row.get("scale_sources") or {}).values())
+    scale_sources = row.get("scale_sources")
+    if not isinstance(scale_sources, dict):
+        return [f"{label}:block_{block}:scale_sources_not_mapping"]
+    try:
+        applied = set(scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:scale_sources_unhashable"]
     expected = _v2_applied_source(block, hp_blocks, channel_blocks)
     if applied != {expected}:
         errors.append(
@@ -1154,8 +1211,10 @@ def _v2_scale_source_errors(chain: dict, label: str) -> list[str]:
     if len(packs) != len(BASELINE_72["blocks"]):
         return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
-    for row in packs:
-        errors.extend(_v2_pack_row_errors(row, label, hp_blocks, channel_blocks))
+    for index, row in enumerate(packs):
+        errors.extend(
+            _v2_pack_row_errors(row, label, hp_blocks, channel_blocks, index=index)
+        )
     return errors
 
 
@@ -1178,14 +1237,18 @@ def _v2_chain_errors(chain: dict, expected_label: str) -> list[str]:
     if label != expected_label:
         return [f"arm_label={label!r} expected={expected_label!r}"]
     errors: list[str] = []
-    errors.extend(_v2_per_block_errors(chain, expected_label))
+    per_block_errors = _v2_per_block_errors(chain, expected_label)
+    errors.extend(per_block_errors)
     mismatch = settings_mismatch_reason(chain)
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
     errors.extend(_v2_schedule_errors(chain, expected_label))
-    control_error = _v2_control_error(chain)
-    if control_error is not None:
-        errors.append(f"{label}:{control_error}")
+    # Skip control probes when per_block is already structurally invalid; those
+    # rows cannot yield a meaningful fp16 gate and may not be mappings.
+    if not per_block_errors:
+        control_error = _v2_control_error(chain)
+        if control_error is not None:
+            errors.append(f"{label}:{control_error}")
     errors.extend(_v2_scale_source_errors(chain, expected_label))
     return errors
 
