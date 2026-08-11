@@ -1,0 +1,19 @@
+.codex/hooks/test-coauthor-hooks.sh
+  s_069966c0fb0bd6::t_23f61239b2be40 245-283
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4dd3cd1b3cd59019fb904afd058b6a250ff1d1d0",
+  "prompts": {},
+  "sessions": {
+    "s_069966c0fb0bd6": {
+      "agent_id": {
+        "tool": "windsurf",
+        "id": "solid-forger",
+        "model": "unknown"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
