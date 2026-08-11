@@ -849,7 +849,10 @@ def _schedule_match_72(chain: dict) -> bool:
 
 def _canonical_block_id(value: object) -> int | None:
     """Accept only a real int block id (reject bool, float, and numeric strings)."""
-    if type(value) is int:
+    # bool is a subclass of int; reject it before the int check.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
         return value
     return None
 
