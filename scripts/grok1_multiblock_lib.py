@@ -847,6 +847,13 @@ def _schedule_match_72(chain: dict) -> bool:
     return observed == expected
 
 
+def _canonical_block_id(value: object) -> int | None:
+    """Accept only a real int block id (reject bool, float, and numeric strings)."""
+    if type(value) is int:
+        return value
+    return None
+
+
 def _pack_identity_match_72(chain: dict) -> bool:
     """When pack_provenance is present, require #72 pack SHA-256 identity."""
     packs = chain.get("pack_provenance")
@@ -860,9 +867,8 @@ def _pack_identity_match_72(chain: dict) -> bool:
     for row in packs:
         if not isinstance(row, dict):
             return False
-        try:
-            block = int(row["block"])
-        except (KeyError, TypeError, ValueError):
+        block = _canonical_block_id(row.get("block"))
+        if block is None:
             return False
         observed[block] = row.get("pack_sha256")
     return observed == expected
@@ -1045,10 +1051,10 @@ def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
             return [f"{label}:per_block[{index}]:not_a_mapping"]
     blocks: list[int] = []
     for index, row in enumerate(rows):
-        try:
-            blocks.append(int(row["block"]))
-        except (KeyError, TypeError, ValueError):
+        block = _canonical_block_id(row.get("block"))
+        if block is None:
             return [f"{label}:per_block[{index}]:invalid_block_id"]
+        blocks.append(block)
     if sorted(blocks) != expected_blocks:
         return [f"{label}:per_block_blocks={sorted(blocks)} expected={expected_blocks}"]
     for row in rows:
@@ -1156,17 +1162,35 @@ def _v2_pack_row_errors(
     row_tag = f"pack_provenance[{index}]" if index is not None else "pack_provenance"
     if not isinstance(row, dict):
         return [f"{label}:{row_tag}:not_a_mapping"]
-    try:
-        block = int(row["block"])
-    except (KeyError, TypeError, ValueError):
+    block = _canonical_block_id(row.get("block"))
+    if block is None:
         return [f"{label}:{row_tag}:invalid_block_id"]
     errors: list[str] = []
-    if set(row.get("container_versions") or []) != {3}:
+    versions = row.get("container_versions")
+    if not isinstance(versions, list):
+        return [f"{label}:block_{block}:container_versions_not_list"]
+    try:
+        version_set = set(versions)
+    except TypeError:
+        return [f"{label}:block_{block}:container_versions_unhashable"]
+    if version_set != {3}:
         errors.append(f"{label}:block_{block}:container_not_v3")
-    pack_sources = set((row.get("pack_scale_sources") or {}).values())
+    pack_scale_sources = row.get("pack_scale_sources")
+    if not isinstance(pack_scale_sources, dict):
+        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
+    try:
+        pack_sources = set(pack_scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:pack_scale_sources_unhashable"]
     if pack_sources != {"pack_v2"}:
         errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
-    applied = set((row.get("scale_sources") or {}).values())
+    scale_sources = row.get("scale_sources")
+    if not isinstance(scale_sources, dict):
+        return [f"{label}:block_{block}:scale_sources_not_mapping"]
+    try:
+        applied = set(scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:scale_sources_unhashable"]
     expected = _v2_applied_source(block, hp_blocks, channel_blocks)
     if applied != {expected}:
         errors.append(

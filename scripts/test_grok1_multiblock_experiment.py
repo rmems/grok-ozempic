@@ -891,7 +891,7 @@ class RemedyV2DecisionTests(unittest.TestCase):
         bad["pack_provenance"] = [
             bad["pack_provenance"][0],
             "not-a-mapping",
-            bad["pack_provenance"][2],
+            {**bad["pack_provenance"][2], "pack_scale_sources": []},
             {**bad["pack_provenance"][3], "block": "x"},
         ]
         comparison = assemble_remedy_v2_comparison(
@@ -907,6 +907,25 @@ class RemedyV2DecisionTests(unittest.TestCase):
         )
         errors = comparison["validation_errors"]
         self.assertTrue(any("not_a_mapping" in error for error in errors))
+        self.assertTrue(any("invalid_block_id" in error for error in errors))
+        self.assertTrue(any("pack_scale_sources_not_mapping" in error for error in errors))
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_non_canonical_block_ids_are_rejected(self) -> None:
+        bad = _v2_chain(V2_PRIMARY_ARM, "help")
+        bad["per_block"] = list(bad["per_block"])
+        bad["per_block"][0] = {**bad["per_block"][0], "block": 0.0}
+        bad["pack_provenance"] = list(bad["pack_provenance"])
+        bad["pack_provenance"][1] = {**bad["pack_provenance"][1], "block": True}
+        comparison = assemble_remedy_v2_comparison(
+            bad,
+            [
+                _v2_secondary(V2_STACKED_ARM, "help"),
+                _v2_secondary(V2_CEILING_ARM, "viable"),
+            ],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        errors = comparison["validation_errors"]
         self.assertTrue(any("invalid_block_id" in error for error in errors))
         self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
 

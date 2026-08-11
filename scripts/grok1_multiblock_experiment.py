@@ -239,7 +239,7 @@ def _arm_identity(
     if expert_mode == "all_hp":
         return "expert_hp_ceiling", "HP expert ceiling: FP16 experts on every measured block.", []
     if expert_mode == "channel_alpha":
-        # Channel-α is not pack ternary: keep ternary_blocks empty and record
+        # Channel-alpha is not pack ternary: keep ternary_blocks empty and record
         # the non-HP set only under channel_alpha_blocks in _arm_meta.
         return "research_per_channel_side", None, []
     return expert_mode, None, ternary_blocks

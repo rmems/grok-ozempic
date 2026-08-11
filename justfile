@@ -109,9 +109,20 @@ _codex-hook-tests:
     fi
     echo '+ jq empty .codex/hooks.json'
     jq empty .codex/hooks.json
-    echo '+ jq empty .muse/hooks.json'
-    jq empty .muse/hooks.json
-    for hook in .codex/hooks/*.sh .muse/hooks/*.sh; do
+    if [[ -f .muse/hooks.json ]]; then
+      echo '+ jq empty .muse/hooks.json'
+      jq empty .muse/hooks.json
+    else
+      echo 'skip: .muse/hooks.json not present'
+    fi
+    shopt -s nullglob
+    hooks=(.codex/hooks/*.sh .muse/hooks/*.sh)
+    shopt -u nullglob
+    if [[ ${#hooks[@]} -eq 0 ]]; then
+      echo 'error: no coauthor hook scripts under .codex/hooks or .muse/hooks' >&2
+      exit 1
+    fi
+    for hook in "${hooks[@]}"; do
       echo "+ bash -n ${hook}"
       bash -n "${hook}"
     done
