@@ -35,9 +35,9 @@ has_git_commit_command() {
   # Match an executable git commit command, ignoring text inside quoted or
   # escaped strings and allowing wrappers like env/command and git globals
   # such as -C, -c, --git-dir, --work-tree, --no-pager, etc.
-  # Pass the whole command as a single AWK variable so heredoc body lines do
-  # not become separate records and get parsed as executable commands.
-  awk -v cmd="${1:-}" -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
+  # Pass the whole command through stdin so AWK does not interpret backslash
+  # escapes in the command string; the AWK script reassembles multi-line input.
+  printf '%s' "${1:-}" | awk -f "$(dirname "$0")/has_git_commit_command.awk" 2>/dev/null
 }
 
 TRAILER_NAME='Co-Authored-By'

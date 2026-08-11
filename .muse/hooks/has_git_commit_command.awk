@@ -106,7 +106,7 @@ BEGIN {
     m = split(segs[i], toks, /[ \t]+/)
     k = 1
     while (k <= m) {
-      if (toks[k] == "command" || toks[k] ~ /^(sudo|nice|time|if|then|else|elif|do|while|until|for|\!|\()$/) {
+      if (toks[k] == "command" || toks[k] ~ /^(sudo|nice|time|if|then|else|elif|do|while|until|for|!|\()$/) {
         # Shell wrappers/control-flow keywords (or a subshell open paren) that
         # precede the actual command. This intentionally does not consume
         # option-argument pairs (e.g. "sudo -u x"); callers should write

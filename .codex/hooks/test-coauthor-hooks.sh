@@ -306,4 +306,21 @@ run_hook "$post_hook" '`git commit -q -m backtick`' "$summary"
 assert_trailer_count 1
 assert_state_clean
 
+# An escaped double quote inside a quoted string does not close it, so the
+# following "; git commit" text is not treated as a real commit.
+base=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q -c escaped-quote-descendant
+printf 'escaped-quote\n' > "$repo/escaped-quote.txt"
+git -C "$repo" add escaped-quote.txt
+git -C "$repo" commit -q -m escaped-quote
+escaped_quote=$(git -C "$repo" rev-parse HEAD)
+git -C "$repo" switch -q --detach "$base"
+run_hook "$pre_hook" 'printf "foo\" ; git commit -m fake" && git checkout escaped-quote-descendant'
+git -C "$repo" checkout -q "$escaped_quote"
+run_hook "$post_hook" 'printf "foo\" ; git commit -m fake" && git checkout escaped-quote-descendant'
+[ "$(git -C "$repo" rev-parse HEAD)" = "$escaped_quote" ]
+assert_trailer_count 0
+assert_state_clean
+git -C "$repo" switch -q main
+
 echo "Codex co-author hook tests passed"
