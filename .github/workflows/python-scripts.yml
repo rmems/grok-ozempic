@@ -41,3 +41,12 @@ jobs:
 
       - name: Unit tests (GOZ1 pack readback)
         run: python3 -m unittest scripts.test_route_preservation_io -v
+
+      - name: Unit tests (multi-block remedy decisions)
+        run: python3 -m unittest scripts.test_grok1_multiblock_experiment -v
+
+      - name: Codex co-author hook contract
+        run: |
+          jq empty .codex/hooks.json
+          bash -n .codex/hooks/*.sh
+          bash .codex/hooks/test-coauthor-hooks.sh

@@ -2,29 +2,45 @@
 """Unit tests for the #68 multi-block residual fidelity harness."""
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import grok1_multiblock_experiment as multiblock  # noqa: E402
 from grok1_block_forward import ForwardError  # noqa: E402
 from grok1_multiblock_experiment import (  # noqa: E402
+    _arm_meta,
+    _resolve_hp_blocks,
+    _validate_v2_cli,
     decide,
     decide_remedy,
     parse_blocks,
+    parse_hp_blocks,
     periodic_hp_blocks,
     require_pack_only_scales,
     residual_stream_metrics,
     write_remedy_results_md,
+    write_remedy_v2_results_md,
     write_results_md,
 )
 from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_72,
+    V2_CEILING_ARM,
+    V2_PRIMARY_ARM,
+    V2_STACKED_ARM,
+    _applied_expert_scale_sources,
+    _expert_primary,
+    assemble_remedy_v2_comparison,
     channel_alpha_dequant,
+    decide_remedy_v2,
     settings_mismatch_reason,
 )
 
@@ -546,6 +562,412 @@ class RemedyReportTests(unittest.TestCase):
         self.assertIn("pack identity not comparable", body.lower())
         self.assertIn("pack SHA-256", body)
         self.assertNotIn("schedule not comparable", body.lower())
+
+
+class RemedyV2ScheduleTests(unittest.TestCase):
+    def test_parse_explicit_hp_blocks(self) -> None:
+        self.assertEqual(parse_hp_blocks("3,1,2"), {1, 2, 3})
+        self.assertEqual(parse_hp_blocks("1,1"), {1})
+
+    def test_multidigit_explicit_schedule_labels_do_not_collide(self) -> None:
+        self.assertEqual(multiblock._explicit_schedule_label({1, 2, 3}), "123")
+        self.assertEqual(multiblock._explicit_schedule_label({123}), "b123")
+        self.assertEqual(multiblock._explicit_schedule_label({1, 23}), "b1-23")
+        self.assertEqual(multiblock._explicit_schedule_label({3, 12}), "b3-12")
+
+    def test_denser_primary_schedule_and_label(self) -> None:
+        hp = _resolve_hp_blocks([0, 1, 2, 3], "periodic_hp", 2, {1, 2, 3})
+        meta = _arm_meta(
+            [0, 1, 2, 3],
+            "periodic_hp",
+            2,
+            hp,
+            ["ternary", "fp16", "fp16", "fp16"],
+            explicit_hp=True,
+        )
+        self.assertEqual(meta["arm_label"], V2_PRIMARY_ARM)
+        self.assertEqual(meta["hp_blocks"], [1, 2, 3])
+        self.assertEqual(meta["ternary_blocks"], [0])
+        self.assertEqual(meta["hp_schedule_kind"], "explicit")
+
+    def test_stacked_and_ceiling_schedules(self) -> None:
+        blocks = [0, 1, 2, 3]
+        stacked_hp = _resolve_hp_blocks(blocks, "periodic_hp_plus_channel_alpha", 2, None)
+        stacked = _arm_meta(
+            blocks,
+            "periodic_hp_plus_channel_alpha",
+            2,
+            stacked_hp,
+            [],
+            explicit_hp=False,
+        )
+        self.assertEqual(stacked["arm_label"], V2_STACKED_ARM)
+        self.assertEqual(stacked["channel_alpha_blocks"], [0, 2])
+        ceiling_hp = _resolve_hp_blocks(blocks, "all_hp", 2, None)
+        ceiling = _arm_meta(blocks, "all_hp", 2, ceiling_hp, [], explicit_hp=False)
+        self.assertEqual(ceiling["arm_label"], V2_CEILING_ARM)
+        self.assertEqual(ceiling["hp_blocks"], blocks)
+        self.assertEqual(ceiling["ternary_blocks"], [])
+
+    def test_secondary_arms_require_evidence_only(self) -> None:
+        args = argparse.Namespace(
+            arm="hp_ceiling",
+            hp_blocks=None,
+            evidence_only=False,
+            comparison_metrics=[],
+        )
+        with self.assertRaisesRegex(ForwardError, "requires --evidence-only"):
+            _validate_v2_cli(args)
+
+    def test_comparison_metrics_rejected_on_non_primary_run(self) -> None:
+        args = argparse.Namespace(
+            arm="periodic_hp",
+            hp_blocks={1, 3},
+            evidence_only=False,
+            comparison_metrics=[Path("stacked/metrics.json")],
+        )
+        with self.assertRaisesRegex(ForwardError, "--comparison-metrics is only valid"):
+            _validate_v2_cli(args)
+
+    def test_partial_explicit_ceiling_schedule_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ForwardError, "hp_ceiling requires every chain block"):
+            _resolve_hp_blocks([0, 1, 2, 3], "all_hp", 2, {1, 2})
+
+    def test_noncanonical_explicit_hp_run_uses_legacy_remedy_contract(self) -> None:
+        args = argparse.Namespace(arm="periodic_hp", hp_blocks={1, 3})
+        self.assertFalse(multiblock._is_v2_run(args))
+        issue, agent = multiblock._agent_for_args(args)
+        self.assertEqual(issue, "GH #73 / Linear RM-362")
+        self.assertEqual(agent, multiblock.REMEDY_AGENT_LINE)
+
+    def test_stacked_and_ceiling_select_hp_control(self) -> None:
+        pack = object()
+        reference = object()
+        control = object()
+        primary, _ = _expert_primary(
+            "periodic_hp_plus_channel_alpha",
+            pack,
+            reference,
+            control,
+            block=1,
+            hp_blocks={1, 3},
+        )
+        self.assertIs(primary, control)
+        primary, label = _expert_primary(
+            "periodic_hp",
+            pack,
+            reference,
+            control,
+            block=2,
+            hp_blocks={1, 2, 3},
+            hp_label="123",
+        )
+        self.assertIs(primary, control)
+        self.assertEqual(label, V2_PRIMARY_ARM)
+        primary, _ = _expert_primary(
+            "all_hp",
+            pack,
+            reference,
+            control,
+            block=0,
+            hp_blocks={0, 1, 2, 3},
+        )
+        self.assertIs(primary, control)
+
+    def test_stacked_ternary_block_selects_channel_alpha(self) -> None:
+        channel_source = object()
+        with mock.patch(
+            "grok1_multiblock_lib.ChannelAlphaExperts",
+            return_value=channel_source,
+        ):
+            primary, label = _expert_primary(
+                "periodic_hp_plus_channel_alpha",
+                object(),
+                object(),
+                object(),
+                block=0,
+                hp_blocks={1, 3},
+            )
+        self.assertIs(primary, channel_source)
+        self.assertEqual(label, "research_per_channel_side")
+
+    def test_hp_source_tags_are_fp16_control(self) -> None:
+        pack = argparse.Namespace(scale_sources={"pack_expert": "pack_v2"})
+        reference = argparse.Namespace(
+            roles={
+                "expert_gelu": "gate",
+                "expert_value": "v1",
+                "expert_down": "v2",
+            }
+        )
+        applied = _applied_expert_scale_sources(
+            pack,
+            object(),
+            reference,
+            expert_mode="all_hp",
+            block=0,
+            hp_blocks={0, 1, 2, 3},
+        )
+        self.assertEqual({applied["gate"], applied["v1"], applied["v2"]}, {"fp16_control"})
+
+
+_V2_FIXTURE_SCHEDULES = {
+    V2_PRIMARY_ARM: ([1, 2, 3], [], "periodic_hp"),
+    V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
+    V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
+}
+_V2_FIXTURE_METRICS = {
+    "viable": {
+        "cos": [0.98, 0.97, 0.96, 0.95],
+        "top1": [1.0, 0.99, 0.98, 0.96],
+        "top2": [1.0, 0.98, 0.96, 0.94],
+        "drift": [0.0, 0.05, 0.08, 0.10],
+        "exit": 0.18,
+    },
+    "help": {
+        "cos": [0.96, 0.94, 0.92, 0.90],
+        "top1": [1.0, 0.90, 0.76, 0.65],
+        "top2": [1.0, 0.82, 0.70, 0.56],
+        "drift": [0.0, 0.18, 0.28, 0.36],
+        "exit": 0.42,
+    },
+    "failed": {
+        "cos": [0.95, 0.91, 0.87, 0.84],
+        "top1": [1.0, 0.82, 0.63, 0.50],
+        "top2": [1.0, 0.70, 0.50, 0.30],
+        "drift": [0.0, 0.27, 0.38, 0.49],
+        "exit": 0.58,
+    },
+}
+_V2_FIXTURE_IMPLEMENTATION = {"commit": "f" * 40, "dirty": False}
+
+
+def _v2_provenance(role: str) -> dict:
+    return {
+        "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+        "evidence_role": role,
+    }
+
+
+def _v2_secondary(label: str, quality: str) -> dict:
+    return {
+        "provenance": _v2_provenance("secondary; no independent decision"),
+        "chain": _v2_chain(label, quality),
+    }
+
+
+def _v2_fixture_source(block: int, hp_blocks: list[int], channel_blocks: list[int]) -> str:
+    if block in channel_blocks:
+        return "research_per_channel_side"
+    return "fp16_control" if block in hp_blocks else "pack_v2"
+
+
+def _v2_fixture_rows(metrics: dict, hp_blocks: list[int], channel_blocks: list[int]):
+    rows = []
+    provenance = []
+    for index, block in enumerate(BASELINE_72["blocks"]):
+        rows.append(
+            _expert_row(
+                block,
+                {
+                    "cos": metrics["cos"][index],
+                    "resid_in_drift": metrics["drift"][index],
+                    "top1": metrics["top1"][index],
+                    "top2": metrics["top2"][index],
+                },
+            )
+        )
+        applied_source = _v2_fixture_source(block, hp_blocks, channel_blocks)
+        provenance.append(
+            {
+                "block": block,
+                "pack_sha256": BASELINE_72["pack_sha256"][block],
+                "container_versions": [3],
+                "pack_scale_sources": {"expert": "pack_v2"},
+                "scale_sources": {"expert": applied_source},
+            }
+        )
+    return rows, provenance
+
+
+def _v2_chain(label: str, quality: str) -> dict:
+    hp_blocks, channel_blocks, mode = _V2_FIXTURE_SCHEDULES[label]
+    metrics = _V2_FIXTURE_METRICS[quality]
+    rows, provenance = _v2_fixture_rows(metrics, hp_blocks, channel_blocks)
+    return {
+        "blocks": list(BASELINE_72["blocks"]),
+        "tokens": BASELINE_72["tokens"],
+        "token_seed": BASELINE_72["token_seed"],
+        "top_k": BASELINE_72["top_k"],
+        "per_block": rows,
+        "pack_provenance": provenance,
+        "skip_fp16_control": False,
+        "expert_mode": mode,
+        "arm_label": label,
+        "hp_blocks": hp_blocks,
+        "channel_alpha_blocks": channel_blocks,
+        "hp_schedule_prose": f"fixture schedule for {label}",
+        "end_of_chain": {
+            "expert_only_chain_exit": {
+                "residual_drift_relative_norm": metrics["exit"],
+            }
+        },
+    }
+
+
+def _v2_comparison(primary: str, stacked: str, ceiling: str) -> dict:
+    return assemble_remedy_v2_comparison(
+        _v2_chain(V2_PRIMARY_ARM, primary),
+        [
+            _v2_secondary(V2_STACKED_ARM, stacked),
+            _v2_secondary(V2_CEILING_ARM, ceiling),
+        ],
+        primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+    )
+
+
+class RemedyV2DecisionTests(unittest.TestCase):
+    def test_validates_applied_scale_sources(self) -> None:
+        comparison = _v2_comparison("help", "help", "viable")
+        self.assertEqual(comparison["validation_errors"], [])
+        bad = _v2_chain(V2_STACKED_ARM, "help")
+        bad["pack_provenance"][0]["scale_sources"]["expert"] = "pack_v2"
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [
+                {
+                    "provenance": _v2_provenance("secondary; no independent decision"),
+                    "chain": bad,
+                },
+                _v2_secondary(V2_CEILING_ARM, "viable"),
+            ],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        self.assertTrue(any("research_per_channel_side" in e for e in comparison["validation_errors"]))
+
+    def test_option_1_when_mostly_ternary_arm_is_viable(self) -> None:
+        decision = decide_remedy_v2(_v2_comparison("viable", "help", "viable"))
+        self.assertEqual(decision["decision"], 1)
+        self.assertEqual(decision["best_remedy_arm"], V2_PRIMARY_ARM)
+
+    def test_option_2_when_remedy_helps_but_is_not_viable(self) -> None:
+        decision = decide_remedy_v2(_v2_comparison("help", "failed", "viable"))
+        self.assertEqual(decision["decision"], 2)
+
+    def test_option_3_when_even_ceiling_fails(self) -> None:
+        decision = decide_remedy_v2(_v2_comparison("failed", "failed", "failed"))
+        self.assertEqual(decision["decision"], 3)
+
+    def test_option_4_when_secondary_evidence_is_missing(self) -> None:
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_rejects_secondary_decision_or_provenance_mismatch(self) -> None:
+        stacked = _v2_secondary(V2_STACKED_ARM, "help")
+        stacked["decision"] = {"decision": 1}
+        stacked["provenance"]["implementation"]["commit"] = "0" * 40
+        ceiling = _v2_secondary(V2_CEILING_ARM, "viable")
+        ceiling["provenance"]["evidence_role"] = "primary"
+        comparison = assemble_remedy_v2_comparison(
+            _v2_chain(V2_PRIMARY_ARM, "help"),
+            [stacked, ceiling],
+            primary_provenance=_v2_provenance("primary; sole canonical #75 decision"),
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(any("contains a decision" in error for error in errors))
+        self.assertTrue(any("implementation differs" in error for error in errors))
+        self.assertTrue(any("role is not locked" in error for error in errors))
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_option_4_when_only_one_option_2_condition_holds(self) -> None:
+        comparison = _v2_comparison("help", "failed", "failed")
+        self.assertEqual(decide_remedy_v2(comparison)["decision"], 4)
+
+    def test_improvement_checks_both_mostly_ternary_arms(self) -> None:
+        comparison = _v2_comparison("failed", "failed", "failed")
+        primary = comparison["summaries"][V2_PRIMARY_ARM]
+        stacked = comparison["summaries"][V2_STACKED_ARM]
+        primary["router_top1"][-1] = 0.59
+        primary["block_output_cosine"][-1] = 0.90
+        primary["chain_exit_residual_drift"] = 0.50
+        stacked["router_top1"][-1] = 0.58
+        stacked["block_output_cosine"][-1] = 0.93
+        stacked["chain_exit_residual_drift"] = 0.50
+        decision = decide_remedy_v2(comparison)
+        self.assertEqual(decision["best_remedy_arm"], V2_PRIMARY_ARM)
+        self.assertEqual(decision["decision"], 4)
+        self.assertIn("any_mostly_ternary_improved_vs_74=True", decision["rationale"])
+
+    def test_secondary_payload_written_without_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "evidence"
+            args = argparse.Namespace(
+                tokens=2048,
+                hp_period=2,
+                blocks="0,1,2,3",
+                npy_root=Path(td),
+                npy_pattern="unused",
+                pack_root=Path(td),
+                pack_pattern="unused",
+                embedding_shard=Path(td) / "unused.npy",
+                out=out,
+                arm="stacked_hp_channel_alpha",
+                hp_blocks=None,
+                skip_fp16_control=False,
+                seed=_DECISION_SEED,
+                top_k=2,
+                write_report_md=True,
+                evidence_only=True,
+                comparison_metrics=[],
+            )
+            with (
+                mock.patch.object(
+                    multiblock,
+                    "run_chain",
+                    return_value=_v2_chain(V2_STACKED_ARM, "help"),
+                ),
+                mock.patch.object(multiblock, "_provenance", return_value={}),
+                mock.patch.object(multiblock, "remedy_metrics_note", return_value="fixture"),
+            ):
+                self.assertEqual(multiblock.run(args), 0)
+            payload = json.loads((out / "metrics.json").read_text())
+            self.assertNotIn("decision", payload)
+            self.assertFalse((out / "results.md").exists())
+
+
+class RemedyV2ReportTests(unittest.TestCase):
+    def test_report_has_one_canonical_decision_and_both_controls(self) -> None:
+        comparison = _v2_comparison("help", "failed", "viable")
+        payload = {
+            "provenance": {
+                "agent": "OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75",
+                "issue": "GH #75 / Linear RM-462 / beads goz-rvk",
+                "implementation": {"commit": "deadbeef", "dirty": False},
+            },
+            "chain": _v2_chain(V2_PRIMARY_ARM, "help"),
+            "comparison": comparison,
+            "decision": decide_remedy_v2(comparison),
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            write_remedy_v2_results_md(path, payload)
+            body = path.read_text()
+        self.assertEqual(body.count("## Decision"), 1)
+        self.assertIn("#72 baseline", body)
+        self.assertIn("#74 baseline", body)
+        self.assertIn(V2_STACKED_ARM, body)
+        self.assertIn(V2_CEILING_ARM, body)
+        self.assertIn("neither mostly-ternary candidate met every locked viability band", body)
+        self.assertIn("clear improvement and a viable HP ceiling both hold", body)
+        self.assertIn("Secondary `metrics.json` files are evidence-only", body)
+        self.assertEqual(body.splitlines().count("### FP16 control"), 1)
+        self.assertIn(f"#### FP16 control — `{V2_STACKED_ARM}`", body)
+        self.assertIn(f"#### FP16 control — `{V2_CEILING_ARM}`", body)
+        self.assertFalse(body.endswith("\n\n"))
 
 
 if __name__ == "__main__":
