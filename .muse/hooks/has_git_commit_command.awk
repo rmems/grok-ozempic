@@ -11,7 +11,7 @@ function remove_heredocs(s,    out, i, st, en, rest, marr, word, esc_word, redir
     rest = substr(s, st)
     # Match <<[-][']WORD["] and capture the delimiter word (alphanumeric/underscore
     # so we can safely embed it in a regex for the closing line).
-    if (match(rest, /^<<-?[ \t]*[\"']?([A-Za-z_][A-Za-z0-9_]+)[\"']?/, marr)) {
+    if (match(rest, /^<<-?[ \t]*[\"']?([^ \t\n\"';|&<>()]+)[\"']?/, marr)) {
       redir_len = RLENGTH
       word = marr[1]
       en = st + redir_len
