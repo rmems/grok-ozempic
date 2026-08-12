@@ -1187,10 +1187,23 @@ def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
     return []
 
 
+def _malformed_exit_object(chain: dict) -> bool:
+    """True when end_of_chain exit is present but non-numeric / non-finite."""
+    exit_m = _chain_exit_metrics(chain)
+    if exit_m is None:
+        return False
+    raw = exit_m.get("residual_drift_relative_norm")
+    if raw is None:
+        raw = exit_m.get("residual_in_drift_relative_norm")
+    return raw is None or _safe_float(raw) is None
+
+
 def _v2_chain_summary(chain: dict) -> dict:
     rows = chain.get("per_block") or []
     if not rows:
         return {"arm_label": chain.get("arm_label"), "empty": True}
+    if _malformed_exit_object(chain):
+        return {"arm_label": chain.get("arm_label"), "empty": True, "malformed": True}
     try:
         metrics = _metric_series(rows)
         exit_drift = _exit_drift(chain, metrics["out_drift"])
@@ -1687,8 +1700,10 @@ def _v3_metric_domain_error(row: dict, label: str) -> str | None:
         expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
     )
     # (raw, lo, hi) — lo/hi inclusive; hi=None means only lower bound.
+    # Cosine upper bound allows tiny float noise above 1.0 (seen in-repo as 1+2e-16).
+    cos_hi = 1.0 + 1e-9
     checks = (
-        (expert.get("block_output_cosine"), -1.0, 1.0),
+        (expert.get("block_output_cosine"), -1.0, cos_hi),
         (residual.get("residual_in_drift_relative_norm"), 0.0, None),
         (expert.get("router_top1_agreement"), 0.0, 1.0),
         (topk, 0.0, 1.0),
