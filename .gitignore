@@ -35,3 +35,6 @@ __pycache__/
 .beads/events.jsonl
 .tmp-head
 .tmp-pr-babysit/
+
+# Generated INT4 research side-tables (multi-block experiment)
+**/int4-side/

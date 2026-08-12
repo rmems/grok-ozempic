@@ -94,8 +94,13 @@ secondary = json.loads((root / "int4-plus-hp123/metrics.json").read_text())
 cmp = assemble_remedy_v3_comparison(
     primary["chain"], [secondary], primary_provenance=primary["provenance"]
 )
+decision = decide_remedy_v3(cmp)
+if cmp["validation_errors"]:
+    raise SystemExit(f"validation failed: {cmp['validation_errors']}")
+if decision["decision"] != 2:
+    raise SystemExit(f"unexpected decision: {decision['decision']}")
 print("validation_errors", cmp["validation_errors"])
-print("decision", decide_remedy_v3(cmp)["decision"])  # expected 2
+print("decision", decision["decision"])
 PY
 ```
 

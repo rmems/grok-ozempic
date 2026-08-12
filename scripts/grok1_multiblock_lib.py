@@ -288,11 +288,25 @@ def _require_finite_array(arr: np.ndarray, what: str) -> None:
         raise ForwardError(f"int4 dequant: non-finite {what}")
 
 
+def _int4_reduce_axes(ndim: int) -> tuple[int, ...]:
+    """Axes to reduce for absmax: contracting dims only.
+
+    Rank-2 ``(K, N)`` reduces K. Rank ≥3 ``(E, K, N, …)`` preserves the leading
+    expert axis and the last output-channel axis (matches per-expert 2-D path).
+    """
+    if ndim <= 1:
+        return ()
+    if ndim == 2:
+        return (0,)
+    return tuple(range(1, ndim - 1))
+
+
 def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-output-channel absmax INT4 codes (int8) + scale (f32).
 
-    ``q ∈ [-INT4_QMAX, INT4_QMAX]`` stored as int8; scale along all axes except
-    the last. Returns ``(q_int8, scale_f32)`` with scale shape ``weights.shape[-1:]``.
+    ``q ∈ [-INT4_QMAX, INT4_QMAX]`` stored as int8. Scale reduces contracting
+    axes only (preserves expert lead dim when present). Scale shape is
+    ``(N,)`` for 2-D and ``(E, N)`` for 3-D expert tensors.
     """
     w = np.asarray(weights, dtype=np.float32)
     if w.size == 0:
@@ -304,20 +318,28 @@ def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         scale = np.float32(max(float(amax) / float(INT4_QMAX), 1e-12))
         q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX).astype(np.int8)
         return q, np.asarray([scale], dtype=np.float32)
-    axes = tuple(range(w.ndim - 1))
+    axes = _int4_reduce_axes(w.ndim)
     amax = np.max(np.abs(w), axis=axes)
     _require_finite_array(amax, "absmax")
     scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
-    q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX).astype(np.int8)
+    scale_b = scale
+    for ax in sorted(axes):
+        scale_b = np.expand_dims(scale_b, ax)
+    q = np.clip(np.rint(w / scale_b), -INT4_QMAX, INT4_QMAX).astype(np.int8)
     _require_finite_array(scale, "scales")
     return q, scale
 
 
 def int4_dequant_from_codes(q: np.ndarray, scale: np.ndarray) -> np.ndarray:
     """Dequant INT4 codes × scale (research side-table load path)."""
-    deq = (np.asarray(q, dtype=np.float32) * np.asarray(scale, dtype=np.float32)).astype(
-        np.float32
-    )
+    q_arr = np.asarray(q, dtype=np.float32)
+    scale_arr = np.asarray(scale, dtype=np.float32)
+    if scale_arr.ndim == q_arr.ndim - 1 and q_arr.ndim >= 2:
+        # Broadcast scale over contracting axis between lead and last dims.
+        # e.g. q (E,K,N) × scale (E,N) → expand to (E,1,N).
+        for ax in range(1, q_arr.ndim - 1):
+            scale_arr = np.expand_dims(scale_arr, ax)
+    deq = (q_arr * scale_arr).astype(np.float32)
     _require_finite_array(deq, "dequantized weights")
     return deq
 
@@ -382,17 +404,46 @@ class Int4SideExperts:
             self._side_dir / f"{stem}__scale_f32.npy",
         )
 
+    def _validate_side_pair(
+        self, name: str, q: np.ndarray, scale: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Fail-closed checks for loaded side-table codes + scales."""
+        if q.dtype != np.int8:
+            raise ForwardError(f"int4 side-table {name}: codes dtype {q.dtype} != int8")
+        q_i = np.asarray(q, dtype=np.int8)
+        if not np.all((q_i >= -INT4_QMAX) & (q_i <= INT4_QMAX)):
+            raise ForwardError(
+                f"int4 side-table {name}: codes outside [-{INT4_QMAX}, {INT4_QMAX}]"
+            )
+        if tuple(int(d) for d in q_i.shape) != ref_shape:
+            raise ForwardError(
+                f"int4 side-table {name}: codes shape {q_i.shape} != reference {ref_shape}"
+            )
+        scale_f = np.asarray(scale, dtype=np.float32)
+        _require_finite_array(scale_f, "loaded scales")
+        if len(ref_shape) >= 3:
+            expected_scale = (ref_shape[0], ref_shape[-1])
+        elif len(ref_shape) == 2:
+            expected_scale = (ref_shape[-1],)
+        else:
+            expected_scale = (1,) if ref_shape else ()
+        if tuple(int(d) for d in scale_f.shape) != expected_scale:
+            raise ForwardError(
+                f"int4 side-table {name}: scale shape {scale_f.shape} "
+                f"!= expected {expected_scale}"
+            )
+        return q_i, scale_f
+
     def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
+        role = next(r for r, n in self.roles.items() if n == name)
+        ref = np.asarray(self._ref.vector(role), dtype=np.float32)
+        ref_shape = tuple(int(d) for d in ref.shape)
         q_path, s_path = self._paths(name)
         if q_path.is_file() and s_path.is_file():
             q = np.load(q_path)
             scale = np.load(s_path)
-            _require_finite_array(scale.astype(np.float32), "loaded scales")
-            return q, scale.astype(np.float32)
-        # Find role for this structural name.
-        role = next(r for r, n in self.roles.items() if n == name)
-        w = np.asarray(self._ref.vector(role), dtype=np.float32)
-        q, scale = int4_absmax_quantize(w)
+            return self._validate_side_pair(name, q, scale, ref_shape)
+        q, scale = int4_absmax_quantize(ref)
         np.save(q_path, q)
         np.save(s_path, scale)
         return q, scale
@@ -408,6 +459,9 @@ class Int4SideExperts:
         q, scale = self._cache[role]
         if q.ndim < 1 or not 0 <= index < int(q.shape[0]):
             raise ForwardError(f"int4 side-table {role}: expert {index} out of range")
+        # Per-expert scale when lead dim was preserved (shape (E, N)).
+        if scale.ndim >= 2 and scale.shape[0] == q.shape[0]:
+            return int4_dequant_from_codes(q[index], scale[index])
         return int4_dequant_from_codes(q[index], scale)
 
 

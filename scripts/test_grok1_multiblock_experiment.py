@@ -1219,10 +1219,7 @@ class RemedyV3DecisionTests(unittest.TestCase):
         )
         errors = comparison["validation_errors"]
         self.assertTrue(
-            any(
-                "metric_out_of_domain" in e or "malformed_expert_only" in e
-                for e in errors
-            ),
+            any("malformed_expert_only" in e for e in errors),
             errors,
         )
         self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
