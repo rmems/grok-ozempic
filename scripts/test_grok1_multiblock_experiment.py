@@ -1212,7 +1212,46 @@ class RemedyV3DecisionTests(unittest.TestCase):
             [_v3_secondary("help")],
             primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
         )
-        self.assertTrue(any("non_finite_metric" in e for e in comparison["validation_errors"]))
+        self.assertTrue(
+            any("metric_out_of_domain" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_agreement_out_of_domain(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][0]["expert_only"]["router_top1_agreement"] = 2.0
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(
+            any("metric_out_of_domain" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_malformed_per_block_does_not_raise_on_settings(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][1] = "not-a-row"  # type: ignore[call-arg]
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(comparison["validation_errors"])
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_malformed_chain_exit_does_not_raise_in_summary(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["end_of_chain"] = {
+            "expert_only_chain_exit": {"residual_drift_relative_norm": "nope"}
+        }
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(any("chain_exit" in e for e in comparison["validation_errors"]))
         self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
 
     def test_option_4_when_per_block_order_permuted(self) -> None:

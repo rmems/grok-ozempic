@@ -621,14 +621,24 @@ def _chain_exit_metrics(chain: dict) -> dict | None:
     return None
 
 
+def _safe_float(raw: object) -> float | None:
+    """Parse a finite float, or None if missing/non-numeric/non-finite."""
+    try:
+        val = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(val):
+        return None
+    return val
+
+
 def _exit_drift(chain: dict, out_drift: list[float]) -> float | None:
     """Drift after the final block (includes last hop). Prefer chain_exit keys."""
     exit_m = _chain_exit_metrics(chain)
     if exit_m is not None:
-        if "residual_drift_relative_norm" in exit_m:
-            return float(exit_m["residual_drift_relative_norm"])
-        if "residual_in_drift_relative_norm" in exit_m:
-            return float(exit_m["residual_in_drift_relative_norm"])
+        for key in ("residual_drift_relative_norm", "residual_in_drift_relative_norm"):
+            if key in exit_m:
+                return _safe_float(exit_m[key])
     return out_drift[-1] if out_drift else None
 
 
@@ -1183,17 +1193,17 @@ def _v2_chain_summary(chain: dict) -> dict:
         return {"arm_label": chain.get("arm_label"), "empty": True}
     try:
         metrics = _metric_series(rows)
+        exit_drift = _exit_drift(chain, metrics["out_drift"])
+        compounding = _compounding_label(metrics["resid_in"], exit_drift)
+        viable = _remedy_option_1(
+            metrics["cos"][-1],
+            min(metrics["top1"]),
+            min(metrics["topk"]),
+            exit_drift,
+            metrics["cos"],
+        )
     except (KeyError, TypeError, ValueError, AttributeError):
         return {"arm_label": chain.get("arm_label"), "empty": True, "malformed": True}
-    exit_drift = _exit_drift(chain, metrics["out_drift"])
-    compounding = _compounding_label(metrics["resid_in"], exit_drift)
-    viable = _remedy_option_1(
-        metrics["cos"][-1],
-        min(metrics["top1"]),
-        min(metrics["topk"]),
-        exit_drift,
-        metrics["cos"],
-    )
     return {
         "arm_label": chain.get("arm_label"),
         "block_output_cosine": metrics["cos"],
@@ -1631,12 +1641,11 @@ def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
         raw = exit_m.get("residual_in_drift_relative_norm")
     if raw is None:
         return f"{label}:chain_exit_missing_drift"
-    try:
-        val = float(raw)
-    except (TypeError, ValueError):
+    val = _safe_float(raw)
+    if val is None:
         return f"{label}:chain_exit_malformed"
-    if not math.isfinite(val):
-        return f"{label}:chain_exit_non_finite"
+    if val < 0.0:
+        return f"{label}:chain_exit_out_of_domain"
     return None
 
 
@@ -1666,8 +1675,8 @@ def _v3_block_order_error(chain: dict, label: str) -> str | None:
     return None
 
 
-def _v3_finite_row_error(row: dict, label: str) -> str | None:
-    """Reject NaN/Inf in metrics that feed viable / ranking."""
+def _v3_metric_domain_error(row: dict, label: str) -> str | None:
+    """Reject non-finite or out-of-domain metrics that feed viable / ranking."""
     expert = row.get("expert_only")
     if not isinstance(expert, dict):
         return None
@@ -1677,21 +1686,19 @@ def _v3_finite_row_error(row: dict, label: str) -> str | None:
         "router_topk_set_agreement",
         expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
     )
-    samples = (
-        expert.get("block_output_cosine"),
-        residual.get("residual_in_drift_relative_norm"),
-        expert.get("router_top1_agreement"),
-        topk,
-        expert.get("expert_load_js_bits"),
-        expert.get("block_output_drift_relative_norm"),
+    # (raw, lo, hi) — lo/hi inclusive; hi=None means only lower bound.
+    checks = (
+        (expert.get("block_output_cosine"), -1.0, 1.0),
+        (residual.get("residual_in_drift_relative_norm"), 0.0, None),
+        (expert.get("router_top1_agreement"), 0.0, 1.0),
+        (topk, 0.0, 1.0),
+        (expert.get("expert_load_js_bits"), 0.0, None),
+        (expert.get("block_output_drift_relative_norm"), 0.0, None),
     )
-    for raw in samples:
-        try:
-            val = float(raw)
-        except (TypeError, ValueError):
-            return f"{label}:block_{row.get('block')}:non_finite_metric"
-        if not math.isfinite(val):
-            return f"{label}:block_{row.get('block')}:non_finite_metric"
+    for raw, lo, hi in checks:
+        val = _safe_float(raw)
+        if val is None or val < lo or (hi is not None and val > hi):
+            return f"{label}:block_{row.get('block')}:metric_out_of_domain"
     return None
 
 
@@ -1703,7 +1710,7 @@ def _append_optional(errors: list[str], message: str | None) -> None:
 def _v3_finite_chain_errors(chain: dict, label: str) -> list[str]:
     for row in chain.get("per_block") or []:
         if isinstance(row, dict):
-            message = _v3_finite_row_error(row, label)
+            message = _v3_metric_domain_error(row, label)
             if message is not None:
                 return [message]
     return []
@@ -1716,12 +1723,14 @@ def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     errors: list[str] = []
     per_block_errors = _v2_per_block_errors(chain, expected_label)
     errors.extend(per_block_errors)
+    # Settings/pack probes subscript per_block rows — skip when structure is invalid.
+    if per_block_errors:
+        return errors
     _append_optional(errors, _v3_block_order_error(chain, expected_label))
-    if not per_block_errors:
-        errors.extend(_v3_finite_chain_errors(chain, expected_label))
-        control_error = _v3_control_error(chain)
-        if control_error is not None:
-            errors.append(f"{label}:{control_error}")
+    errors.extend(_v3_finite_chain_errors(chain, expected_label))
+    control_error = _v3_control_error(chain)
+    if control_error is not None:
+        errors.append(f"{label}:{control_error}")
     mismatch = settings_mismatch_reason(chain)
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
