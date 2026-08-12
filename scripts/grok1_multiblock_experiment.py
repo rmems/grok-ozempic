@@ -720,39 +720,73 @@ def run(args: argparse.Namespace) -> int:
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
         if _is_v3_primary(args):
-            # Always regenerate so metrics.json and results.md cannot diverge on reruns.
-            report = args.out / "results.md"
-            report.write_text(_v3_results_md(payload), encoding="utf-8")
-            print(f"wrote {report}")
+            _write_v3_report(args.out / "results.md", payload)
         elif _is_v2_primary(args):
             write_remedy_v2_results_md(args.out / "results.md", payload)
+            print(f"wrote {args.out / 'results.md'}")
         elif _is_remedy_arm(args.arm):
             write_remedy_results_md(args.out / "results.md", payload)
+            print(f"wrote {args.out / 'results.md'}")
         else:
             write_results_md(args.out / "results.md", payload)
-        if not _is_v3_primary(args):
             print(f"wrote {args.out / 'results.md'}")
     return EXIT_OK
 
 
+def _write_v3_report(report: Path, payload: dict) -> None:
+    """Write #80 results.md without clobbering a pre-authored analysis.
+
+    ``metrics.json`` is the machine source of truth. A long hand-authored report
+    (comparison tables, interpretation) is kept on reruns; only a missing file
+    gets a generated skeleton. Warn when an existing report's Option line drifts
+    from the latest decision.
+    """
+    decision = payload.get("decision") or {}
+    option = decision.get("decision")
+    if report.is_file():
+        body = report.read_text(encoding="utf-8")
+        # Match both authored "## Decision / **Option N**" and skeleton "Decision: Option N".
+        if option is not None and f"Option {option}" not in body:
+            print(
+                f"warning: existing {report} does not mention Option {option} "
+                f"— metrics.json decision is SoT; update the report by hand"
+            )
+        print(f"kept existing {report} (pre-authored; metrics.json is SoT)")
+        return
+    report.write_text(_v3_results_md(payload), encoding="utf-8")
+    print(f"wrote {report}")
+
+
 def _v3_results_md(payload: dict) -> str:
-    """Minimal markdown for #80 when a pre-authored report is absent."""
+    """Skeleton markdown for #80 when a pre-authored report is absent."""
     decision = payload.get("decision") or {}
     chain = payload.get("chain") or {}
     prov = payload.get("provenance") or {}
+    comparison = payload.get("comparison") or {}
     lines = [
         "# Expert middle-ground (INT4) multi-block fidelity",
         "",
         f"**Agent:** {prov.get('agent', REMEDY_V3_AGENT_LINE)}",
         f"**Decision:** Option {decision.get('decision')} — {decision.get('decision_text')}",
         f"**Arm:** `{chain.get('arm_label')}`",
+        f"**Best middle-ground arm:** `{decision.get('best_remedy_arm')}`",
         "",
         "## Rationale",
         "",
     ]
     for item in decision.get("rationale") or []:
         lines.append(f"- `{item}`")
-    lines.append("")
+    lines.extend(["", "## Arms in comparison", ""])
+    for label in sorted((comparison.get("summaries") or {}).keys()):
+        lines.append(f"- `{label}`")
+    lines.extend(
+        [
+            "",
+            "_Generated skeleton — expand with per-block tables when promoting a "
+            "canonical report under `reports/`. `metrics.json` remains SoT._",
+            "",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
