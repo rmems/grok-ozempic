@@ -1543,6 +1543,16 @@ def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     ]
 
 
+def _value_set(mapping: object) -> set | None:
+    """Values of a mapping as a set, or None if not a mapping / unhashable values."""
+    if not isinstance(mapping, dict):
+        return None
+    try:
+        return set(mapping.values())
+    except TypeError:
+        return None
+
+
 def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
     """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
     row_tag = f"pack_provenance[{index}]"
@@ -1551,7 +1561,6 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
     block = _canonical_block_id(row.get("block"))
     if block is None:
         return [f"{label}:{row_tag}:invalid_block_id"]
-    errors: list[str] = []
     versions = row.get("container_versions")
     if not isinstance(versions, list):
         return [f"{label}:block_{block}:container_versions_not_list"]
@@ -1559,24 +1568,17 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
         version_set = set(versions)
     except TypeError:
         return [f"{label}:block_{block}:container_versions_unhashable"]
+    pack_sources = _value_set(row.get("pack_scale_sources"))
+    if pack_sources is None:
+        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
+    applied = _value_set(row.get("scale_sources"))
+    if applied is None:
+        return [f"{label}:block_{block}:scale_sources_not_mapping"]
+    errors: list[str] = []
     if version_set != {3}:
         errors.append(f"{label}:block_{block}:container_not_v3")
-    pack_scale_sources = row.get("pack_scale_sources")
-    if not isinstance(pack_scale_sources, dict):
-        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
-    try:
-        pack_sources = set(pack_scale_sources.values())
-    except TypeError:
-        return [f"{label}:block_{block}:pack_scale_sources_unhashable"]
     if pack_sources != {"pack_v2"}:
         errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
-    scale_sources = row.get("scale_sources")
-    if not isinstance(scale_sources, dict):
-        return [f"{label}:block_{block}:scale_sources_not_mapping"]
-    try:
-        applied = set(scale_sources.values())
-    except TypeError:
-        return [f"{label}:block_{block}:scale_sources_unhashable"]
     expected = _v3_applied_source(block, hp_blocks)
     if applied != {expected}:
         errors.append(
@@ -1659,6 +1661,20 @@ def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     return errors
 
 
+def _v3_secondary_provenance_errors(
+    payload: dict, label: str, expected_implementation: dict
+) -> list[str]:
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        return [f"{label}:secondary evidence missing provenance object"]
+    errors: list[str] = []
+    if provenance.get("evidence_role") != _V3_SECONDARY_EVIDENCE_ROLE:
+        errors.append(f"{label}:secondary evidence role is not locked")
+    if provenance.get("implementation") != expected_implementation:
+        errors.append(f"{label}:secondary implementation differs from primary")
+    return errors
+
+
 def _v3_secondary_map(
     payloads: list[dict],
     errors: list[str],
@@ -1673,20 +1689,13 @@ def _v3_secondary_map(
             errors.append("secondary evidence missing chain object")
             continue
         label = chain.get("arm_label")
-        if label in mapped:
-            errors.append(f"duplicate secondary arm {label!r}")
+        if label in mapped or label not in _V3_SECONDARY_ARMS:
+            kind = "duplicate" if label in mapped else "unexpected"
+            errors.append(f"{kind} secondary arm {label!r}")
             continue
-        if label not in _V3_SECONDARY_ARMS:
-            errors.append(f"unexpected secondary arm {label!r}")
-            continue
-        provenance = payload.get("provenance")
-        if not isinstance(provenance, dict):
-            errors.append(f"{label}:secondary evidence missing provenance object")
-        else:
-            if provenance.get("evidence_role") != _V3_SECONDARY_EVIDENCE_ROLE:
-                errors.append(f"{label}:secondary evidence role is not locked")
-            if provenance.get("implementation") != expected_implementation:
-                errors.append(f"{label}:secondary implementation differs from primary")
+        errors.extend(
+            _v3_secondary_provenance_errors(payload, label, expected_implementation)
+        )
         mapped[label] = payload
     missing = sorted(_V3_SECONDARY_ARMS - set(mapped))
     if missing:
@@ -1756,19 +1765,18 @@ def assemble_remedy_v3_comparison(
     }
 
 
+def _finite_tail(series: object) -> bool:
+    return isinstance(series, list) and bool(series) and _finite_number(series[-1])
+
+
 def _v3_middle_complete(summary: dict) -> bool:
     """Complete middle-ground arm: finite routing/cosine/exit metrics present."""
     if not isinstance(summary, dict) or "viable" not in summary:
         return False
-    top1 = summary.get("router_top1")
-    cos = summary.get("block_output_cosine")
-    exit_drift = summary.get("chain_exit_residual_drift")
-    if not isinstance(top1, list) or not top1 or not isinstance(cos, list) or not cos:
-        return False
     return (
-        _finite_number(top1[-1])
-        and _finite_number(cos[-1])
-        and _finite_number(exit_drift)
+        _finite_tail(summary.get("router_top1"))
+        and _finite_tail(summary.get("block_output_cosine"))
+        and _finite_number(summary.get("chain_exit_residual_drift"))
     )
 
 

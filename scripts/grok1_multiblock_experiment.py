@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -733,55 +734,30 @@ def run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _selected_option_in_report(body: str) -> int | None:
-    """Parse the *selected* option from a report (not the Why-not list).
+# Selected decision line only — not Why-not ``**Option N:**``.
+_SELECTED_OPTION_RE = re.compile(
+    r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
+)
 
-    Authored: ``**Option 2 — …`` under ## Decision.
-    Skeleton: ``**Decision:** Option 2 — …``.
-    Why-not lines use ``**Option N:**`` (colon) and must not match.
-    """
-    for raw in body.splitlines():
-        line = raw.strip()
-        if line.startswith("**Decision:**") and "Option" in line:
-            marker = "Option"
-            idx = line.find(marker)
-            tail = line[idx + len(marker) :].strip()
-            digits = ""
-            for ch in tail:
-                if ch.isdigit():
-                    digits += ch
-                elif digits:
-                    break
-            if digits:
-                return int(digits)
-        if line.startswith("**Option ") and ("—" in line or " - " in line):
-            # Selected decision line uses em dash / spaced hyphen, not colon.
-            if ":**" in line:
-                continue
-            rest = line[len("**Option ") :]
-            digits = ""
-            for ch in rest:
-                if ch.isdigit():
-                    digits += ch
-                elif digits:
-                    break
-            if digits:
-                return int(digits)
-    return None
+
+def _selected_option_in_report(body: str) -> int | None:
+    """Parse the *selected* option from a report (not the Why-not list)."""
+    match = _SELECTED_OPTION_RE.search(body)
+    if match is None:
+        return None
+    return int(match.group(1) or match.group(2))
 
 
 def _write_v3_report(report: Path, payload: dict) -> None:
     """Write #80 results.md without clobbering a pre-authored analysis.
 
     ``metrics.json`` is the machine source of truth. A long hand-authored report
-    (comparison tables, interpretation) is kept on reruns; only a missing file
-    gets a generated skeleton. Warn when the *selected* Decision option drifts.
+    is kept on reruns; only a missing file gets a generated skeleton.
     """
     decision = payload.get("decision") or {}
     option = decision.get("decision")
     if report.is_file():
-        body = report.read_text(encoding="utf-8")
-        reported = _selected_option_in_report(body)
+        reported = _selected_option_in_report(report.read_text(encoding="utf-8"))
         if option is not None and reported != option:
             print(
                 f"warning: existing {report} selects Option {reported!r} but "
@@ -799,8 +775,10 @@ def _v3_results_md(payload: dict) -> str:
     decision = payload.get("decision") or {}
     chain = payload.get("chain") or {}
     prov = payload.get("provenance") or {}
-    comparison = payload.get("comparison") or {}
-    lines = [
+    summaries = (payload.get("comparison") or {}).get("summaries") or {}
+    rationale = [f"- `{item}`" for item in (decision.get("rationale") or [])]
+    arms = [f"- `{label}`" for label in sorted(summaries)]
+    parts = [
         "# Expert middle-ground (INT4) multi-block fidelity",
         "",
         f"**Agent:** {prov.get('agent', REMEDY_V3_AGENT_LINE)}",
@@ -810,21 +788,17 @@ def _v3_results_md(payload: dict) -> str:
         "",
         "## Rationale",
         "",
+        *rationale,
+        "",
+        "## Arms in comparison",
+        "",
+        *arms,
+        "",
+        "_Generated skeleton — expand with per-block tables when promoting a "
+        "canonical report under `reports/`. `metrics.json` remains SoT._",
+        "",
     ]
-    for item in decision.get("rationale") or []:
-        lines.append(f"- `{item}`")
-    lines.extend(["", "## Arms in comparison", ""])
-    for label in sorted((comparison.get("summaries") or {}).keys()):
-        lines.append(f"- `{label}`")
-    lines.extend(
-        [
-            "",
-            "_Generated skeleton — expand with per-block tables when promoting a "
-            "canonical report under `reports/`. `metrics.json` remains SoT._",
-            "",
-        ]
-    )
-    return "\n".join(lines) + "\n"
+    return "\n".join(parts) + "\n"
 
 
 def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
