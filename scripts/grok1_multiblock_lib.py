@@ -1695,6 +1695,20 @@ def _v3_finite_row_error(row: dict, label: str) -> str | None:
     return None
 
 
+def _append_optional(errors: list[str], message: str | None) -> None:
+    if message is not None:
+        errors.append(message)
+
+
+def _v3_finite_chain_errors(chain: dict, label: str) -> list[str]:
+    for row in chain.get("per_block") or []:
+        if isinstance(row, dict):
+            message = _v3_finite_row_error(row, label)
+            if message is not None:
+                return [message]
+    return []
+
+
 def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     label = chain.get("arm_label")
     if label != expected_label:
@@ -1702,27 +1716,17 @@ def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     errors: list[str] = []
     per_block_errors = _v2_per_block_errors(chain, expected_label)
     errors.extend(per_block_errors)
-    order_error = _v3_block_order_error(chain, expected_label)
-    if order_error is not None:
-        errors.append(order_error)
+    _append_optional(errors, _v3_block_order_error(chain, expected_label))
     if not per_block_errors:
-        for row in chain.get("per_block") or []:
-            if isinstance(row, dict):
-                finite_error = _v3_finite_row_error(row, expected_label)
-                if finite_error is not None:
-                    errors.append(finite_error)
-                    break
+        errors.extend(_v3_finite_chain_errors(chain, expected_label))
+        control_error = _v3_control_error(chain)
+        if control_error is not None:
+            errors.append(f"{label}:{control_error}")
     mismatch = settings_mismatch_reason(chain)
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
     errors.extend(_v3_schedule_errors(chain, expected_label))
-    exit_error = _v3_chain_exit_error(chain, expected_label)
-    if exit_error is not None:
-        errors.append(exit_error)
-    if not per_block_errors:
-        control_error = _v3_control_error(chain)
-        if control_error is not None:
-            errors.append(f"{label}:{control_error}")
+    _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
     errors.extend(_v3_scale_source_errors(chain, expected_label))
     return errors
 
@@ -1741,6 +1745,31 @@ def _v3_secondary_provenance_errors(
     return errors
 
 
+def _v3_secondary_entry(
+    payload: object,
+    mapped: dict[str, dict],
+    expected_implementation: dict,
+) -> tuple[str | None, dict | None, list[str]]:
+    """Return (label, payload, errors) for one secondary evidence item."""
+    if not isinstance(payload, dict):
+        return None, None, ["secondary evidence must be a JSON object"]
+    errors: list[str] = []
+    if "decision" in payload:
+        errors.append("secondary evidence contains a decision")
+    chain = payload.get("chain")
+    if not isinstance(chain, dict):
+        return None, None, errors + ["secondary evidence missing chain object"]
+    label = chain.get("arm_label")
+    if label in mapped:
+        return None, None, errors + [f"duplicate secondary arm {label!r}"]
+    if label not in _V3_SECONDARY_ARMS:
+        return None, None, errors + [f"unexpected secondary arm {label!r}"]
+    errors.extend(
+        _v3_secondary_provenance_errors(payload, label, expected_implementation)
+    )
+    return label, payload, errors
+
+
 def _v3_secondary_map(
     payloads: list[dict],
     errors: list[str],
@@ -1748,24 +1777,12 @@ def _v3_secondary_map(
 ) -> dict[str, dict]:
     mapped: dict[str, dict] = {}
     for payload in payloads:
-        if not isinstance(payload, dict):
-            errors.append("secondary evidence must be a JSON object")
-            continue
-        if "decision" in payload:
-            errors.append("secondary evidence contains a decision")
-        chain = payload.get("chain")
-        if not isinstance(chain, dict):
-            errors.append("secondary evidence missing chain object")
-            continue
-        label = chain.get("arm_label")
-        if label in mapped or label not in _V3_SECONDARY_ARMS:
-            kind = "duplicate" if label in mapped else "unexpected"
-            errors.append(f"{kind} secondary arm {label!r}")
-            continue
-        errors.extend(
-            _v3_secondary_provenance_errors(payload, label, expected_implementation)
+        label, accepted, item_errors = _v3_secondary_entry(
+            payload, mapped, expected_implementation
         )
-        mapped[label] = payload
+        errors.extend(item_errors)
+        if label is not None and accepted is not None:
+            mapped[label] = accepted
     missing = sorted(_V3_SECONDARY_ARMS - set(mapped))
     if missing:
         errors.append(f"missing secondary arms {missing}")
