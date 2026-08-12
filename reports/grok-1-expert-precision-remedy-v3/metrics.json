@@ -1365,12 +1365,7 @@
     "hp_period": null,
     "hp_schedule_kind": "none",
     "hp_blocks": [],
-    "ternary_blocks": [
-      0,
-      1,
-      2,
-      3
-    ],
+    "ternary_blocks": [],
     "channel_alpha_blocks": [],
     "hp_schedule_prose": "INT4 experts (research_int4_side) on all chain blocks.",
     "arm_label": "expert_int4",
@@ -1379,6 +1374,12 @@
       "research_int4_side",
       "research_int4_side",
       "research_int4_side"
+    ],
+    "int4_blocks": [
+      0,
+      1,
+      2,
+      3
     ]
   },
   "comparison": {
@@ -2755,9 +2756,7 @@
             2,
             3
           ],
-          "ternary_blocks": [
-            0
-          ],
+          "ternary_blocks": [],
           "channel_alpha_blocks": [],
           "hp_schedule_prose": "INT4 middle-ground label `expert_int4_123`: research INT4 experts on {0}, HP (FP16 experts) on {1,2,3}.",
           "arm_label": "expert_int4_123",
@@ -2766,6 +2765,9 @@
             "expert_int4_123",
             "expert_int4_123",
             "expert_int4_123"
+          ],
+          "int4_blocks": [
+            0
           ]
         }
       }

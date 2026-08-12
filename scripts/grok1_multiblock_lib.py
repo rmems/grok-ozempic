@@ -1509,17 +1509,149 @@ def _v3_improved_vs_denser(summary: dict) -> bool:
     return top1_gain >= 0.05 or cos_gain >= 0.03 or drift_gain >= 0.08
 
 
-def assemble_remedy_v3_comparison(
-    primary_chain: dict,
-    secondary_payloads: list[dict],
-    *,
-    primary_provenance: dict,
-    load_errors: list[str] | None = None,
-) -> dict:
-    """Assemble #80 middle-ground comparison (P0 primary + P1 secondary + #76 cites)."""
-    errors = list(load_errors or [])
-    summaries = {
-        V3_PRIMARY_ARM: _v2_chain_summary(primary_chain),
+# #80 locked schedule: P0 all-INT4 primary + P1 denser-HP secondary (blocks 1,2,3).
+_V3_SECONDARY_ARMS = frozenset({V3_SECONDARY_ARM})
+_V3_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
+
+
+def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
+    """Return (hp_blocks, int4_blocks, expert_mode) for a locked #80 arm label."""
+    schedules = {
+        V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
+        V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
+    }
+    return schedules[label]
+
+
+def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
+    return "fp16_control" if block in hp_blocks else "research_int4_side"
+
+
+def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
+    hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
+    checks = [
+        ("hp_blocks", list(chain.get("hp_blocks") or []), hp_blocks),
+        ("int4_blocks", list(chain.get("int4_blocks") or []), int4_blocks),
+        ("ternary_blocks", list(chain.get("ternary_blocks") or []), []),
+        ("expert_mode", chain.get("expert_mode"), mode),
+    ]
+    return [
+        f"{label}:{field}={observed!r} expected={expected!r}"
+        for field, observed, expected in checks
+        if observed != expected
+    ]
+
+
+def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
+    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
+    row_tag = f"pack_provenance[{index}]"
+    if not isinstance(row, dict):
+        return [f"{label}:{row_tag}:not_a_mapping"]
+    block = _canonical_block_id(row.get("block"))
+    if block is None:
+        return [f"{label}:{row_tag}:invalid_block_id"]
+    errors: list[str] = []
+    versions = row.get("container_versions")
+    if not isinstance(versions, list):
+        return [f"{label}:block_{block}:container_versions_not_list"]
+    try:
+        version_set = set(versions)
+    except TypeError:
+        return [f"{label}:block_{block}:container_versions_unhashable"]
+    if version_set != {3}:
+        errors.append(f"{label}:block_{block}:container_not_v3")
+    pack_scale_sources = row.get("pack_scale_sources")
+    if not isinstance(pack_scale_sources, dict):
+        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
+    try:
+        pack_sources = set(pack_scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:pack_scale_sources_unhashable"]
+    if pack_sources != {"pack_v2"}:
+        errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
+    scale_sources = row.get("scale_sources")
+    if not isinstance(scale_sources, dict):
+        return [f"{label}:block_{block}:scale_sources_not_mapping"]
+    try:
+        applied = set(scale_sources.values())
+    except TypeError:
+        return [f"{label}:block_{block}:scale_sources_unhashable"]
+    expected = _v3_applied_source(block, hp_blocks)
+    if applied != {expected}:
+        errors.append(
+            f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
+            f"expected={expected}"
+        )
+    return errors
+
+
+def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
+    hp_blocks, _, _ = _v3_expected_schedule(label)
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list) or len(packs) != len(BASELINE_72["blocks"]):
+        return [f"{label}:missing_pack_provenance"]
+    errors: list[str] = []
+    for index, row in enumerate(packs):
+        errors.extend(_v3_pack_row_errors(row, label, hp_blocks, index=index))
+    return errors
+
+
+def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
+    label = chain.get("arm_label")
+    if label != expected_label:
+        return [f"arm_label={label!r} expected={expected_label!r}"]
+    errors: list[str] = []
+    per_block_errors = _v2_per_block_errors(chain, expected_label)
+    errors.extend(per_block_errors)
+    mismatch = settings_mismatch_reason(chain)
+    if mismatch is not None:
+        errors.append(f"{label}:{mismatch}")
+    errors.extend(_v3_schedule_errors(chain, expected_label))
+    if not per_block_errors:
+        control_error = _v2_control_error(chain)
+        if control_error is not None:
+            errors.append(f"{label}:{control_error}")
+    errors.extend(_v3_scale_source_errors(chain, expected_label))
+    return errors
+
+
+def _v3_secondary_map(
+    payloads: list[dict],
+    errors: list[str],
+    expected_implementation: dict,
+) -> dict[str, dict]:
+    mapped: dict[str, dict] = {}
+    for payload in payloads:
+        if "decision" in payload:
+            errors.append("secondary evidence contains a decision")
+        chain = payload.get("chain")
+        if not isinstance(chain, dict):
+            errors.append("secondary evidence missing chain object")
+            continue
+        label = chain.get("arm_label")
+        if label in mapped:
+            errors.append(f"duplicate secondary arm {label!r}")
+            continue
+        if label not in _V3_SECONDARY_ARMS:
+            errors.append(f"unexpected secondary arm {label!r}")
+            continue
+        provenance = payload.get("provenance")
+        if not isinstance(provenance, dict):
+            errors.append(f"{label}:secondary evidence missing provenance object")
+        else:
+            if provenance.get("evidence_role") != _V3_SECONDARY_EVIDENCE_ROLE:
+                errors.append(f"{label}:secondary evidence role is not locked")
+            if provenance.get("implementation") != expected_implementation:
+                errors.append(f"{label}:secondary implementation differs from primary")
+        mapped[label] = payload
+    missing = sorted(_V3_SECONDARY_ARMS - set(mapped))
+    if missing:
+        errors.append(f"missing secondary arms {missing}")
+    return mapped
+
+
+def _v3_cited_summaries() -> dict[str, dict]:
+    return {
         "cited_denser_76": {
             "arm_label": BASELINE_76_DENSER["arm_label"],
             "block_output_cosine": list(BASELINE_76_DENSER["block_output_cosine"]),
@@ -1541,42 +1673,32 @@ def assemble_remedy_v3_comparison(
             "cited": True,
         },
     }
-    secondary: dict[str, dict] = {}
-    primary_label = str(primary_chain.get("arm_label") or V3_PRIMARY_ARM)
-    for payload in secondary_payloads:
-        chain = payload.get("chain")
-        if not isinstance(chain, dict):
-            errors.append("secondary evidence missing chain object")
-            continue
-        prov = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
-        role = str(prov.get("evidence_role") or "")
-        if "secondary" not in role.lower():
-            errors.append(
-                f"secondary evidence_role={role!r} expected secondary (no independent decision)"
-            )
-        label = str(chain.get("arm_label") or "secondary")
-        if not label.startswith("expert_int4"):
-            errors.append(f"secondary arm_label={label!r} expected expert_int4*")
-            continue
-        if label == primary_label or label == V3_PRIMARY_ARM:
-            errors.append(f"secondary arm_label={label!r} collides with primary")
-            continue
-        mismatch = settings_mismatch_reason(chain)
-        if mismatch is not None:
-            errors.append(f"{label}:{mismatch}")
-        if label in secondary:
-            errors.append(f"duplicate secondary arm_label={label!r}")
-            continue
-        secondary[label] = payload
-        summaries[label] = _v2_chain_summary(chain)
-    if not any(k.startswith("expert_int4") and k != V3_PRIMARY_ARM for k in summaries):
-        if not secondary:
-            errors.append("missing #80 P1 secondary evidence (int4 + HP schedule)")
-    if primary_label not in (V3_PRIMARY_ARM, "expert_int4"):
-        if not primary_label.startswith("expert_int4"):
-            errors.append(f"primary arm_label={primary_label!r} expected expert_int4*")
+
+
+def assemble_remedy_v3_comparison(
+    primary_chain: dict,
+    secondary_payloads: list[dict],
+    *,
+    primary_provenance: dict,
+    load_errors: list[str] | None = None,
+) -> dict:
+    """Validate #80 evidence and return a decision-ready comparison payload."""
+    errors = list(load_errors or [])
+    implementation = (primary_provenance or {}).get("implementation")
+    if not isinstance(implementation, dict):
+        errors.append("primary evidence missing implementation provenance")
+        implementation = {}
+    secondary = _v3_secondary_map(secondary_payloads, errors, implementation)
+    errors.extend(_v3_chain_errors(primary_chain, V3_PRIMARY_ARM))
+    for label, payload in secondary.items():
+        errors.extend(_v3_chain_errors(payload["chain"], label))
+    summaries = {V3_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
+    summaries.update(_v3_cited_summaries())
+    summaries.update(
+        {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
+    )
     return {
-        "primary_arm": primary_chain.get("arm_label") or V3_PRIMARY_ARM,
+        "primary_arm": V3_PRIMARY_ARM,
         "secondary_arms": secondary,
         "summaries": summaries,
         "validation_errors": errors,
@@ -1586,10 +1708,82 @@ def assemble_remedy_v3_comparison(
             "baseline_74": BASELINE_74,
             "baseline_72": BASELINE_72,
         },
-        "primary_provenance": {
-            "implementation": (primary_provenance or {}).get("implementation"),
-        },
+        "primary_provenance": {"implementation": implementation},
     }
+
+
+def _v3_middle_complete(summary: dict) -> bool:
+    top1 = summary.get("router_top1")
+    cos = summary.get("block_output_cosine")
+    return (
+        isinstance(summary, dict)
+        and "viable" in summary
+        and isinstance(top1, list)
+        and bool(top1)
+        and isinstance(cos, list)
+        and bool(cos)
+        and isinstance(top1[-1], (int, float))
+        and isinstance(cos[-1], (int, float))
+    )
+
+
+def _v3_middle_labels(summaries: dict) -> list[str]:
+    return [
+        label
+        for label, summary in summaries.items()
+        if str(label).startswith("expert_int4")
+        and not summary.get("cited")
+        and _v3_middle_complete(summary)
+    ]
+
+
+def _v3_outcome(
+    best: dict,
+    *,
+    any_improved: bool,
+    ceiling_viable: bool,
+) -> tuple[int, str]:
+    if best.get("viable"):
+        return (
+            1,
+            "Middle-ground INT4 experts restore multi-block viability for the measured chain.",
+        )
+    if any_improved and ceiling_viable:
+        return (
+            2,
+            "INT4 middle-ground helps vs denser ternary, but full-HP experts or another "
+            "correction remain required.",
+        )
+    if not any_improved:
+        return (
+            3,
+            "INT4 middle-ground fails to beat denser ternary meaningfully — gap is not "
+            "payload-width alone.",
+        )
+    return 4, "Inconclusive — measured outcomes do not satisfy a locked decision branch."
+
+
+def _v3_decision_rationale(
+    best_label: str,
+    best: dict,
+    *,
+    any_improved: bool,
+    ceiling_viable: bool,
+) -> list[str]:
+    top1 = best["router_top1"]
+    cos = best["block_output_cosine"]
+    return [
+        f"best_middle_ground_arm={best_label}",
+        f"best_b3_top1={float(top1[-1]):.6f}",
+        f"best_b3_cos={float(cos[-1]):.6f}",
+        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
+        f"#76_denser_b3_top1={BASELINE_76_DENSER['router_top1'][-1]:.6f} (cited)",
+        f"#76_denser_b3_cos={BASELINE_76_DENSER['block_output_cosine'][-1]:.6f} (cited)",
+        f"#76_denser_exit_drift={BASELINE_76_DENSER['chain_exit_residual_drift']:.6f} (cited)",
+        f"#76_ceiling_viable={ceiling_viable} (cited)",
+        f"any_middle_ground_improved_vs_denser={any_improved}",
+        f"codec=research_int4_side per-output-channel absmax qmax={INT4_QMAX}",
+    ]
 
 
 def decide_remedy_v3(comparison: dict) -> dict:
@@ -1603,27 +1797,7 @@ def decide_remedy_v3(comparison: dict) -> dict:
             "unknown",
         )
     summaries = comparison["summaries"]
-    def _complete_middle(summary: dict) -> bool:
-        top1 = summary.get("router_top1")
-        cos = summary.get("block_output_cosine")
-        return (
-            isinstance(summary, dict)
-            and "viable" in summary
-            and isinstance(top1, list)
-            and bool(top1)
-            and isinstance(cos, list)
-            and bool(cos)
-            and isinstance(top1[-1], (int, float))
-            and isinstance(cos[-1], (int, float))
-        )
-
-    middle_labels = [
-        label
-        for label, summary in summaries.items()
-        if str(label).startswith("expert_int4")
-        and not summary.get("cited")
-        and _complete_middle(summary)
-    ]
+    middle_labels = _v3_middle_labels(summaries)
     if not middle_labels:
         return _decision_payload(
             4,
@@ -1633,45 +1807,15 @@ def decide_remedy_v3(comparison: dict) -> dict:
         )
     best_label = max(middle_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
     best = summaries[best_label]
-    top1 = best["router_top1"]
-    cos = best["block_output_cosine"]
     ceiling = summaries.get("cited_ceiling_76") or {"viable": True}
     any_improved = any(_v3_improved_vs_denser(summaries[label]) for label in middle_labels)
     ceiling_viable = bool(ceiling.get("viable", True))
-    rationale = [
-        f"best_middle_ground_arm={best_label}",
-        f"best_b3_top1={float(top1[-1]):.6f}",
-        f"best_b3_cos={float(cos[-1]):.6f}",
-        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
-        f"#76_denser_b3_top1={BASELINE_76_DENSER['router_top1'][-1]:.6f} (cited)",
-        f"#76_denser_b3_cos={BASELINE_76_DENSER['block_output_cosine'][-1]:.6f} (cited)",
-        f"#76_denser_exit_drift={BASELINE_76_DENSER['chain_exit_residual_drift']:.6f} (cited)",
-        f"#76_ceiling_viable={ceiling_viable} (cited)",
-        f"any_middle_ground_improved_vs_denser={any_improved}",
-        f"codec=research_int4_side per-output-channel absmax qmax={INT4_QMAX}",
-    ]
-    if best.get("viable"):
-        decision, text = (
-            1,
-            "Middle-ground INT4 experts restore multi-block viability for the measured chain.",
-        )
-    elif any_improved and ceiling_viable:
-        decision, text = (
-            2,
-            "INT4 middle-ground helps vs denser ternary, but full-HP experts or another "
-            "correction remain required.",
-        )
-    elif not any_improved:
-        decision, text = (
-            3,
-            "INT4 middle-ground fails to beat denser ternary meaningfully — gap is not "
-            "payload-width alone.",
-        )
-    else:
-        decision, text = (
-            4,
-            "Inconclusive — measured outcomes do not satisfy a locked decision branch.",
-        )
+    decision, text = _v3_outcome(
+        best, any_improved=any_improved, ceiling_viable=ceiling_viable
+    )
+    rationale = _v3_decision_rationale(
+        best_label, best, any_improved=any_improved, ceiling_viable=ceiling_viable
+    )
     payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
     payload["best_remedy_arm"] = best_label
     return payload

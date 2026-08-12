@@ -535,6 +535,40 @@ def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]
     return payloads, errors
 
 
+def _remedy_issue_meta(*, v2: bool, v3: bool) -> tuple[str, str, str, str]:
+    """Return (issue, agent, model, design) for remedy provenance."""
+    if v3:
+        return (
+            "GH #80 / Linear RM-468 / beads goz-d603r4",
+            REMEDY_V3_AGENT_LINE,
+            "Grok-4.5 (high)",
+            "Grok Build design lock: INT4 research side-table middle-ground "
+            "(P0 all-blocks + P1 denser HP); cite #76 denser/ceiling",
+        )
+    if v2:
+        return (
+            "GH #75 / Linear RM-462 / beads goz-rvk",
+            REMEDY_V2_AGENT_LINE,
+            "GPT-5.6 Sol (xhigh)",
+            "Codex design lock: C denser, N=2+C+A, and HP expert ceiling",
+        )
+    return (
+        "GH #73 / Linear RM-362",
+        REMEDY_AGENT_LINE,
+        "Grok-4.5 (high)",
+        "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)",
+    )
+
+
+def _remedy_scale_policy(*, v3: bool) -> str:
+    if v3:
+        return (
+            "research_int4_side per-output-channel absmax on INT4 path; "
+            "GOZ1 v3 pack-only on ternary cite path; abort on legacy_oracle"
+        )
+    return "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle"
+
+
 def _provenance(
     paths: ChainPaths,
     skip_fp16: bool,
@@ -543,69 +577,47 @@ def _provenance(
     v2: bool = False,
     v3: bool = False,
 ) -> dict:
-    if _is_remedy_arm(arm):
-        if v3:
-            issue = "GH #80 / Linear RM-468 / beads goz-d603r4"
-            agent = REMEDY_V3_AGENT_LINE
-            model = "Grok-4.5 (high)"
-            design = (
-                "Grok Build design lock: INT4 research side-table middle-ground "
-                "(P0 all-blocks + P1 denser HP); cite #76 denser/ceiling"
-            )
-        elif v2:
-            issue = "GH #75 / Linear RM-462 / beads goz-rvk"
-            agent = REMEDY_V2_AGENT_LINE
-            model = "GPT-5.6 Sol (xhigh)"
-            design = "Codex design lock: C denser, N=2+C+A, and HP expert ceiling"
-        else:
-            issue = "GH #73 / Linear RM-362"
-            agent = REMEDY_AGENT_LINE
-            model = "Grok-4.5 (high)"
-            design = "Grok Build design lock: arms C (periodic HP) and A (channel α side-table)"
+    if not _is_remedy_arm(arm):
         return {
-            "issue": issue,
-            "agent": agent,
-            "model": model,
-            "design": design,
+            "issue": "GH #68 / Linear RM-255",
+            "agent": AGENT_LINE,
+            "model": "grok-4.5",
+            "design": "Grok Build super-research design (sequential chain, pack-only v3)",
             "baseline_64": BASELINE_64,
-            "baseline_72": BASELINE_72,
-            "baseline_74": BASELINE_74 if (v2 or v3) else None,
-            "baseline_76_denser": BASELINE_76_DENSER if v3 else None,
-            "baseline_76_ceiling": BASELINE_76_CEILING if v3 else None,
             "implementation": implementation_commit(),
             "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
             "numpy": np.__version__,
             "python": platform.python_version(),
-            "embedding_shard": Path(paths.embedding_shard).name,
+            "embedding_shard": str(paths.embedding_shard),
             "skip_fp16_control": bool(skip_fp16),
             "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
-            "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
-            "scale_policy": (
-                "research_int4_side per-output-channel absmax on INT4 path; "
-                "GOZ1 v3 pack-only on ternary cite path; abort on legacy_oracle"
-                if v3
-                else "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle"
-            ),
-            "arm": arm,
-            "metrics_filename": "metrics.json",
-            # metrics_note filled after chain when comparability is known
-            "metrics_note": None,
+            "ternary_policy": "experts only; attention/routers/norms high precision",
+            "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
         }
+    issue, agent, model, design = _remedy_issue_meta(v2=v2, v3=v3)
     return {
-        "issue": "GH #68 / Linear RM-255",
-        "agent": AGENT_LINE,
-        "model": "grok-4.5",
-        "design": "Grok Build super-research design (sequential chain, pack-only v3)",
+        "issue": issue,
+        "agent": agent,
+        "model": model,
+        "design": design,
         "baseline_64": BASELINE_64,
+        "baseline_72": BASELINE_72,
+        "baseline_74": BASELINE_74 if (v2 or v3) else None,
+        "baseline_76_denser": BASELINE_76_DENSER if v3 else None,
+        "baseline_76_ceiling": BASELINE_76_CEILING if v3 else None,
         "implementation": implementation_commit(),
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
         "numpy": np.__version__,
         "python": platform.python_version(),
-        "embedding_shard": str(paths.embedding_shard),
+        "embedding_shard": Path(paths.embedding_shard).name,
         "skip_fp16_control": bool(skip_fp16),
         "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
-        "ternary_policy": "experts only; attention/routers/norms high precision",
-        "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
+        "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
+        "scale_policy": _remedy_scale_policy(v3=v3),
+        "arm": arm,
+        "metrics_filename": "metrics.json",
+        # metrics_note filled after chain when comparability is known
+        "metrics_note": None,
     }
 
 

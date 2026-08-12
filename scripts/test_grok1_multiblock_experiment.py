@@ -36,11 +36,15 @@ from grok1_multiblock_lib import (  # noqa: E402
     V2_CEILING_ARM,
     V2_PRIMARY_ARM,
     V2_STACKED_ARM,
+    V3_PRIMARY_ARM,
+    V3_SECONDARY_ARM,
     _applied_expert_scale_sources,
     _expert_primary,
     assemble_remedy_v2_comparison,
+    assemble_remedy_v3_comparison,
     channel_alpha_dequant,
     decide_remedy_v2,
+    decide_remedy_v3,
     settings_mismatch_reason,
 )
 
@@ -1017,6 +1021,162 @@ class RemedyV2DecisionTests(unittest.TestCase):
             payload = json.loads((out / "metrics.json").read_text())
             self.assertNotIn("decision", payload)
             self.assertFalse((out / "results.md").exists())
+
+
+_V3_FIXTURE_SCHEDULES = {
+    V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
+    V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
+}
+
+
+def _v3_fixture_source(block: int, hp_blocks: list[int]) -> str:
+    return "fp16_control" if block in hp_blocks else "research_int4_side"
+
+
+def _v3_chain(label: str, quality: str) -> dict:
+    hp_blocks, int4_blocks, mode = _V3_FIXTURE_SCHEDULES[label]
+    metrics = _V2_FIXTURE_METRICS[quality]
+    rows = []
+    provenance = []
+    for index, block in enumerate(BASELINE_72["blocks"]):
+        rows.append(
+            _expert_row(
+                block,
+                {
+                    "cos": metrics["cos"][index],
+                    "resid_in_drift": metrics["drift"][index],
+                    "top1": metrics["top1"][index],
+                    "top2": metrics["top2"][index],
+                },
+            )
+        )
+        provenance.append(
+            {
+                "block": block,
+                "pack_sha256": BASELINE_72["pack_sha256"][block],
+                "container_versions": [3],
+                "pack_scale_sources": {"expert": "pack_v2"},
+                "scale_sources": {"expert": _v3_fixture_source(block, hp_blocks)},
+            }
+        )
+    return {
+        "blocks": list(BASELINE_72["blocks"]),
+        "tokens": BASELINE_72["tokens"],
+        "token_seed": BASELINE_72["token_seed"],
+        "top_k": BASELINE_72["top_k"],
+        "per_block": rows,
+        "pack_provenance": provenance,
+        "skip_fp16_control": False,
+        "expert_mode": mode,
+        "arm_label": label,
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": [],
+        "end_of_chain": {
+            "expert_only_chain_exit": {
+                "residual_drift_relative_norm": metrics["exit"],
+            }
+        },
+    }
+
+
+def _v3_secondary(quality: str) -> dict:
+    return {
+        "provenance": {
+            "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            "evidence_role": "secondary; no independent decision",
+        },
+        "chain": _v3_chain(V3_SECONDARY_ARM, quality),
+    }
+
+
+def _v3_comparison(primary: str, secondary: str) -> dict:
+    return assemble_remedy_v3_comparison(
+        _v3_chain(V3_PRIMARY_ARM, primary),
+        [_v3_secondary(secondary)],
+        primary_provenance={
+            "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            "evidence_role": "primary; sole canonical #80 decision",
+        },
+    )
+
+
+class RemedyV3DecisionTests(unittest.TestCase):
+    def test_option_2_when_int4_helps_but_is_not_viable(self) -> None:
+        # Beat #76 denser (top1 0.616 / cos 0.914 / exit 0.437) without full viability.
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][3]["expert_only"]["router_top1_agreement"] = 0.70
+        primary["per_block"][3]["expert_only"]["block_output_cosine"] = 0.92
+        primary["end_of_chain"]["expert_only_chain_exit"][
+            "residual_drift_relative_norm"
+        ] = 0.30
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("failed")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+                "evidence_role": "primary; sole canonical #80 decision",
+            },
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v3(comparison)
+        self.assertEqual(decision["decision"], 2)
+        self.assertEqual(decision["best_remedy_arm"], V3_PRIMARY_ARM)
+
+    def test_option_4_when_secondary_missing(self) -> None:
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_fp16_control_skipped(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["skip_fp16_control"] = True
+        for row in primary["per_block"]:
+            row.pop("fp16_control", None)
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("fp16_control" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_ternary_blocks_mislabel_int4(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["ternary_blocks"] = list(BASELINE_72["blocks"])
+        primary["int4_blocks"] = []
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("int4_blocks" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_rejects_wrong_applied_scale_source(self) -> None:
+        secondary = _v3_secondary("help")
+        secondary["chain"]["pack_provenance"][0]["scale_sources"]["expert"] = "pack_v2"
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [secondary],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(
+            any("research_int4_side" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
 
 
 class RemedyV2ReportTests(unittest.TestCase):
