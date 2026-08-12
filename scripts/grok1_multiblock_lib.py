@@ -1758,17 +1758,25 @@ def _explicit_topk_raw(expert: dict) -> object:
     return None
 
 
+def _in_metric_domain(raw: object, lo: float, hi: float | None) -> bool:
+    """True when raw is a real number inside [lo, hi] (hi=None → unbounded above)."""
+    val = _safe_float(raw)
+    if val is None or val < lo:
+        return False
+    return hi is None or val <= hi
+
+
 def _v3_metric_domain_error(row: dict, label: str) -> str | None:
     """Reject non-finite or out-of-domain metrics that feed viable / ranking."""
     expert = row.get("expert_only")
     if not isinstance(expert, dict):
         return None
     residual = expert.get("residual_stream_in")
-    residual = residual if isinstance(residual, dict) else {}
+    if not isinstance(residual, dict):
+        residual = {}
     topk = _explicit_topk_raw(expert)
     if topk is None:
         return f"{label}:block_{row.get('block')}:missing_top2_agreement"
-    # (raw, lo, hi) — lo/hi inclusive; hi=None means only lower bound.
     # Cosine upper bound allows tiny float noise above 1.0 (seen in-repo as 1+2e-16).
     cos_hi = 1.0 + 1e-9
     checks = (
@@ -1780,9 +1788,7 @@ def _v3_metric_domain_error(row: dict, label: str) -> str | None:
         (expert.get("block_output_drift_relative_norm"), 0.0, None),
     )
     for raw, lo, hi in checks:
-        # Require real numbers (not numeric strings) before domain checks.
-        val = _safe_float(raw)
-        if val is None or val < lo or (hi is not None and val > hi):
+        if not _in_metric_domain(raw, lo, hi):
             return f"{label}:block_{row.get('block')}:metric_out_of_domain"
     return None
 
