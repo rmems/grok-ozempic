@@ -636,8 +636,13 @@ def _safe_float(raw: object) -> float | None:
 
 
 def _safe_int(raw: object, default: int | None = None) -> int | None:
-    """Parse a real int (not bool), or default/None on failure."""
-    if isinstance(raw, bool):
+    """Parse a real int (not bool), or default/None on failure.
+
+    ``None`` and non-numeric values return ``default`` (default ``None``) so
+    callers can reject missing/malformed fields instead of inventing baseline
+    look-alikes (e.g. top_k→2).
+    """
+    if raw is None or isinstance(raw, bool):
         return default
     if isinstance(raw, int):
         return raw
@@ -969,9 +974,10 @@ def _chain_blocks(chain: dict) -> list[int]:
 def _schedule_match_72(chain: dict) -> bool:
     """Blocks/tokens/seed/top_k match the #72 decision run."""
     b72 = BASELINE_72
-    tokens = _safe_int(chain.get("tokens"), 0)
-    seed = _safe_int(chain.get("token_seed"), -1)
-    top_k = _safe_int(chain.get("top_k"), 2)
+    # No baseline-shaped defaults: missing/malformed fields must not match #72.
+    tokens = _safe_int(chain.get("tokens"))
+    seed = _safe_int(chain.get("token_seed"))
+    top_k = _safe_int(chain.get("top_k"))
     if tokens is None or seed is None or top_k is None:
         return False
     try:
