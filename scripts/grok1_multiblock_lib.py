@@ -2,6 +2,7 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Iterable
 from pathlib import Path
@@ -287,11 +288,11 @@ def _require_finite_array(arr: np.ndarray, what: str) -> None:
         raise ForwardError(f"int4 dequant: non-finite {what}")
 
 
-def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-output-channel absmax INT4 quantize-dequant (research side-table).
+def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-channel absmax INT4 codes (int8) + scale (f32).
 
-    ``q ∈ [-INT4_QMAX, INT4_QMAX]``; scale along all axes except the last.
-    Returns ``(dequant_f32, scale_f32)`` with scale shape ``weights.shape[-1:]``.
+    ``q ∈ [-INT4_QMAX, INT4_QMAX]`` stored as int8; scale along all axes except
+    the last. Returns ``(q_int8, scale_f32)`` with scale shape ``weights.shape[-1:]``.
     """
     w = np.asarray(weights, dtype=np.float32)
     if w.size == 0:
@@ -301,51 +302,113 @@ def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         amax = np.asarray(np.max(np.abs(w)), dtype=np.float32)
         _require_finite_array(amax, "absmax")
         scale = np.float32(max(float(amax) / float(INT4_QMAX), 1e-12))
-        q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
-        deq = (q * scale).astype(np.float32)
-        _require_finite_array(deq, "dequantized weights")
-        return deq, np.asarray([scale], dtype=np.float32)
+        q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX).astype(np.int8)
+        return q, np.asarray([scale], dtype=np.float32)
     axes = tuple(range(w.ndim - 1))
     amax = np.max(np.abs(w), axis=axes)
     _require_finite_array(amax, "absmax")
     scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
-    q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
-    deq = (q * scale).astype(np.float32)
-    _require_finite_array(deq, "dequantized weights")
+    q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX).astype(np.int8)
     _require_finite_array(scale, "scales")
-    return deq, scale
+    return q, scale
+
+
+def int4_dequant_from_codes(q: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """Dequant INT4 codes × scale (research side-table load path)."""
+    deq = (np.asarray(q, dtype=np.float32) * np.asarray(scale, dtype=np.float32)).astype(
+        np.float32
+    )
+    _require_finite_array(deq, "dequantized weights")
+    return deq
+
+
+def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Quantize then dequant (convenience); prefer side-table codes for runs."""
+    q, scale = int4_absmax_quantize(weights)
+    return int4_dequant_from_codes(q, scale), scale
 
 
 class Int4SideExperts:
-    """Expert primary: f32 reference → per-channel INT4 side-table dequant.
+    """Expert primary from a **persisted** INT4 research side-table.
 
     Scale provenance tag is ``research_int4_side`` — never claim pack_v2.
-    Side-table is formed online from the same npy used as the FP reference so
-    the run is deterministic and pack-honest (no silent oracle from GOZ1).
+    Layout under ``side_root/block_{BBB}/``: ``{tensor}__q_int8.npy``,
+    ``{tensor}__scale_f32.npy``, ``sidecar.json``. Missing tables are built
+    once from the FP32 reference and written before any forward access.
     """
 
     label = "research_int4_side"
 
-    def __init__(self, reference: NpyWeights) -> None:
+    def __init__(
+        self,
+        reference: NpyWeights,
+        *,
+        side_root: Path,
+        block: int,
+    ) -> None:
         self._ref = reference
         self.roles = {r: reference.roles[r] for r in EXPERT_ROLES if r in reference.roles}
         missing = sorted(EXPERT_ROLES - set(self.roles))
         if missing:
             raise ForwardError(f"int4 primary lacks expert roles {missing}")
         self.scale_sources = {self.roles[r]: "research_int4_side" for r in self.roles}
+        self._block = int(block)
+        self._side_dir = Path(side_root).expanduser() / f"block_{self._block:03d}"
+        self._side_dir.mkdir(parents=True, exist_ok=True)
+        self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        sidecar: dict[str, dict] = {
+            "block": self._block,
+            "codec": "int4_absmax_per_output_channel",
+            "qmax": INT4_QMAX,
+            "tensors": {},
+        }
+        for role, name in self.roles.items():
+            self._cache[role] = self._load_or_build(name)
+            q, scale = self._cache[role]
+            sidecar["tensors"][name] = {
+                "q_file": f"{name.replace('.', '__')}__q_int8.npy",
+                "scale_file": f"{name.replace('.', '__')}__scale_f32.npy",
+                "shape": list(q.shape),
+                "scale_shape": list(scale.shape),
+            }
+        (self._side_dir / "sidecar.json").write_text(
+            json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _paths(self, name: str) -> tuple[Path, Path]:
+        stem = name.replace(".", "__")
+        return (
+            self._side_dir / f"{stem}__q_int8.npy",
+            self._side_dir / f"{stem}__scale_f32.npy",
+        )
+
+    def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
+        q_path, s_path = self._paths(name)
+        if q_path.is_file() and s_path.is_file():
+            q = np.load(q_path)
+            scale = np.load(s_path)
+            _require_finite_array(scale.astype(np.float32), "loaded scales")
+            return q, scale.astype(np.float32)
+        # Find role for this structural name.
+        role = next(r for r, n in self.roles.items() if n == name)
+        w = np.asarray(self._ref.vector(role), dtype=np.float32)
+        q, scale = int4_absmax_quantize(w)
+        np.save(q_path, q)
+        np.save(s_path, scale)
+        return q, scale
 
     def vector(self, role: str) -> np.ndarray:
-        w = np.asarray(self._ref.vector(role), dtype=np.float32)
-        deq, _ = int4_absmax_dequant(w)
-        return deq
+        q, scale = self._cache[role]
+        return int4_dequant_from_codes(q, scale)
 
     def matrix(self, role: str) -> np.ndarray:
         return self.vector(role)
 
     def expert(self, role: str, index: int) -> np.ndarray:
-        w = np.asarray(self._ref.expert(role, index), dtype=np.float32)
-        deq, _ = int4_absmax_dequant(w)
-        return deq
+        q, scale = self._cache[role]
+        if q.ndim < 1 or not 0 <= index < int(q.shape[0]):
+            raise ForwardError(f"int4 side-table {role}: expert {index} out of range")
+        return int4_dequant_from_codes(q[index], scale)
 
 
 class ChannelAlphaExperts:
@@ -405,6 +468,7 @@ def _expert_primary(
     hp_blocks: set[int],
     hp_period: int = 2,
     hp_label: str | None = None,
+    int4_side_root: Path | None = None,
 ) -> tuple[object, str]:
     """Return (primary WeightSource for experts, arm label)."""
     if mode == "ternary":
@@ -447,7 +511,15 @@ def _expert_primary(
                 )
             schedule = hp_label or f"n{int(hp_period)}"
             return control, f"expert_int4_{schedule}"
-        return Int4SideExperts(reference), "research_int4_side"
+        if int4_side_root is None:
+            raise ForwardError(
+                "int4 arm requires int4_side_root (persisted research side-table); "
+                "pass --int4-side-root or use the default under --out"
+            )
+        return (
+            Int4SideExperts(reference, side_root=int4_side_root, block=block),
+            "research_int4_side",
+        )
     raise ForwardError(f"unknown expert mode {mode!r}")
 
 
@@ -483,6 +555,7 @@ def load_block_sources(
     hp_blocks: set[int] | None = None,
     hp_period: int = 2,
     hp_label: str | None = None,
+    int4_side_root: Path | None = None,
 ) -> tuple[NpyWeights, PackWeights, MixedWeights, F16Weights | None]:
     """Load reference, pack, expert mix (arm-aware), optional fp16 control."""
     expect = f"block_{block:03d}"
@@ -505,6 +578,7 @@ def load_block_sources(
         hp_blocks=hp,
         hp_period=hp_period,
         hp_label=hp_label,
+        int4_side_root=int4_side_root,
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
     mixed.applied_scale_sources = _applied_expert_scale_sources(  # type: ignore[attr-defined]
@@ -641,7 +715,10 @@ def _safe_float(raw: object) -> float | None:
     # bool is a subclass of int; reject JSON true/false and numeric strings.
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
-    val = float(raw)
+    try:
+        val = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
     if not math.isfinite(val):
         return None
     return val
@@ -1214,18 +1291,26 @@ def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
     if sorted(blocks) != expected_blocks:
         return [f"{label}:per_block_blocks={sorted(blocks)} expected={expected_blocks}"]
     for row in rows:
-        try:
-            expert = row.get("expert_only")
-            if not isinstance(expert, dict):
-                return [f"{label}:block_{row.get('block')}:missing_expert_only"]
-            _ = float(expert["block_output_cosine"])
-            _ = float(expert["residual_stream_in"]["residual_in_drift_relative_norm"])
-            _ = float(expert["router_top1_agreement"])
-            _ = float(expert.get("router_topk_set_agreement", expert.get("router_top2_set_agreement", expert["router_top1_agreement"])))
-            _ = float(expert["expert_load_js_bits"])
-            _ = float(expert["block_output_drift_relative_norm"])
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            return [f"{label}:block_{row.get('block')}:malformed_expert_only:{exc}"]
+        expert = row.get("expert_only")
+        if not isinstance(expert, dict):
+            return [f"{label}:block_{row.get('block')}:missing_expert_only"]
+        residual = expert.get("residual_stream_in")
+        residual = residual if isinstance(residual, dict) else {}
+        topk = expert.get(
+            "router_topk_set_agreement",
+            expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
+        )
+        probes = (
+            expert.get("block_output_cosine"),
+            residual.get("residual_in_drift_relative_norm"),
+            expert.get("router_top1_agreement"),
+            topk,
+            expert.get("expert_load_js_bits"),
+            expert.get("block_output_drift_relative_norm"),
+        )
+        for raw in probes:
+            if _safe_float(raw) is None:
+                return [f"{label}:block_{row.get('block')}:malformed_expert_only"]
     return []
 
 
@@ -1655,6 +1740,18 @@ def _version_set(versions: object) -> set | None:
         return None
 
 
+def _canonical_container_versions(raw: object) -> list[int] | None:
+    """Exact list of non-bool ints (no float 3.0, no set-equality tricks)."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[int] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, int):
+            return None
+        out.append(item)
+    return out
+
+
 _STRUCTURAL_EXPERT_SUFFIXES = frozenset({"gate", "down", "up"})
 
 
@@ -1690,7 +1787,7 @@ def _v3_pack_row_shape(
     block = _canonical_block_id(row.get("block"))
     if block is None:
         return [f"{label}:{row_tag}:invalid_block_id"]
-    versions = _version_set(row.get("container_versions"))
+    versions = _canonical_container_versions(row.get("container_versions"))
     if versions is None:
         return [f"{label}:block_{block}:container_versions_not_list"]
     pack_map = row.get("pack_scale_sources")
@@ -1731,7 +1828,8 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
         return shaped
     block, versions, pack_map, scale_map = shaped
     errors: list[str] = []
-    if versions != {3}:
+    # Exact list [3] — not set equality (rejects [3.0] and [3, 3]).
+    if versions != [3]:
         errors.append(f"{label}:block_{block}:container_not_v3")
     pack_keys = set(pack_map.keys())
     scale_keys = set(scale_map.keys())

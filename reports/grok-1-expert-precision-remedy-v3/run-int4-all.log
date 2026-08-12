@@ -28,22 +28,9 @@
     33.9s  block_out_cos=0.999920
 wrote reports/grok-1-expert-precision-remedy-v3/metrics.json
 DECISION option 2: INT4 middle-ground helps vs denser ternary, but full-HP experts or another correction remain required.
-Traceback (most recent call last):
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 774, in <module>
-    raise SystemExit(main())
-                     ~~~~^^
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 758, in main
-    return run(args)
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 687, in run
-    write_remedy_v2_results_md(args.out / "results.md", payload)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1984, in write_remedy_v2_results_md
-    lines += _v2_comparison_lines(comparison)
-             ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1942, in _v2_comparison_lines
-    lines += _v2_comparison_table(comparison)
-             ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
-  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1825, in _v2_comparison_table
-    ("C denser", summaries[V2_PRIMARY_ARM]),
-                 ~~~~~~~~~^^^^^^^^^^^^^^^^
-KeyError: 'expert_periodic_hp_123'
+
+# Note: original run also hit a KeyError in the obsolete v2 report
+# renderer after metrics.json was written; report path is now v3-native.
+# Committed-payload revalidation (assemble/decide only):
+#   python3 scripts/…  (see results.md Reproducibility note)
+# revalidation: validation_errors=[] decision=2

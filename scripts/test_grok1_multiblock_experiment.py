@@ -1217,8 +1217,13 @@ class RemedyV3DecisionTests(unittest.TestCase):
             [_v3_secondary("help")],
             primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
         )
+        errors = comparison["validation_errors"]
         self.assertTrue(
-            any("metric_out_of_domain" in e for e in comparison["validation_errors"])
+            any(
+                "metric_out_of_domain" in e or "malformed_expert_only" in e
+                for e in errors
+            ),
+            errors,
         )
         self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
 

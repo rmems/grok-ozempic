@@ -137,6 +137,7 @@ class _BlockRunCfg:
     hp_blocks: frozenset[int]
     hp_period: int
     hp_label: str
+    int4_side_root: Path | None
 
 
 def _run_block(b, paths, streams, cfg: _BlockRunCfg):
@@ -153,6 +154,7 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         hp_blocks=set(cfg.hp_blocks),
         hp_period=cfg.hp_period,
         hp_label=cfg.hp_label,
+        int4_side_root=cfg.int4_side_root,
     )
     stream_pilot = residual_stream_metrics(h_ref, h_pilot)
     stream_fp16 = residual_stream_metrics(h_ref, h_fp16) if h_fp16 is not None else None
@@ -373,6 +375,7 @@ def run_chain(
     expert_mode="ternary",
     hp_period=2,
     hp_blocks: set[int] | None = None,
+    int4_side_root: Path | None = None,
 ) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
@@ -385,6 +388,7 @@ def run_chain(
         hp_blocks=frozenset(resolved_hp),
         hp_period=int(hp_period),
         hp_label=_schedule_label(resolved_hp, hp_period, explicit_hp),
+        int4_side_root=int4_side_root,
     )
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)
@@ -462,6 +466,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         type=Path,
         help="Secondary evidence metrics.json; repeat for stacked and ceiling arms",
+    )
+    p.add_argument(
+        "--int4-side-root",
+        type=Path,
+        default=None,
+        help=(
+            "Root for persisted INT4 research side-tables (block_BBB/ q+scale npy). "
+            "Default for --arm int4: <out>/int4-side/"
+        ),
     )
     return p
 
@@ -668,6 +681,15 @@ def run(args: argparse.Namespace) -> int:
     )
     args.out = args.out.expanduser()
     expert_mode = _ARM_TO_MODE[args.arm]
+    int4_side_root = None
+    if expert_mode == "int4":
+        raw_side = getattr(args, "int4_side_root", None)
+        int4_side_root = (
+            raw_side.expanduser()
+            if raw_side is not None
+            else (args.out / "int4-side")
+        )
+        int4_side_root.mkdir(parents=True, exist_ok=True)
     chain = run_chain(
         blocks,
         paths,
@@ -678,6 +700,7 @@ def run(args: argparse.Namespace) -> int:
         expert_mode=expert_mode,
         hp_period=args.hp_period,
         hp_blocks=args.hp_blocks,
+        int4_side_root=int4_side_root,
     )
     is_v2 = _is_v2_run(args)
     is_v3 = _is_v3_run(args)

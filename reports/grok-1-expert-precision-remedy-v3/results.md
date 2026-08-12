@@ -73,11 +73,14 @@ Values from `int4-plus-hp123/metrics.json`.
 ## Reproducibility note
 
 Both `metrics.json` artifacts record `implementation.dirty: true` and commit
-`7cf99b2` (pre-INT4 harness landing). Numerics were measured on a dirty tree;
-the harness + validation fixes in this PR post-date that SHA. A clean-tree
-re-run of the multi-GiB chain is a follow-up.
+`7cf99b2` (pre-INT4 harness landing). Numerics were measured on a dirty tree
+with **online** INT4 quantize-dequant. This PR now **persists** INT4 codes +
+scales under `--int4-side-root` / `<out>/int4-side/block_BBB/` (design-locked
+research side-table) and loads them for dequant. A clean-tree multi-GiB re-run
+that rewrites metrics with the new side-table paths is a follow-up; payload-only
+revalidation cannot reproduce numerics from the dirty SHA.
 
-**Committed-payload revalidation** (no weight forward — decision only):
+**Committed-payload revalidation** (decision assembly only — not a weight re-run):
 
 ```bash
 python3 - <<'PY'
