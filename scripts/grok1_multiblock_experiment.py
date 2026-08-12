@@ -521,9 +521,10 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
         )
     if _is_v3_primary(args) and evidence_only:
         raise ForwardError("#80 primary cannot be --evidence-only")
-    if _is_v3_primary(args) and bool(getattr(args, "skip_fp16_control", False)):
+    # Primary and locked P1 secondary both need FP16 control (HP blocks use it).
+    if args.arm == "int4" and bool(getattr(args, "skip_fp16_control", False)):
         raise ForwardError(
-            "#80 primary decision runs require FP16 control (do not pass --skip-fp16-control)"
+            "#80 int4 runs require FP16 control (do not pass --skip-fp16-control)"
         )
 
 

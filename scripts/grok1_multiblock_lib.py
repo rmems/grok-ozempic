@@ -622,7 +622,10 @@ def _chain_exit_metrics(chain: dict) -> dict | None:
 
 
 def _safe_float(raw: object) -> float | None:
-    """Parse a finite float, or None if missing/non-numeric/non-finite."""
+    """Parse a finite float, or None if missing/non-numeric/non-finite/bool."""
+    # bool is a subclass of int; reject JSON true/false as drift metrics.
+    if isinstance(raw, bool) or raw is None:
+        return None
     try:
         val = float(raw)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -632,13 +635,28 @@ def _safe_float(raw: object) -> float | None:
     return val
 
 
+def _safe_int(raw: object, default: int | None = None) -> int | None:
+    """Parse a real int (not bool), or default/None on failure."""
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _exit_drift(chain: dict, out_drift: list[float]) -> float | None:
     """Drift after the final block (includes last hop). Prefer chain_exit keys."""
     exit_m = _chain_exit_metrics(chain)
     if exit_m is not None:
         for key in ("residual_drift_relative_norm", "residual_in_drift_relative_norm"):
-            if key in exit_m:
-                return _safe_float(exit_m[key])
+            # Skip null/missing key values so the legacy key can still win.
+            if exit_m.get(key) is None:
+                continue
+            return _safe_float(exit_m[key])
+        return None
     return out_drift[-1] if out_drift else None
 
 
@@ -943,12 +961,16 @@ def _chain_blocks(chain: dict) -> list[int]:
 def _schedule_match_72(chain: dict) -> bool:
     """Blocks/tokens/seed/top_k match the #72 decision run."""
     b72 = BASELINE_72
-    observed = (
-        _chain_blocks(chain),
-        int(chain.get("tokens") or 0),
-        int(chain.get("token_seed") or -1),
-        int(chain.get("top_k") or 2),
-    )
+    tokens = _safe_int(chain.get("tokens"), 0)
+    seed = _safe_int(chain.get("token_seed"), -1)
+    top_k = _safe_int(chain.get("top_k"), 2)
+    if tokens is None or seed is None or top_k is None:
+        return False
+    try:
+        blocks = _chain_blocks(chain)
+    except (TypeError, KeyError, AttributeError):
+        return False
+    observed = (blocks, tokens, seed, top_k)
     expected = (
         list(b72["blocks"]),
         int(b72["tokens"]),

@@ -48,23 +48,35 @@ Rationale:
 
 ## Per-block — P0 `expert_int4` (INT4 all blocks)
 
+Values from `metrics.json` (`router_top2_set_agreement` / expert_only).
+
 | block | block_out cos | resid_in drift | top-1 | top-2 |
 |------:|--------------:|---------------:|------:|------:|
 | 0 | 0.998615 | 0.000000 | 1.000000 | 1.000000 |
-| 1 | 0.997147 | 0.052881 | 0.981934 | 0.955078 |
-| 2 | 0.989049 | 0.075692 | 0.929688 | 0.870117 |
-| 3 | 0.978044 | 0.147663 | 0.850586 | 0.736328 |
+| 1 | 0.997147 | 0.052881 | 0.981934 | 0.933594 |
+| 2 | 0.989049 | 0.075692 | 0.929688 | 0.885742 |
+| 3 | 0.978044 | 0.147663 | 0.850586 | 0.729492 |
 
 FP16 control min block_out cos ≥ 0.9999 (clean).
 
 ## Per-block — P1 `expert_int4_123` (evidence-only secondary)
 
+Values from `int4-plus-hp123/metrics.json`.
+
 | block | block_out cos | top-1 | top-2 | pilot label |
 |------:|--------------:|------:|------:|-------------|
 | 0 | 0.998615 | 1.000000 | 1.000000 | research_int4_side |
-| 1 | 0.998473 | 0.981934 | 0.955078 | expert_int4_123 (FP16 experts) |
-| 2 | 0.995620 | 0.953125 | 0.899902 | expert_int4_123 (FP16 experts) |
-| 3 | 0.991523 | 0.925293 | 0.858398 | expert_int4_123 (FP16 experts) |
+| 1 | 0.998473 | 0.981934 | 0.933594 | expert_int4_123 (FP16 experts) |
+| 2 | 0.995620 | 0.953125 | 0.919922 | expert_int4_123 (FP16 experts) |
+| 3 | 0.991523 | 0.925293 | 0.861328 | expert_int4_123 (FP16 experts) |
+
+## Reproducibility note
+
+Both `metrics.json` artifacts record `implementation.dirty: true` and commit
+`7cf99b2` (pre-INT4 harness landing). Numerics were measured on a dirty tree;
+the harness + validation fixes in this PR post-date that SHA. A clean-tree
+re-run of the multi-GiB chain is a follow-up — Option 2 is unchanged under
+revalidation of the committed payloads.
 
 ## Interpretation
 
