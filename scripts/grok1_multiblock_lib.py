@@ -282,6 +282,11 @@ def channel_alpha_dequant(weights: np.ndarray, trits: np.ndarray) -> np.ndarray:
     return trits.astype(np.float32) * alpha.astype(np.float32)
 
 
+def _require_finite_array(arr: np.ndarray, what: str) -> None:
+    if not np.isfinite(arr).all():
+        raise ForwardError(f"int4 dequant: non-finite {what}")
+
+
 def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-output-channel absmax INT4 quantize-dequant (research side-table).
 
@@ -291,27 +296,23 @@ def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     w = np.asarray(weights, dtype=np.float32)
     if w.size == 0:
         raise ForwardError("int4 dequant: empty weight tensor")
-    if not np.isfinite(w).all():
-        raise ForwardError("int4 dequant: non-finite source weights (NaN/Inf)")
+    _require_finite_array(w, "source weights (NaN/Inf)")
     if w.ndim == 1:
-        amax = float(np.max(np.abs(w)))
-        if not math.isfinite(amax):
-            raise ForwardError("int4 dequant: non-finite absmax")
-        scale = np.float32(max(amax / float(INT4_QMAX), 1e-12))
+        amax = np.asarray(np.max(np.abs(w)), dtype=np.float32)
+        _require_finite_array(amax, "absmax")
+        scale = np.float32(max(float(amax) / float(INT4_QMAX), 1e-12))
         q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
         deq = (q * scale).astype(np.float32)
-        if not np.isfinite(deq).all():
-            raise ForwardError("int4 dequant: non-finite dequantized weights")
+        _require_finite_array(deq, "dequantized weights")
         return deq, np.asarray([scale], dtype=np.float32)
     axes = tuple(range(w.ndim - 1))
     amax = np.max(np.abs(w), axis=axes)
-    if not np.isfinite(amax).all():
-        raise ForwardError("int4 dequant: non-finite absmax")
+    _require_finite_array(amax, "absmax")
     scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
     q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
     deq = (q * scale).astype(np.float32)
-    if not np.isfinite(deq).all() or not np.isfinite(scale).all():
-        raise ForwardError("int4 dequant: non-finite dequantized weights or scales")
+    _require_finite_array(deq, "dequantized weights")
+    _require_finite_array(scale, "scales")
     return deq, scale
 
 
