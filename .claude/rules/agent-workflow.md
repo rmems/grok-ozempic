@@ -15,11 +15,12 @@
 
 ### Issue relationships (what next after close)
 
-- **Beads owns the readiness graph** (`bd dep` / `bd link`). GitHub sub-issues under epics (e.g. #48) mirror the same parent for humans.
+- **Beads owns the readiness graph when `bd` is available** (`bd dep` / `bd link`). GitHub sub-issues under epics (e.g. #48) mirror the same parent for humans.
 - Types: `blocks` (hard sequence — `bd dep add NEW --blocked-by DONE`), `parent-child` (epic ownership), `relates-to` / `relate` (soft), `supersedes` (replacement).
-- **On close:** run `bd dep list <id>` and `bd ready`. Start the highest-priority **unblocked** successor. If the close creates follow-on work, file it and wire `bd dep add follow-on --blocked-by closed-id` (and GH parent/sub-issue when under an epic) in the **same session**.
+- **On close (hosts with `bd`):** run `bd dep list <id>` and `bd ready`. Start the highest-priority **unblocked** successor. If the close creates follow-on work, file it and wire `bd dep add follow-on --blocked-by closed-id` (and GH parent/sub-issue when under an epic) in the **same session**.
+- **Fallback (hosts without `bd` / Dolt — e.g. Claude Code cloud):** use **GitHub issues + Linear `RM-*`** as the readiness surface. Read issue bodies / sub-issues / milestone board for “what next”; create follow-ons on GitHub (and let Linear sync). **Do not** invent a markdown dependency board and **do not** hand-edit `.beads/issues.jsonl`.
 - `bd ready` ignores closed blockers; historical `blocks` edges remain for `bd dep tree` context.
-- Do **not** invent markdown dependency boards; keep edges in beads + GH/Linear.
+- Do **not** invent markdown dependency boards; keep edges in beads + GH/Linear when those tools are present.
 
 ## Quality gates before done
 
