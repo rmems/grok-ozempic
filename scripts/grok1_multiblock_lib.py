@@ -291,16 +291,28 @@ def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     w = np.asarray(weights, dtype=np.float32)
     if w.size == 0:
         raise ForwardError("int4 dequant: empty weight tensor")
+    if not np.isfinite(w).all():
+        raise ForwardError("int4 dequant: non-finite source weights (NaN/Inf)")
     if w.ndim == 1:
         amax = float(np.max(np.abs(w)))
+        if not math.isfinite(amax):
+            raise ForwardError("int4 dequant: non-finite absmax")
         scale = np.float32(max(amax / float(INT4_QMAX), 1e-12))
         q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
-        return (q * scale).astype(np.float32), np.asarray([scale], dtype=np.float32)
+        deq = (q * scale).astype(np.float32)
+        if not np.isfinite(deq).all():
+            raise ForwardError("int4 dequant: non-finite dequantized weights")
+        return deq, np.asarray([scale], dtype=np.float32)
     axes = tuple(range(w.ndim - 1))
     amax = np.max(np.abs(w), axis=axes)
+    if not np.isfinite(amax).all():
+        raise ForwardError("int4 dequant: non-finite absmax")
     scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
     q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
-    return (q * scale).astype(np.float32), scale
+    deq = (q * scale).astype(np.float32)
+    if not np.isfinite(deq).all() or not np.isfinite(scale).all():
+        raise ForwardError("int4 dequant: non-finite dequantized weights or scales")
+    return deq, scale
 
 
 class Int4SideExperts:
