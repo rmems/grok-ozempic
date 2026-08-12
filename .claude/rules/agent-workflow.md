@@ -15,9 +15,17 @@
 
 ### Issue relationships (what next after close)
 
-- **Beads owns the readiness graph when `bd` is available** (`bd dep` / `bd link`). GitHub sub-issues under epics (e.g. #48) mirror the same parent for humans.
+- **GitHub/Linear remain canonical** for issue creation, status, close state, and handoff.
+  When `bd` is available, use Beads as the machine-readable local readiness graph
+  (`bd dep` / `bd link`). GitHub sub-issues under epics (e.g. #48) mirror the same
+  parent for humans. `.beads/issues.jsonl` is only an offline cache — never invent
+  follow-ons only in beads.
 - Types: `blocks` (hard sequence — `bd dep add NEW --blocked-by DONE`), `parent-child` (epic ownership), `relates-to` / `relate` (soft), `supersedes` (replacement).
-- **On close (hosts with `bd`):** run `bd dep list <id>` and `bd ready`. Start the highest-priority **unblocked** successor. If the close creates follow-on work, file it and wire `bd dep add follow-on --blocked-by closed-id` (and GH parent/sub-issue when under an epic) in the **same session**.
+- **On close (hosts with `bd`):** ensure any follow-on issue exists in GitHub and is
+  synced to Linear, then run `bd dep list <id>` and `bd ready`. Start the highest-priority
+  **unblocked** successor. Wire the Beads edge for the **canonical** issue with
+  `bd dep add follow-on --blocked-by closed-id` (and GH parent/sub-issue when under an
+  epic) in the **same session** — never add a `bd dep` edge before the GH issue exists.
 - **Fallback (hosts without `bd` / Dolt — e.g. Claude Code cloud):** use **GitHub issues + Linear `RM-*`** as the readiness surface. Read issue bodies / sub-issues / milestone board for “what next”; create follow-ons on GitHub (and let Linear sync). **Do not** invent a markdown dependency board and **do not** hand-edit `.beads/issues.jsonl`.
 - `bd ready` ignores closed blockers; historical `blocks` edges remain for `bd dep tree` context.
 - Do **not** invent markdown dependency boards; keep edges in beads + GH/Linear when those tools are present.
