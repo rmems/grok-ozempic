@@ -733,23 +733,60 @@ def run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _selected_option_in_report(body: str) -> int | None:
+    """Parse the *selected* option from a report (not the Why-not list).
+
+    Authored: ``**Option 2 — …`` under ## Decision.
+    Skeleton: ``**Decision:** Option 2 — …``.
+    Why-not lines use ``**Option N:**`` (colon) and must not match.
+    """
+    for raw in body.splitlines():
+        line = raw.strip()
+        if line.startswith("**Decision:**") and "Option" in line:
+            marker = "Option"
+            idx = line.find(marker)
+            tail = line[idx + len(marker) :].strip()
+            digits = ""
+            for ch in tail:
+                if ch.isdigit():
+                    digits += ch
+                elif digits:
+                    break
+            if digits:
+                return int(digits)
+        if line.startswith("**Option ") and ("—" in line or " - " in line):
+            # Selected decision line uses em dash / spaced hyphen, not colon.
+            if ":**" in line:
+                continue
+            rest = line[len("**Option ") :]
+            digits = ""
+            for ch in rest:
+                if ch.isdigit():
+                    digits += ch
+                elif digits:
+                    break
+            if digits:
+                return int(digits)
+    return None
+
+
 def _write_v3_report(report: Path, payload: dict) -> None:
     """Write #80 results.md without clobbering a pre-authored analysis.
 
     ``metrics.json`` is the machine source of truth. A long hand-authored report
     (comparison tables, interpretation) is kept on reruns; only a missing file
-    gets a generated skeleton. Warn when an existing report's Option line drifts
-    from the latest decision.
+    gets a generated skeleton. Warn when the *selected* Decision option drifts.
     """
     decision = payload.get("decision") or {}
     option = decision.get("decision")
     if report.is_file():
         body = report.read_text(encoding="utf-8")
-        # Match both authored "## Decision / **Option N**" and skeleton "Decision: Option N".
-        if option is not None and f"Option {option}" not in body:
+        reported = _selected_option_in_report(body)
+        if option is not None and reported != option:
             print(
-                f"warning: existing {report} does not mention Option {option} "
-                f"— metrics.json decision is SoT; update the report by hand"
+                f"warning: existing {report} selects Option {reported!r} but "
+                f"metrics.json has Option {option} — metrics.json is SoT; "
+                f"update the report by hand"
             )
         print(f"kept existing {report} (pre-authored; metrics.json is SoT)")
         return

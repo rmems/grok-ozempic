@@ -1178,6 +1178,32 @@ class RemedyV3DecisionTests(unittest.TestCase):
         )
         self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
 
+    def test_option_4_when_chain_exit_missing(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary.pop("end_of_chain", None)
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("missing_chain_exit" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_decision_metrics_non_finite(self) -> None:
+        comparison = _v3_comparison("help", "failed")
+        self.assertEqual(comparison["validation_errors"], [])
+        # Corrupt summary after assembly so ranking sees NaN (simulates bad payload).
+        comparison["summaries"][V3_PRIMARY_ARM]["router_top1"][-1] = float("nan")
+        comparison["summaries"][V3_PRIMARY_ARM]["block_output_cosine"][-1] = 0.92
+        comparison["summaries"][V3_PRIMARY_ARM]["chain_exit_residual_drift"] = 0.3
+        secondary_label = V3_SECONDARY_ARM
+        comparison["summaries"][secondary_label]["router_top1"][-1] = float("nan")
+        comparison["summaries"][secondary_label]["chain_exit_residual_drift"] = 0.3
+        decision = decide_remedy_v3(comparison)
+        self.assertEqual(decision["decision"], 4)
+
 
 class RemedyV2ReportTests(unittest.TestCase):
     def test_report_has_one_canonical_decision_and_both_controls(self) -> None:

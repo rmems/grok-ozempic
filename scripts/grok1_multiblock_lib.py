@@ -2,6 +2,7 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -1596,6 +1597,46 @@ def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
     return errors
 
 
+def _finite_number(value: object) -> bool:
+    """True for real int/float (not bool) that is finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(float(value))
+
+
+def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
+    """Require a real post-chain residual metric (no silent block-output fallback)."""
+    exit_m = _chain_exit_metrics(chain)
+    if exit_m is None:
+        return f"{label}:missing_chain_exit"
+    raw = exit_m.get("residual_drift_relative_norm")
+    if raw is None:
+        raw = exit_m.get("residual_in_drift_relative_norm")
+    if raw is None:
+        return f"{label}:chain_exit_missing_drift"
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return f"{label}:chain_exit_malformed"
+    if not math.isfinite(val):
+        return f"{label}:chain_exit_non_finite"
+    return None
+
+
+def _v3_control_error(chain: dict) -> str | None:
+    """FP16 control present, ≥0.99 cosine, and finite metrics."""
+    error = _v2_control_error(chain)
+    if error is not None:
+        return error
+    controls, _ = _v2_controls(chain)
+    for control in controls:
+        if not isinstance(control, dict):
+            return "fp16_control_malformed"
+        if not _finite_number(control.get("block_output_cosine")):
+            return "fp16_control_non_finite"
+    return None
+
+
 def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     label = chain.get("arm_label")
     if label != expected_label:
@@ -1607,8 +1648,11 @@ def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
     errors.extend(_v3_schedule_errors(chain, expected_label))
+    exit_error = _v3_chain_exit_error(chain, expected_label)
+    if exit_error is not None:
+        errors.append(exit_error)
     if not per_block_errors:
-        control_error = _v2_control_error(chain)
+        control_error = _v3_control_error(chain)
         if control_error is not None:
             errors.append(f"{label}:{control_error}")
     errors.extend(_v3_scale_source_errors(chain, expected_label))
@@ -1713,17 +1757,18 @@ def assemble_remedy_v3_comparison(
 
 
 def _v3_middle_complete(summary: dict) -> bool:
+    """Complete middle-ground arm: finite routing/cosine/exit metrics present."""
+    if not isinstance(summary, dict) or "viable" not in summary:
+        return False
     top1 = summary.get("router_top1")
     cos = summary.get("block_output_cosine")
+    exit_drift = summary.get("chain_exit_residual_drift")
+    if not isinstance(top1, list) or not top1 or not isinstance(cos, list) or not cos:
+        return False
     return (
-        isinstance(summary, dict)
-        and "viable" in summary
-        and isinstance(top1, list)
-        and bool(top1)
-        and isinstance(cos, list)
-        and bool(cos)
-        and isinstance(top1[-1], (int, float))
-        and isinstance(cos[-1], (int, float))
+        _finite_number(top1[-1])
+        and _finite_number(cos[-1])
+        and _finite_number(exit_drift)
     )
 
 
