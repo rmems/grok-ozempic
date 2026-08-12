@@ -1597,16 +1597,21 @@ def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     observed_hp = _canonical_block_list(chain.get("hp_blocks"))
     observed_int4 = _canonical_block_list(chain.get("int4_blocks"))
     observed_ternary = _canonical_block_list(chain.get("ternary_blocks"))
+    observed_channel = _canonical_block_list(chain.get("channel_alpha_blocks"))
     if observed_hp is None:
         return [f"{label}:hp_blocks_not_block_list"]
     if observed_int4 is None:
         return [f"{label}:int4_blocks_not_block_list"]
     if observed_ternary is None:
         return [f"{label}:ternary_blocks_not_block_list"]
+    if observed_channel is None:
+        return [f"{label}:channel_alpha_blocks_not_block_list"]
+    # INT4 arms never use channel-α; require empty list for provenance honesty.
     checks = [
         ("hp_blocks", observed_hp, hp_blocks),
         ("int4_blocks", observed_int4, int4_blocks),
         ("ternary_blocks", observed_ternary, []),
+        ("channel_alpha_blocks", observed_channel, []),
         ("expert_mode", chain.get("expert_mode"), mode),
     ]
     return [
@@ -1635,10 +1640,20 @@ def _version_set(versions: object) -> set | None:
         return None
 
 
+def _expert_tensor_keys_ok(mapping: dict) -> bool:
+    """True when every key names an expert tensor (fixture or structural)."""
+    if not mapping:
+        return False
+    for key in mapping:
+        if not isinstance(key, str) or "expert" not in key:
+            return False
+    return True
+
+
 def _v3_pack_row_shape(
     row: object, label: str, index: int
-) -> tuple[int, set, set, set] | list[str]:
-    """Return (block, versions, pack_sources, applied) or a hard-error list."""
+) -> tuple[int, set, dict, dict] | list[str]:
+    """Return (block, versions, pack_map, scale_map) or a hard-error list."""
     row_tag = f"pack_provenance[{index}]"
     if not isinstance(row, dict):
         return [f"{label}:{row_tag}:not_a_mapping"]
@@ -1648,13 +1663,13 @@ def _v3_pack_row_shape(
     versions = _version_set(row.get("container_versions"))
     if versions is None:
         return [f"{label}:block_{block}:container_versions_not_list"]
-    pack_sources = _value_set(row.get("pack_scale_sources"))
-    if pack_sources is None:
+    pack_map = row.get("pack_scale_sources")
+    scale_map = row.get("scale_sources")
+    if not isinstance(pack_map, dict):
         return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
-    applied = _value_set(row.get("scale_sources"))
-    if applied is None:
+    if not isinstance(scale_map, dict):
         return [f"{label}:block_{block}:scale_sources_not_mapping"]
-    return block, versions, pack_sources, applied
+    return block, versions, pack_map, scale_map
 
 
 def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
@@ -1662,11 +1677,22 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
     shaped = _v3_pack_row_shape(row, label, index)
     if isinstance(shaped, list):
         return shaped
-    block, versions, pack_sources, applied = shaped
+    block, versions, pack_map, scale_map = shaped
     expected = _v3_applied_source(block, hp_blocks)
     errors: list[str] = []
     if versions != {3}:
         errors.append(f"{label}:block_{block}:container_not_v3")
+    if not _expert_tensor_keys_ok(pack_map) or not _expert_tensor_keys_ok(scale_map):
+        errors.append(f"{label}:block_{block}:scale_source_keys_not_expert")
+        return errors
+    if set(pack_map.keys()) != set(scale_map.keys()):
+        errors.append(f"{label}:block_{block}:scale_source_key_mismatch")
+        return errors
+    try:
+        pack_sources = set(pack_map.values())
+        applied = set(scale_map.values())
+    except TypeError:
+        return [f"{label}:block_{block}:scale_sources_unhashable"]
     if pack_sources != {"pack_v2"}:
         errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
     if not all(isinstance(value, str) for value in applied):
