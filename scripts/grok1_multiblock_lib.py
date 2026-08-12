@@ -1542,24 +1542,39 @@ def assemble_remedy_v3_comparison(
         },
     }
     secondary: dict[str, dict] = {}
+    primary_label = str(primary_chain.get("arm_label") or V3_PRIMARY_ARM)
     for payload in secondary_payloads:
         chain = payload.get("chain")
         if not isinstance(chain, dict):
             errors.append("secondary evidence missing chain object")
             continue
-        label = chain.get("arm_label") or "secondary"
+        prov = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+        role = str(prov.get("evidence_role") or "")
+        if "secondary" not in role.lower():
+            errors.append(
+                f"secondary evidence_role={role!r} expected secondary (no independent decision)"
+            )
+        label = str(chain.get("arm_label") or "secondary")
+        if not label.startswith("expert_int4"):
+            errors.append(f"secondary arm_label={label!r} expected expert_int4*")
+            continue
+        if label == primary_label or label == V3_PRIMARY_ARM:
+            errors.append(f"secondary arm_label={label!r} collides with primary")
+            continue
+        mismatch = settings_mismatch_reason(chain)
+        if mismatch is not None:
+            errors.append(f"{label}:{mismatch}")
+        if label in secondary:
+            errors.append(f"duplicate secondary arm_label={label!r}")
+            continue
         secondary[label] = payload
         summaries[label] = _v2_chain_summary(chain)
     if not any(k.startswith("expert_int4") and k != V3_PRIMARY_ARM for k in summaries):
-        # Accept any expert_int4_* secondary; warn if none loaded.
         if not secondary:
             errors.append("missing #80 P1 secondary evidence (int4 + HP schedule)")
-    if primary_chain.get("arm_label") not in (V3_PRIMARY_ARM, "expert_int4"):
-        # Allow exact expert_int4 label
-        if not str(primary_chain.get("arm_label", "")).startswith("expert_int4"):
-            errors.append(
-                f"primary arm_label={primary_chain.get('arm_label')!r} expected expert_int4*"
-            )
+    if primary_label not in (V3_PRIMARY_ARM, "expert_int4"):
+        if not primary_label.startswith("expert_int4"):
+            errors.append(f"primary arm_label={primary_label!r} expected expert_int4*")
     return {
         "primary_arm": primary_chain.get("arm_label") or V3_PRIMARY_ARM,
         "secondary_arms": secondary,
@@ -1588,27 +1603,45 @@ def decide_remedy_v3(comparison: dict) -> dict:
             "unknown",
         )
     summaries = comparison["summaries"]
+    def _complete_middle(summary: dict) -> bool:
+        top1 = summary.get("router_top1")
+        cos = summary.get("block_output_cosine")
+        return (
+            isinstance(summary, dict)
+            and "viable" in summary
+            and isinstance(top1, list)
+            and bool(top1)
+            and isinstance(cos, list)
+            and bool(cos)
+            and isinstance(top1[-1], (int, float))
+            and isinstance(cos[-1], (int, float))
+        )
+
     middle_labels = [
         label
         for label, summary in summaries.items()
-        if str(label).startswith("expert_int4") and not summary.get("cited")
+        if str(label).startswith("expert_int4")
+        and not summary.get("cited")
+        and _complete_middle(summary)
     ]
     if not middle_labels:
         return _decision_payload(
             4,
-            "Inconclusive — no INT4 middle-ground arm summaries present.",
+            "Inconclusive — no complete INT4 middle-ground arm summaries present.",
             ["no_int4_summaries"],
             "unknown",
         )
     best_label = max(middle_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
     best = summaries[best_label]
+    top1 = best["router_top1"]
+    cos = best["block_output_cosine"]
     ceiling = summaries.get("cited_ceiling_76") or {"viable": True}
     any_improved = any(_v3_improved_vs_denser(summaries[label]) for label in middle_labels)
     ceiling_viable = bool(ceiling.get("viable", True))
     rationale = [
         f"best_middle_ground_arm={best_label}",
-        f"best_b3_top1={best['router_top1'][-1]:.6f}",
-        f"best_b3_cos={best['block_output_cosine'][-1]:.6f}",
+        f"best_b3_top1={float(top1[-1]):.6f}",
+        f"best_b3_cos={float(cos[-1]):.6f}",
         f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
         f"#76_denser_b3_top1={BASELINE_76_DENSER['router_top1'][-1]:.6f} (cited)",
         f"#76_denser_b3_cos={BASELINE_76_DENSER['block_output_cosine'][-1]:.6f} (cited)",

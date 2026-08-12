@@ -57,6 +57,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     write_remedy_v2_results_md,
     write_results_md,
 )
+from grok1_multiblock_lib import _fp16_gate  # noqa: E402
 from route_preservation_io import MetricsError  # noqa: E402
 
 __all__ = [
@@ -250,11 +251,12 @@ def _arm_identity(
         # the non-HP set only under channel_alpha_blocks in _arm_meta.
         return "research_per_channel_side", None, []
     if expert_mode == "int4":
+        # INT4 is not pack ternary: keep ternary_blocks empty; INT4 set lives in int4_blocks.
         if not hp_blocks:
             return (
                 "expert_int4",
                 "INT4 experts (research_int4_side) on all chain blocks.",
-                list(ternary_blocks),
+                [],
             )
         label = f"expert_int4_{schedule}"
         prose = (
@@ -262,7 +264,7 @@ def _arm_identity(
             f"{{{_block_set_text(ternary_blocks)}}}, HP (FP16 experts) on "
             f"{{{_block_set_text(hp_blocks)}}}."
         )
-        return label, prose, list(ternary_blocks)
+        return label, prose, []
     return expert_mode, None, ternary_blocks
 
 
@@ -298,12 +300,14 @@ def _arm_meta(
         channel_blocks = ternary_blocks
     else:
         channel_blocks = []
+    int4_blocks = non_hp_blocks if expert_mode == "int4" else []
     return {
         "expert_mode": expert_mode,
         "hp_period": stored_period,
         "hp_schedule_kind": schedule_kind,
         "hp_blocks": hp_list,
         "ternary_blocks": ternary_blocks,
+        "int4_blocks": int4_blocks,
         "channel_alpha_blocks": channel_blocks,
         "hp_schedule_prose": prose,
         "arm_label": arm_label,
@@ -495,6 +499,12 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
         raise ForwardError(
             "--evidence-only is reserved for #75 stacked/HP-ceiling or #80 int4 secondary"
         )
+    # #80 P1 (int4 + explicit HP) is evidence-only; never a legacy primary decision.
+    if args.arm == "int4" and getattr(args, "hp_blocks", None) and not evidence_only:
+        raise ForwardError(
+            "--arm int4 with --hp-blocks is #80 P1 secondary: pass --evidence-only "
+            "(primary is --arm int4 with no --hp-blocks)"
+        )
     if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "
@@ -502,6 +512,10 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
         )
     if _is_v3_primary(args) and evidence_only:
         raise ForwardError("#80 primary cannot be --evidence-only")
+    if _is_v3_primary(args) and bool(getattr(args, "skip_fp16_control", False)):
+        raise ForwardError(
+            "#80 primary decision runs require FP16 control (do not pass --skip-fp16-control)"
+        )
 
 
 def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]:
@@ -644,7 +658,18 @@ def run(args: argparse.Namespace) -> int:
             primary_provenance=prov,
             load_errors=load_errors,
         )
-        decision = decide_remedy_v3(comparison)
+        # Same FP16 gate as legacy decide_remedy before ranking middle-ground arms.
+        rows = chain.get("per_block") or []
+        fp16_hit = _fp16_gate(chain, rows, [], "unknown")
+        if fp16_hit is not None:
+            decision = fp16_hit
+            comparison = {
+                **comparison,
+                "validation_errors": list(comparison.get("validation_errors") or [])
+                + list(fp16_hit.get("rationale") or []),
+            }
+        else:
+            decision = decide_remedy_v3(comparison)
         prov["evidence_role"] = "primary; sole canonical #80 decision"
         payload = {
             "provenance": prov,
@@ -683,15 +708,9 @@ def run(args: argparse.Namespace) -> int:
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
         if _is_v3_primary(args):
-            # #80 report is written alongside metrics by the experiment runner
-            # (see reports/grok-1-expert-precision-remedy-v3/results.md template).
-            # Avoid v2 table keys which assume denser/stacked/ceiling arms.
+            # Always regenerate so metrics.json and results.md cannot diverge on reruns.
             report = args.out / "results.md"
-            if not report.is_file():
-                report.write_text(
-                    _v3_results_md(payload),
-                    encoding="utf-8",
-                )
+            report.write_text(_v3_results_md(payload), encoding="utf-8")
             print(f"wrote {report}")
         elif _is_v2_primary(args):
             write_remedy_v2_results_md(args.out / "results.md", payload)
