@@ -647,16 +647,24 @@ def _safe_int(raw: object, default: int | None = None) -> int | None:
         return default
 
 
+def _exit_metric_from_map(exit_m: dict) -> float | None:
+    """First finite exit drift from preferred then legacy key; skip null/bad values."""
+    for key in ("residual_drift_relative_norm", "residual_in_drift_relative_norm"):
+        if exit_m.get(key) is None:
+            continue
+        val = _safe_float(exit_m[key])
+        if val is not None:
+            return val
+    return None
+
+
 def _exit_drift(chain: dict, out_drift: list[float]) -> float | None:
     """Drift after the final block (includes last hop). Prefer chain_exit keys."""
     exit_m = _chain_exit_metrics(chain)
     if exit_m is not None:
-        for key in ("residual_drift_relative_norm", "residual_in_drift_relative_norm"):
-            # Skip null/missing key values so the legacy key can still win.
-            if exit_m.get(key) is None:
-                continue
-            return _safe_float(exit_m[key])
-        return None
+        val = _exit_metric_from_map(exit_m)
+        if val is not None:
+            return val
     return out_drift[-1] if out_drift else None
 
 
@@ -1210,14 +1218,11 @@ def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
 
 
 def _malformed_exit_object(chain: dict) -> bool:
-    """True when end_of_chain exit is present but non-numeric / non-finite."""
+    """True when end_of_chain exit is present but yields no finite drift."""
     exit_m = _chain_exit_metrics(chain)
     if exit_m is None:
         return False
-    raw = exit_m.get("residual_drift_relative_norm")
-    if raw is None:
-        raw = exit_m.get("residual_in_drift_relative_norm")
-    return raw is None or _safe_float(raw) is None
+    return _exit_metric_from_map(exit_m) is None
 
 
 def _v2_chain_summary(chain: dict) -> dict:
@@ -1671,13 +1676,14 @@ def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
     exit_m = _chain_exit_metrics(chain)
     if exit_m is None:
         return f"{label}:missing_chain_exit"
-    raw = exit_m.get("residual_drift_relative_norm")
-    if raw is None:
-        raw = exit_m.get("residual_in_drift_relative_norm")
-    if raw is None:
-        return f"{label}:chain_exit_missing_drift"
-    val = _safe_float(raw)
+    val = _exit_metric_from_map(exit_m)
     if val is None:
+        # Distinguish empty keys vs present-but-unparseable.
+        if (
+            exit_m.get("residual_drift_relative_norm") is None
+            and exit_m.get("residual_in_drift_relative_norm") is None
+        ):
+            return f"{label}:chain_exit_missing_drift"
         return f"{label}:chain_exit_malformed"
     if val < 0.0:
         return f"{label}:chain_exit_out_of_domain"
