@@ -1204,6 +1204,51 @@ class RemedyV3DecisionTests(unittest.TestCase):
         decision = decide_remedy_v3(comparison)
         self.assertEqual(decision["decision"], 4)
 
+    def test_option_4_when_mid_chain_topk_non_finite(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][1]["expert_only"]["router_top2_set_agreement"] = float("nan")
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(any("non_finite_metric" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_per_block_order_permuted(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"] = list(reversed(primary["per_block"]))
+        primary["pack_provenance"] = list(reversed(primary["pack_provenance"]))
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(any("per_block_order" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_secondary_payload_not_object(self) -> None:
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [[], "not-a-mapping"],  # type: ignore[list-item]
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(
+            any("JSON object" in e or "must be a JSON object" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_int4_evidence_only_requires_hp_123(self) -> None:
+        args = argparse.Namespace(
+            arm="int4",
+            evidence_only=True,
+            hp_blocks={0, 2},
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        with self.assertRaisesRegex(ForwardError, r"hp-blocks 1,2,3"):
+            _validate_v2_cli(args)
+
 
 class RemedyV2ReportTests(unittest.TestCase):
     def test_report_has_one_canonical_decision_and_both_controls(self) -> None:

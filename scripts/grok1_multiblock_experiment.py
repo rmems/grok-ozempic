@@ -506,6 +506,14 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
             "--arm int4 with --hp-blocks is #80 P1 secondary: pass --evidence-only "
             "(primary is --arm int4 with no --hp-blocks)"
         )
+    # Locked P1 secondary schedule only — reject before the expensive forward pass.
+    if args.arm == "int4" and evidence_only:
+        hp = getattr(args, "hp_blocks", None)
+        if hp != {1, 2, 3}:
+            raise ForwardError(
+                "--arm int4 --evidence-only is #80 P1 secondary: require "
+                f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None})"
+            )
     if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "

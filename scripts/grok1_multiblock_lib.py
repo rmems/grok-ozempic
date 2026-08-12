@@ -1654,6 +1654,47 @@ def _v3_control_error(chain: dict) -> str | None:
     return None
 
 
+def _v3_block_order_error(chain: dict, label: str) -> str | None:
+    """Require per_block order [0,1,2,3] (not merely the same multiset)."""
+    rows = chain.get("per_block")
+    if not isinstance(rows, list) or not rows:
+        return None
+    blocks = [_canonical_block_id(row.get("block")) for row in rows if isinstance(row, dict)]
+    expected = list(BASELINE_72["blocks"])
+    if blocks != expected:
+        return f"{label}:per_block_order={blocks} expected={expected}"
+    return None
+
+
+def _v3_finite_row_error(row: dict, label: str) -> str | None:
+    """Reject NaN/Inf in metrics that feed viable / ranking."""
+    expert = row.get("expert_only")
+    if not isinstance(expert, dict):
+        return None
+    residual = expert.get("residual_stream_in")
+    residual = residual if isinstance(residual, dict) else {}
+    topk = expert.get(
+        "router_topk_set_agreement",
+        expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
+    )
+    samples = (
+        expert.get("block_output_cosine"),
+        residual.get("residual_in_drift_relative_norm"),
+        expert.get("router_top1_agreement"),
+        topk,
+        expert.get("expert_load_js_bits"),
+        expert.get("block_output_drift_relative_norm"),
+    )
+    for raw in samples:
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            return f"{label}:block_{row.get('block')}:non_finite_metric"
+        if not math.isfinite(val):
+            return f"{label}:block_{row.get('block')}:non_finite_metric"
+    return None
+
+
 def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     label = chain.get("arm_label")
     if label != expected_label:
@@ -1661,6 +1702,16 @@ def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
     errors: list[str] = []
     per_block_errors = _v2_per_block_errors(chain, expected_label)
     errors.extend(per_block_errors)
+    order_error = _v3_block_order_error(chain, expected_label)
+    if order_error is not None:
+        errors.append(order_error)
+    if not per_block_errors:
+        for row in chain.get("per_block") or []:
+            if isinstance(row, dict):
+                finite_error = _v3_finite_row_error(row, expected_label)
+                if finite_error is not None:
+                    errors.append(finite_error)
+                    break
     mismatch = settings_mismatch_reason(chain)
     if mismatch is not None:
         errors.append(f"{label}:{mismatch}")
@@ -1697,6 +1748,9 @@ def _v3_secondary_map(
 ) -> dict[str, dict]:
     mapped: dict[str, dict] = {}
     for payload in payloads:
+        if not isinstance(payload, dict):
+            errors.append("secondary evidence must be a JSON object")
+            continue
         if "decision" in payload:
             errors.append("secondary evidence contains a decision")
         chain = payload.get("chain")
@@ -1780,17 +1834,21 @@ def assemble_remedy_v3_comparison(
     }
 
 
-def _finite_tail(series: object) -> bool:
-    return isinstance(series, list) and bool(series) and _finite_number(series[-1])
+def _finite_series(series: object) -> bool:
+    """True when series is a non-empty list of finite numbers (every element)."""
+    if not isinstance(series, list) or not series:
+        return False
+    return all(_finite_number(value) for value in series)
 
 
 def _v3_middle_complete(summary: dict) -> bool:
-    """Complete middle-ground arm: finite routing/cosine/exit metrics present."""
+    """Complete middle-ground arm: finite viability inputs on every block."""
     if not isinstance(summary, dict) or "viable" not in summary:
         return False
     return (
-        _finite_tail(summary.get("router_top1"))
-        and _finite_tail(summary.get("block_output_cosine"))
+        _finite_series(summary.get("router_top1"))
+        and _finite_series(summary.get("router_top2"))
+        and _finite_series(summary.get("block_output_cosine"))
         and _finite_number(summary.get("chain_exit_residual_drift"))
     )
 
