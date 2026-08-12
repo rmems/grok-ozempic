@@ -1578,9 +1578,7 @@ def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
 
 
 def _canonical_block_list(raw: object) -> list[int] | None:
-    """List of canonical block ids, or None if raw is not a valid list."""
-    if raw is None:
-        return []
+    """List of canonical block ids, or None if raw is not a list (incl. missing)."""
     if not isinstance(raw, list):
         return None
     out: list[int] = []
@@ -1592,32 +1590,36 @@ def _canonical_block_list(raw: object) -> list[int] | None:
     return out
 
 
+_V3_SCHEDULE_FIELDS = (
+    "hp_blocks",
+    "int4_blocks",
+    "ternary_blocks",
+    "channel_alpha_blocks",
+)
+
+
 def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
-    observed_hp = _canonical_block_list(chain.get("hp_blocks"))
-    observed_int4 = _canonical_block_list(chain.get("int4_blocks"))
-    observed_ternary = _canonical_block_list(chain.get("ternary_blocks"))
-    observed_channel = _canonical_block_list(chain.get("channel_alpha_blocks"))
-    if observed_hp is None:
-        return [f"{label}:hp_blocks_not_block_list"]
-    if observed_int4 is None:
-        return [f"{label}:int4_blocks_not_block_list"]
-    if observed_ternary is None:
-        return [f"{label}:ternary_blocks_not_block_list"]
-    if observed_channel is None:
-        return [f"{label}:channel_alpha_blocks_not_block_list"]
+    # Missing fields are not the same as explicit empty lists.
+    for field in _V3_SCHEDULE_FIELDS:
+        if field not in chain:
+            return [f"{label}:{field}_missing"]
+    observed = {field: _canonical_block_list(chain.get(field)) for field in _V3_SCHEDULE_FIELDS}
+    for field, value in observed.items():
+        if value is None:
+            return [f"{label}:{field}_not_block_list"]
     # INT4 arms never use channel-α; require empty list for provenance honesty.
     checks = [
-        ("hp_blocks", observed_hp, hp_blocks),
-        ("int4_blocks", observed_int4, int4_blocks),
-        ("ternary_blocks", observed_ternary, []),
-        ("channel_alpha_blocks", observed_channel, []),
+        ("hp_blocks", observed["hp_blocks"], hp_blocks),
+        ("int4_blocks", observed["int4_blocks"], int4_blocks),
+        ("ternary_blocks", observed["ternary_blocks"], []),
+        ("channel_alpha_blocks", observed["channel_alpha_blocks"], []),
         ("expert_mode", chain.get("expert_mode"), mode),
     ]
     return [
-        f"{label}:{field}={observed!r} expected={expected!r}"
-        for field, observed, expected in checks
-        if observed != expected
+        f"{label}:{field}={obs!r} expected={exp!r}"
+        for field, obs, exp in checks
+        if obs != exp
     ]
 
 
@@ -1640,14 +1642,22 @@ def _version_set(versions: object) -> set | None:
         return None
 
 
-def _expert_tensor_keys_ok(mapping: dict) -> bool:
-    """True when every key names an expert tensor (fixture or structural)."""
-    if not mapping:
+_STRUCTURAL_EXPERT_SUFFIXES = frozenset({"gate", "down", "up"})
+
+
+def _expert_tensor_keys_ok(keys: set[str], block: int) -> bool:
+    """Fixture sentinel ``expert`` or full structural gate/up/down set for block."""
+    if keys == {"expert"}:
+        return True
+    if len(keys) != 3 or not all(isinstance(k, str) for k in keys):
         return False
-    for key in mapping:
-        if not isinstance(key, str) or "expert" not in key:
+    prefix = f"block_{block:03d}."
+    suffixes: set[str] = set()
+    for key in keys:
+        if "moe_expert." not in key or not key.startswith(prefix):
             return False
-    return True
+        suffixes.add(key.rsplit(".", 1)[-1])
+    return suffixes == _STRUCTURAL_EXPERT_SUFFIXES
 
 
 def _v3_pack_row_shape(
@@ -1672,27 +1682,16 @@ def _v3_pack_row_shape(
     return block, versions, pack_map, scale_map
 
 
-def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
-    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
-    shaped = _v3_pack_row_shape(row, label, index)
-    if isinstance(shaped, list):
-        return shaped
-    block, versions, pack_map, scale_map = shaped
-    expected = _v3_applied_source(block, hp_blocks)
-    errors: list[str] = []
-    if versions != {3}:
-        errors.append(f"{label}:block_{block}:container_not_v3")
-    if not _expert_tensor_keys_ok(pack_map) or not _expert_tensor_keys_ok(scale_map):
-        errors.append(f"{label}:block_{block}:scale_source_keys_not_expert")
-        return errors
-    if set(pack_map.keys()) != set(scale_map.keys()):
-        errors.append(f"{label}:block_{block}:scale_source_key_mismatch")
-        return errors
+def _v3_scale_value_errors(
+    label: str, block: int, pack_map: dict, scale_map: dict, expected: str
+) -> list[str]:
+    """Value-level pack/applied source checks after keys are known good."""
     try:
         pack_sources = set(pack_map.values())
         applied = set(scale_map.values())
     except TypeError:
         return [f"{label}:block_{block}:scale_sources_unhashable"]
+    errors: list[str] = []
     if pack_sources != {"pack_v2"}:
         errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
     if not all(isinstance(value, str) for value in applied):
@@ -1702,6 +1701,28 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
             f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
             f"expected={expected}"
         )
+    return errors
+
+
+def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
+    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
+    shaped = _v3_pack_row_shape(row, label, index)
+    if isinstance(shaped, list):
+        return shaped
+    block, versions, pack_map, scale_map = shaped
+    errors: list[str] = []
+    if versions != {3}:
+        errors.append(f"{label}:block_{block}:container_not_v3")
+    pack_keys = set(pack_map.keys())
+    scale_keys = set(scale_map.keys())
+    if not _expert_tensor_keys_ok(pack_keys, block) or not _expert_tensor_keys_ok(
+        scale_keys, block
+    ):
+        return errors + [f"{label}:block_{block}:scale_source_keys_not_expert"]
+    if pack_keys != scale_keys:
+        return errors + [f"{label}:block_{block}:scale_source_key_mismatch"]
+    expected = _v3_applied_source(block, hp_blocks)
+    errors.extend(_v3_scale_value_errors(label, block, pack_map, scale_map, expected))
     return errors
 
 

@@ -514,6 +514,19 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
                 "--arm int4 --evidence-only is #80 P1 secondary: require "
                 f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None})"
             )
+    # Locked #80 sample settings (bit-comparable to #72 / #76 cites).
+    if args.arm == "int4":
+        locked = (
+            ("tokens", int(args.tokens), int(BASELINE_72["tokens"])),
+            ("seed", int(args.seed), int(BASELINE_72["token_seed"])),
+            ("top_k", int(args.top_k), int(BASELINE_72["top_k"])),
+        )
+        for name, got, want in locked:
+            if got != want:
+                raise ForwardError(
+                    f"#80 int4 runs require --{name.replace('_', '-')} {want} "
+                    f"(got {got}); noncanonical settings cannot produce comparison evidence"
+                )
     if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "
