@@ -13,6 +13,14 @@
 - **After a squash merge, branch deletion is manual — never `git pull --rebase` it.**
   Verify with `git diff --stat origin/main <branch>` first (should be empty if fully merged), then delete manually only if intended. Squash merges leave no ancestry link, so replaying commits onto `main` conflicts (`AA`) on every file it touched. See `CLAUDE.md`.
 
+### Issue relationships (what next after close)
+
+- **Beads owns the readiness graph** (`bd dep` / `bd link`). GitHub sub-issues under epics (e.g. #48) mirror the same parent for humans.
+- Types: `blocks` (hard sequence — `bd dep add NEW --blocked-by DONE`), `parent-child` (epic ownership), `relates-to` / `relate` (soft), `supersedes` (replacement).
+- **On close:** run `bd dep list <id>` and `bd ready`. Start the highest-priority **unblocked** successor. If the close creates follow-on work, file it and wire `bd dep add follow-on --blocked-by closed-id` (and GH parent/sub-issue when under an epic) in the **same session**.
+- `bd ready` ignores closed blockers; historical `blocks` edges remain for `bd dep tree` context.
+- Do **not** invent markdown dependency boards; keep edges in beads + GH/Linear.
+
 ## Quality gates before done
 
 Prefer the root `justfile` tiers (#62 / RM-250):
