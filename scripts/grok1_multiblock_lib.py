@@ -1553,39 +1553,54 @@ def _value_set(mapping: object) -> set | None:
         return None
 
 
-def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
-    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
+def _version_set(versions: object) -> set | None:
+    if not isinstance(versions, list):
+        return None
+    try:
+        return set(versions)
+    except TypeError:
+        return None
+
+
+def _v3_pack_row_shape(
+    row: object, label: str, index: int
+) -> tuple[int, set, set, set] | list[str]:
+    """Return (block, versions, pack_sources, applied) or a hard-error list."""
     row_tag = f"pack_provenance[{index}]"
     if not isinstance(row, dict):
         return [f"{label}:{row_tag}:not_a_mapping"]
     block = _canonical_block_id(row.get("block"))
     if block is None:
         return [f"{label}:{row_tag}:invalid_block_id"]
-    versions = row.get("container_versions")
-    if not isinstance(versions, list):
+    versions = _version_set(row.get("container_versions"))
+    if versions is None:
         return [f"{label}:block_{block}:container_versions_not_list"]
-    try:
-        version_set = set(versions)
-    except TypeError:
-        return [f"{label}:block_{block}:container_versions_unhashable"]
     pack_sources = _value_set(row.get("pack_scale_sources"))
     if pack_sources is None:
         return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
     applied = _value_set(row.get("scale_sources"))
     if applied is None:
         return [f"{label}:block_{block}:scale_sources_not_mapping"]
-    errors: list[str] = []
-    if version_set != {3}:
-        errors.append(f"{label}:block_{block}:container_not_v3")
-    if pack_sources != {"pack_v2"}:
-        errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
+    return block, versions, pack_sources, applied
+
+
+def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
+    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
+    shaped = _v3_pack_row_shape(row, label, index)
+    if isinstance(shaped, list):
+        return shaped
+    block, versions, pack_sources, applied = shaped
     expected = _v3_applied_source(block, hp_blocks)
-    if applied != {expected}:
-        errors.append(
+    checks = [
+        (versions != {3}, f"{label}:block_{block}:container_not_v3"),
+        (pack_sources != {"pack_v2"}, f"{label}:block_{block}:pack_scale_source_not_pack_v2"),
+        (
+            applied != {expected},
             f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
-            f"expected={expected}"
-        )
-    return errors
+            f"expected={expected}",
+        ),
+    ]
+    return [msg for bad, msg in checks if bad]
 
 
 def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:

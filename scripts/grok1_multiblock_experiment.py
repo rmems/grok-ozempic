@@ -770,35 +770,32 @@ def _write_v3_report(report: Path, payload: dict) -> None:
     print(f"wrote {report}")
 
 
+def _mapping(payload: dict, key: str) -> dict:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _v3_results_md(payload: dict) -> str:
     """Skeleton markdown for #80 when a pre-authored report is absent."""
-    decision = payload.get("decision") or {}
-    chain = payload.get("chain") or {}
-    prov = payload.get("provenance") or {}
-    summaries = (payload.get("comparison") or {}).get("summaries") or {}
-    rationale = [f"- `{item}`" for item in (decision.get("rationale") or [])]
-    arms = [f"- `{label}`" for label in sorted(summaries)]
-    parts = [
-        "# Expert middle-ground (INT4) multi-block fidelity",
-        "",
-        f"**Agent:** {prov.get('agent', REMEDY_V3_AGENT_LINE)}",
-        f"**Decision:** Option {decision.get('decision')} — {decision.get('decision_text')}",
-        f"**Arm:** `{chain.get('arm_label')}`",
-        f"**Best middle-ground arm:** `{decision.get('best_remedy_arm')}`",
-        "",
-        "## Rationale",
-        "",
-        *rationale,
-        "",
-        "## Arms in comparison",
-        "",
-        *arms,
-        "",
+    decision = _mapping(payload, "decision")
+    chain = _mapping(payload, "chain")
+    prov = _mapping(payload, "provenance")
+    summaries = _mapping(_mapping(payload, "comparison"), "summaries")
+    agent = prov.get("agent", REMEDY_V3_AGENT_LINE)
+    header = (
+        "# Expert middle-ground (INT4) multi-block fidelity\n\n"
+        f"**Agent:** {agent}\n"
+        f"**Decision:** Option {decision.get('decision')} — {decision.get('decision_text')}\n"
+        f"**Arm:** `{chain.get('arm_label')}`\n"
+        f"**Best middle-ground arm:** `{decision.get('best_remedy_arm')}`"
+    )
+    rationale = "\n".join(f"- `{item}`" for item in decision.get("rationale", ()))
+    arms = "\n".join(f"- `{label}`" for label in sorted(summaries))
+    footer = (
         "_Generated skeleton — expand with per-block tables when promoting a "
-        "canonical report under `reports/`. `metrics.json` remains SoT._",
-        "",
-    ]
-    return "\n".join(parts) + "\n"
+        "canonical report under `reports/`. `metrics.json` remains SoT._"
+    )
+    return f"{header}\n\n## Rationale\n\n{rationale}\n\n## Arms in comparison\n\n{arms}\n\n{footer}\n"
 
 
 def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
