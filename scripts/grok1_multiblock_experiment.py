@@ -527,6 +527,14 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
                     f"#80 int4 runs require --{name.replace('_', '-')} {want} "
                     f"(got {got}); noncanonical settings cannot produce comparison evidence"
                 )
+        # Exact locked chain before any real-weight forward work.
+        blocks = parse_blocks(args.blocks)
+        want_blocks = list(BASELINE_72["blocks"])
+        if blocks != want_blocks:
+            raise ForwardError(
+                f"#80 int4 runs require --blocks {','.join(str(b) for b in want_blocks)} "
+                f"(got {blocks}); noncanonical chains cannot produce comparison evidence"
+            )
     if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "

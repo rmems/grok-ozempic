@@ -46,6 +46,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     decide_remedy_v2,
     decide_remedy_v3,
     settings_mismatch_reason,
+    structural_expert_scale_map,
 )
 
 
@@ -1050,13 +1051,14 @@ def _v3_chain(label: str, quality: str) -> dict:
                 },
             )
         )
+        applied = _v3_fixture_source(block, hp_blocks)
         provenance.append(
             {
                 "block": block,
                 "pack_sha256": BASELINE_72["pack_sha256"][block],
                 "container_versions": [3],
-                "pack_scale_sources": {"expert": "pack_v2"},
-                "scale_sources": {"expert": _v3_fixture_source(block, hp_blocks)},
+                "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
+                "scale_sources": structural_expert_scale_map(block, applied),
             }
         )
     return {
@@ -1165,7 +1167,10 @@ class RemedyV3DecisionTests(unittest.TestCase):
 
     def test_rejects_wrong_applied_scale_source(self) -> None:
         secondary = _v3_secondary("help")
-        secondary["chain"]["pack_provenance"][0]["scale_sources"]["expert"] = "pack_v2"
+        # Corrupt all applied sources for block 0 (INT4 expected).
+        secondary["chain"]["pack_provenance"][0]["scale_sources"] = (
+            structural_expert_scale_map(0, "pack_v2")
+        )
         comparison = assemble_remedy_v3_comparison(
             _v3_chain(V3_PRIMARY_ARM, "help"),
             [secondary],

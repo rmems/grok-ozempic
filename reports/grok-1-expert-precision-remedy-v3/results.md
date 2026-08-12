@@ -75,8 +75,26 @@ Values from `int4-plus-hp123/metrics.json`.
 Both `metrics.json` artifacts record `implementation.dirty: true` and commit
 `7cf99b2` (pre-INT4 harness landing). Numerics were measured on a dirty tree;
 the harness + validation fixes in this PR post-date that SHA. A clean-tree
-re-run of the multi-GiB chain is a follow-up — Option 2 is unchanged under
-revalidation of the committed payloads.
+re-run of the multi-GiB chain is a follow-up.
+
+**Committed-payload revalidation** (no weight forward — decision only):
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+import json, sys
+sys.path.insert(0, "scripts")
+from grok1_multiblock_lib import assemble_remedy_v3_comparison, decide_remedy_v3
+root = Path("reports/grok-1-expert-precision-remedy-v3")
+primary = json.loads((root / "metrics.json").read_text())
+secondary = json.loads((root / "int4-plus-hp123/metrics.json").read_text())
+cmp = assemble_remedy_v3_comparison(
+    primary["chain"], [secondary], primary_provenance=primary["provenance"]
+)
+print("validation_errors", cmp["validation_errors"])
+print("decision", decide_remedy_v3(cmp)["decision"])  # expected 2
+PY
+```
 
 ## Interpretation
 

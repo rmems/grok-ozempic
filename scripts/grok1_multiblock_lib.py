@@ -1645,10 +1645,17 @@ def _version_set(versions: object) -> set | None:
 _STRUCTURAL_EXPERT_SUFFIXES = frozenset({"gate", "down", "up"})
 
 
+def structural_expert_scale_map(block: int, source: str) -> dict[str, str]:
+    """Three structural expert tensor names for pack/applied scale provenance."""
+    return {
+        f"block_{block:03d}.slot_00.moe_expert.gate": source,
+        f"block_{block:03d}.slot_01.moe_expert.down": source,
+        f"block_{block:03d}.slot_02.moe_expert.up": source,
+    }
+
+
 def _expert_tensor_keys_ok(keys: set[str], block: int) -> bool:
-    """Fixture sentinel ``expert`` or full structural gate/up/down set for block."""
-    if keys == {"expert"}:
-        return True
+    """Full structural gate/up/down set for block (no aggregate fixture sentinel)."""
     if len(keys) != 3 or not all(isinstance(k, str) for k in keys):
         return False
     prefix = f"block_{block:03d}."
