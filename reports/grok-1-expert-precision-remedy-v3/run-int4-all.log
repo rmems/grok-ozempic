@@ -1,0 +1,49 @@
+== block 000  residual_in shape=(2048, 6144)
+  reference forward ...
+    24.4s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_side) ...
+    38.5s  cos=0.998615 top1=1.000000 drift=0.000000
+  fp16 control ...
+    36.6s  block_out_cos=0.999987
+== block 001  residual_in shape=(2048, 6144)
+  reference forward ...
+    23.8s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_side) ...
+    41.7s  cos=0.997147 top1=0.981934 drift=0.052881
+  fp16 control ...
+    41.3s  block_out_cos=0.999986
+== block 002  residual_in shape=(2048, 6144)
+  reference forward ...
+    19.4s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_side) ...
+    39.0s  cos=0.989049 top1=0.929688 drift=0.075692
+  fp16 control ...
+    35.8s  block_out_cos=0.999968
+== block 003  residual_in shape=(2048, 6144)
+  reference forward ...
+    18.2s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_side) ...
+    37.1s  cos=0.978044 top1=0.850586 drift=0.147663
+  fp16 control ...
+    33.9s  block_out_cos=0.999920
+wrote reports/grok-1-expert-precision-remedy-v3/metrics.json
+DECISION option 2: INT4 middle-ground helps vs denser ternary, but full-HP experts or another correction remain required.
+Traceback (most recent call last):
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 774, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 758, in main
+    return run(args)
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_experiment.py", line 687, in run
+    write_remedy_v2_results_md(args.out / "results.md", payload)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1984, in write_remedy_v2_results_md
+    lines += _v2_comparison_lines(comparison)
+             ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1942, in _v2_comparison_lines
+    lines += _v2_comparison_table(comparison)
+             ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/home/raulmc/rmems/grok-ozempic/scripts/grok1_multiblock_lib.py", line 1825, in _v2_comparison_table
+    ("C denser", summaries[V2_PRIMARY_ARM]),
+                 ~~~~~~~~~^^^^^^^^^^^^^^^^
+KeyError: 'expert_periodic_hp_123'

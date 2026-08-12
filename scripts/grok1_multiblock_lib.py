@@ -36,6 +36,43 @@ REMEDY_V2_AGENT_LINE = (
     "OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75 / Linear RM-462 · beads goz-rvk"
 )
 
+REMEDY_V3_AGENT_LINE = (
+    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #80 / Linear RM-468 · beads goz-d603r4"
+)
+
+# Cited from reports/grok-1-expert-precision-remedy-v2/ (PR #76 option 2).
+BASELINE_76_DENSER = {
+    "source": "reports/grok-1-expert-precision-remedy-v2/ (PR #76 / #75 / RM-462)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "decision": 2,
+    "block_output_cosine": [0.963572, 0.963211, 0.939684, 0.913853],
+    "residual_in_drift": [0.0, 0.277351, 0.279321, 0.348475],
+    "router_top1": [1.0, 0.887695, 0.729004, 0.615723],
+    "router_top2": [1.0, 0.680664, 0.592773, 0.408691],
+    "chain_exit_residual_drift": 0.4370545723375058,
+    "arm_label": "expert_periodic_hp_123",
+}
+
+BASELINE_76_CEILING = {
+    "source": "reports/grok-1-expert-precision-remedy-v2/hp-ceiling/ (PR #76)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "block_output_cosine": [1.0, 0.999997, 0.999998, 0.999984],
+    "router_top1": [1.0, 1.0, 1.0, 1.0],
+    "chain_exit_residual_drift": 0.005690267932494616,
+    "arm_label": "expert_hp_ceiling",
+    "viable": True,
+}
+
+V3_PRIMARY_ARM = "expert_int4"
+V3_SECONDARY_ARM = "expert_int4_123"
+INT4_QMAX = 7
+
 # Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
 # settings: tokens=2048, seed=20260806, blocks=0..3, pack-only v3 experts.
 BASELINE_72 = {
@@ -244,6 +281,59 @@ def channel_alpha_dequant(weights: np.ndarray, trits: np.ndarray) -> np.ndarray:
     return trits.astype(np.float32) * alpha.astype(np.float32)
 
 
+def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-channel absmax INT4 quantize-dequant (research side-table).
+
+    ``q ∈ [-INT4_QMAX, INT4_QMAX]``; scale along all axes except the last.
+    Returns ``(dequant_f32, scale_f32)`` with scale shape ``weights.shape[-1:]``.
+    """
+    w = np.asarray(weights, dtype=np.float32)
+    if w.size == 0:
+        raise ForwardError("int4 dequant: empty weight tensor")
+    if w.ndim == 1:
+        amax = float(np.max(np.abs(w)))
+        scale = np.float32(max(amax / float(INT4_QMAX), 1e-12))
+        q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
+        return (q * scale).astype(np.float32), np.asarray([scale], dtype=np.float32)
+    axes = tuple(range(w.ndim - 1))
+    amax = np.max(np.abs(w), axis=axes)
+    scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
+    q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX)
+    return (q * scale).astype(np.float32), scale
+
+
+class Int4SideExperts:
+    """Expert primary: f32 reference → per-channel INT4 side-table dequant.
+
+    Scale provenance tag is ``research_int4_side`` — never claim pack_v2.
+    Side-table is formed online from the same npy used as the FP reference so
+    the run is deterministic and pack-honest (no silent oracle from GOZ1).
+    """
+
+    label = "research_int4_side"
+
+    def __init__(self, reference: NpyWeights) -> None:
+        self._ref = reference
+        self.roles = {r: reference.roles[r] for r in EXPERT_ROLES if r in reference.roles}
+        missing = sorted(EXPERT_ROLES - set(self.roles))
+        if missing:
+            raise ForwardError(f"int4 primary lacks expert roles {missing}")
+        self.scale_sources = {self.roles[r]: "research_int4_side" for r in self.roles}
+
+    def vector(self, role: str) -> np.ndarray:
+        w = np.asarray(self._ref.vector(role), dtype=np.float32)
+        deq, _ = int4_absmax_dequant(w)
+        return deq
+
+    def matrix(self, role: str) -> np.ndarray:
+        return self.vector(role)
+
+    def expert(self, role: str, index: int) -> np.ndarray:
+        w = np.asarray(self._ref.expert(role, index), dtype=np.float32)
+        deq, _ = int4_absmax_dequant(w)
+        return deq
+
+
 class ChannelAlphaExperts:
     """Expert primary source: pack trits × research per-channel α (not pack scalar).
 
@@ -334,6 +424,16 @@ def _expert_primary(
         return control, "expert_hp_ceiling"
     if mode == "channel_alpha":
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
+    if mode == "int4":
+        if block in hp_blocks:
+            if control is None:
+                raise ForwardError(
+                    f"block {block}: int4+HP needs FP16 expert source "
+                    "(do not --skip-fp16-control on decision runs)"
+                )
+            schedule = hp_label or f"n{int(hp_period)}"
+            return control, f"expert_int4_{schedule}"
+        return Int4SideExperts(reference), "research_int4_side"
     raise ForwardError(f"unknown expert mode {mode!r}")
 
 
@@ -351,7 +451,7 @@ def _applied_expert_scale_sources(
     if hasattr(primary, "scale_sources"):
         applied.update(dict(primary.scale_sources))
     elif expert_mode == "all_hp" or (
-        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
+        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha", "int4")
         and block in hp_blocks
     ):
         for name in _expert_names(reference):
@@ -1396,6 +1496,152 @@ def _v2_outcome(
     if not any_improved and not ceiling_viable:
         return 3, "Even denser, stacked, and HP-ceiling expert remedies fail under the current policy."
     return 4, "Inconclusive — measured outcomes do not satisfy a locked decision branch."
+
+
+def _v3_improved_vs_denser(summary: dict) -> bool:
+    if summary.get("empty"):
+        return False
+    top1_gain = summary["router_top1"][-1] - BASELINE_76_DENSER["router_top1"][-1]
+    cos_gain = summary["block_output_cosine"][-1] - BASELINE_76_DENSER["block_output_cosine"][-1]
+    exit_drift = summary.get("chain_exit_residual_drift")
+    denser_exit = BASELINE_76_DENSER["chain_exit_residual_drift"]
+    drift_gain = 0.0 if exit_drift is None else denser_exit - float(exit_drift)
+    return top1_gain >= 0.05 or cos_gain >= 0.03 or drift_gain >= 0.08
+
+
+def assemble_remedy_v3_comparison(
+    primary_chain: dict,
+    secondary_payloads: list[dict],
+    *,
+    primary_provenance: dict,
+    load_errors: list[str] | None = None,
+) -> dict:
+    """Assemble #80 middle-ground comparison (P0 primary + P1 secondary + #76 cites)."""
+    errors = list(load_errors or [])
+    summaries = {
+        V3_PRIMARY_ARM: _v2_chain_summary(primary_chain),
+        "cited_denser_76": {
+            "arm_label": BASELINE_76_DENSER["arm_label"],
+            "block_output_cosine": list(BASELINE_76_DENSER["block_output_cosine"]),
+            "residual_in_drift": list(BASELINE_76_DENSER["residual_in_drift"]),
+            "router_top1": list(BASELINE_76_DENSER["router_top1"]),
+            "router_top2": list(BASELINE_76_DENSER["router_top2"]),
+            "chain_exit_residual_drift": BASELINE_76_DENSER["chain_exit_residual_drift"],
+            "compounding": "cited",
+            "viable": False,
+            "cited": True,
+        },
+        "cited_ceiling_76": {
+            "arm_label": BASELINE_76_CEILING["arm_label"],
+            "block_output_cosine": list(BASELINE_76_CEILING["block_output_cosine"]),
+            "router_top1": list(BASELINE_76_CEILING["router_top1"]),
+            "chain_exit_residual_drift": BASELINE_76_CEILING["chain_exit_residual_drift"],
+            "compounding": "cited",
+            "viable": True,
+            "cited": True,
+        },
+    }
+    secondary: dict[str, dict] = {}
+    for payload in secondary_payloads:
+        chain = payload.get("chain")
+        if not isinstance(chain, dict):
+            errors.append("secondary evidence missing chain object")
+            continue
+        label = chain.get("arm_label") or "secondary"
+        secondary[label] = payload
+        summaries[label] = _v2_chain_summary(chain)
+    if not any(k.startswith("expert_int4") and k != V3_PRIMARY_ARM for k in summaries):
+        # Accept any expert_int4_* secondary; warn if none loaded.
+        if not secondary:
+            errors.append("missing #80 P1 secondary evidence (int4 + HP schedule)")
+    if primary_chain.get("arm_label") not in (V3_PRIMARY_ARM, "expert_int4"):
+        # Allow exact expert_int4 label
+        if not str(primary_chain.get("arm_label", "")).startswith("expert_int4"):
+            errors.append(
+                f"primary arm_label={primary_chain.get('arm_label')!r} expected expert_int4*"
+            )
+    return {
+        "primary_arm": primary_chain.get("arm_label") or V3_PRIMARY_ARM,
+        "secondary_arms": secondary,
+        "summaries": summaries,
+        "validation_errors": errors,
+        "baselines_cited": {
+            "denser": BASELINE_76_DENSER,
+            "ceiling": BASELINE_76_CEILING,
+            "baseline_74": BASELINE_74,
+            "baseline_72": BASELINE_72,
+        },
+        "primary_provenance": {
+            "implementation": (primary_provenance or {}).get("implementation"),
+        },
+    }
+
+
+def decide_remedy_v3(comparison: dict) -> dict:
+    """Pick exactly one #80 decision across INT4 middle-ground arms vs #76 bounds."""
+    errors = list(comparison.get("validation_errors") or [])
+    if errors:
+        return _decision_payload(
+            4,
+            "Inconclusive — required multi-arm evidence is incomplete or incomparable.",
+            errors,
+            "unknown",
+        )
+    summaries = comparison["summaries"]
+    middle_labels = [
+        label
+        for label, summary in summaries.items()
+        if str(label).startswith("expert_int4") and not summary.get("cited")
+    ]
+    if not middle_labels:
+        return _decision_payload(
+            4,
+            "Inconclusive — no INT4 middle-ground arm summaries present.",
+            ["no_int4_summaries"],
+            "unknown",
+        )
+    best_label = max(middle_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
+    best = summaries[best_label]
+    ceiling = summaries.get("cited_ceiling_76") or {"viable": True}
+    any_improved = any(_v3_improved_vs_denser(summaries[label]) for label in middle_labels)
+    ceiling_viable = bool(ceiling.get("viable", True))
+    rationale = [
+        f"best_middle_ground_arm={best_label}",
+        f"best_b3_top1={best['router_top1'][-1]:.6f}",
+        f"best_b3_cos={best['block_output_cosine'][-1]:.6f}",
+        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
+        f"#76_denser_b3_top1={BASELINE_76_DENSER['router_top1'][-1]:.6f} (cited)",
+        f"#76_denser_b3_cos={BASELINE_76_DENSER['block_output_cosine'][-1]:.6f} (cited)",
+        f"#76_denser_exit_drift={BASELINE_76_DENSER['chain_exit_residual_drift']:.6f} (cited)",
+        f"#76_ceiling_viable={ceiling_viable} (cited)",
+        f"any_middle_ground_improved_vs_denser={any_improved}",
+        f"codec=research_int4_side per-output-channel absmax qmax={INT4_QMAX}",
+    ]
+    if best.get("viable"):
+        decision, text = (
+            1,
+            "Middle-ground INT4 experts restore multi-block viability for the measured chain.",
+        )
+    elif any_improved and ceiling_viable:
+        decision, text = (
+            2,
+            "INT4 middle-ground helps vs denser ternary, but full-HP experts or another "
+            "correction remain required.",
+        )
+    elif not any_improved:
+        decision, text = (
+            3,
+            "INT4 middle-ground fails to beat denser ternary meaningfully — gap is not "
+            "payload-width alone.",
+        )
+    else:
+        decision, text = (
+            4,
+            "Inconclusive — measured outcomes do not satisfy a locked decision branch.",
+        )
+    payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
+    payload["best_remedy_arm"] = best_label
+    return payload
 
 
 def decide_remedy_v2(comparison: dict) -> dict:

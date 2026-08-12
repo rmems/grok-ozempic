@@ -32,13 +32,18 @@ from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_64,
     BASELINE_72,
     BASELINE_74,
+    BASELINE_76_CEILING,
+    BASELINE_76_DENSER,
     REMEDY_AGENT_LINE,
     REMEDY_V2_AGENT_LINE,
+    REMEDY_V3_AGENT_LINE,
     LegacyOracleError,
     assemble_remedy_v2_comparison,
+    assemble_remedy_v3_comparison,
     decide,
     decide_remedy,
     decide_remedy_v2,
+    decide_remedy_v3,
     load_block_sources,
     pack_provenance_row,
     parse_blocks,
@@ -74,9 +79,11 @@ _ARM_TO_MODE = {
     "channel_alpha": "channel_alpha",
     "stacked_hp_channel_alpha": "periodic_hp_plus_channel_alpha",
     "hp_ceiling": "all_hp",
+    "int4": "int4",
 }
 _REMEDY_ARMS = frozenset(_ARM_TO_MODE) - {"ternary_baseline"}
 _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
+_V3_ARMS = frozenset({"int4"})
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -242,6 +249,20 @@ def _arm_identity(
         # Channel-alpha is not pack ternary: keep ternary_blocks empty and record
         # the non-HP set only under channel_alpha_blocks in _arm_meta.
         return "research_per_channel_side", None, []
+    if expert_mode == "int4":
+        if not hp_blocks:
+            return (
+                "expert_int4",
+                "INT4 experts (research_int4_side) on all chain blocks.",
+                list(ternary_blocks),
+            )
+        label = f"expert_int4_{schedule}"
+        prose = (
+            f"INT4 middle-ground label `{label}`: research INT4 experts on "
+            f"{{{_block_set_text(ternary_blocks)}}}, HP (FP16 experts) on "
+            f"{{{_block_set_text(hp_blocks)}}}."
+        )
+        return label, prose, list(ternary_blocks)
     return expert_mode, None, ternary_blocks
 
 
@@ -326,9 +347,12 @@ def _resolve_hp_blocks(
         if explicit is not None:
             return explicit
         return periodic_hp_blocks(blocks, hp_period)
+    if expert_mode == "int4":
+        # #80 P1: optional explicit HP set; default all-INT4 (P0).
+        return explicit if explicit is not None else set()
     if explicit is not None:
         raise ForwardError(
-            f"--hp-blocks is only valid for scheduled HP arms, got mode {expert_mode!r}"
+            f"--hp-blocks is only valid for scheduled HP arms or int4, got mode {expert_mode!r}"
         )
     return set()
 
@@ -449,18 +473,35 @@ def _is_v2_run(args: argparse.Namespace) -> bool:
     return args.arm in _V2_REMEDY_ARMS or _is_v2_primary(args)
 
 
+def _is_v3_primary(args: argparse.Namespace) -> bool:
+    """#80 primary: int4 on all blocks with comparison metrics for P1."""
+    return (
+        args.arm == "int4"
+        and not bool(getattr(args, "evidence_only", False))
+        and not getattr(args, "hp_blocks", None)
+    )
+
+
+def _is_v3_run(args: argparse.Namespace) -> bool:
+    return args.arm in _V3_ARMS
+
+
 def _validate_v2_cli(args: argparse.Namespace) -> None:
     evidence_only = bool(getattr(args, "evidence_only", False))
     comparison_paths = list(getattr(args, "comparison_metrics", []))
     if args.arm in _V2_REMEDY_ARMS and not evidence_only:
         raise ForwardError(f"--arm {args.arm} requires --evidence-only")
-    if evidence_only and args.arm not in _V2_REMEDY_ARMS:
-        raise ForwardError("--evidence-only is reserved for #75 stacked and HP-ceiling arms")
-    if comparison_paths and not _is_v2_primary(args):
+    if evidence_only and args.arm not in _V2_REMEDY_ARMS | _V3_ARMS:
         raise ForwardError(
-            "--comparison-metrics is only valid for the #75 primary run "
-            "(--arm periodic_hp --hp-blocks 1,2,3)"
+            "--evidence-only is reserved for #75 stacked/HP-ceiling or #80 int4 secondary"
         )
+    if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
+        raise ForwardError(
+            "--comparison-metrics is only valid for #75 primary "
+            "(--arm periodic_hp --hp-blocks 1,2,3) or #80 primary (--arm int4, no --hp-blocks)"
+        )
+    if _is_v3_primary(args) and evidence_only:
+        raise ForwardError("#80 primary cannot be --evidence-only")
 
 
 def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]:
@@ -480,9 +521,24 @@ def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]
     return payloads, errors
 
 
-def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str, *, v2: bool = False) -> dict:
+def _provenance(
+    paths: ChainPaths,
+    skip_fp16: bool,
+    arm: str,
+    *,
+    v2: bool = False,
+    v3: bool = False,
+) -> dict:
     if _is_remedy_arm(arm):
-        if v2:
+        if v3:
+            issue = "GH #80 / Linear RM-468 / beads goz-d603r4"
+            agent = REMEDY_V3_AGENT_LINE
+            model = "Grok-4.5 (high)"
+            design = (
+                "Grok Build design lock: INT4 research side-table middle-ground "
+                "(P0 all-blocks + P1 denser HP); cite #76 denser/ceiling"
+            )
+        elif v2:
             issue = "GH #75 / Linear RM-462 / beads goz-rvk"
             agent = REMEDY_V2_AGENT_LINE
             model = "GPT-5.6 Sol (xhigh)"
@@ -499,7 +555,9 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str, *, v2: bool = Fals
             "design": design,
             "baseline_64": BASELINE_64,
             "baseline_72": BASELINE_72,
-            "baseline_74": BASELINE_74 if v2 else None,
+            "baseline_74": BASELINE_74 if (v2 or v3) else None,
+            "baseline_76_denser": BASELINE_76_DENSER if v3 else None,
+            "baseline_76_ceiling": BASELINE_76_CEILING if v3 else None,
             "implementation": implementation_commit(),
             "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
             "numpy": np.__version__,
@@ -508,7 +566,12 @@ def _provenance(paths: ChainPaths, skip_fp16: bool, arm: str, *, v2: bool = Fals
             "skip_fp16_control": bool(skip_fp16),
             "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
             "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
-            "scale_policy": "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle",
+            "scale_policy": (
+                "research_int4_side per-output-channel absmax on INT4 path; "
+                "GOZ1 v3 pack-only on ternary cite path; abort on legacy_oracle"
+                if v3
+                else "GOZ1 v3 pack-only on ternary path; abort on legacy_oracle"
+            ),
             "arm": arm,
             "metrics_filename": "metrics.json",
             # metrics_note filled after chain when comparability is known
@@ -560,7 +623,10 @@ def run(args: argparse.Namespace) -> int:
         hp_blocks=args.hp_blocks,
     )
     is_v2 = _is_v2_run(args)
-    prov = _provenance(paths, args.skip_fp16_control, args.arm, v2=is_v2)
+    is_v3 = _is_v3_run(args)
+    prov = _provenance(
+        paths, args.skip_fp16_control, args.arm, v2=is_v2 and not is_v3, v3=is_v3
+    )
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
     evidence_only = bool(getattr(args, "evidence_only", False))
@@ -568,6 +634,24 @@ def run(args: argparse.Namespace) -> int:
         prov["evidence_role"] = "secondary; no independent decision"
         payload = {"provenance": prov, "chain": chain}
         decision = None
+    elif _is_v3_primary(args):
+        secondary, load_errors = _load_comparison_payloads(
+            list(getattr(args, "comparison_metrics", []))
+        )
+        comparison = assemble_remedy_v3_comparison(
+            chain,
+            secondary,
+            primary_provenance=prov,
+            load_errors=load_errors,
+        )
+        decision = decide_remedy_v3(comparison)
+        prov["evidence_role"] = "primary; sole canonical #80 decision"
+        payload = {
+            "provenance": prov,
+            "chain": chain,
+            "comparison": comparison,
+            "decision": decision,
+        }
     elif _is_v2_primary(args):
         secondary, load_errors = _load_comparison_payloads(
             list(getattr(args, "comparison_metrics", []))
@@ -598,18 +682,53 @@ def run(args: argparse.Namespace) -> int:
     assert decision is not None
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        if _is_v2_primary(args):
+        if _is_v3_primary(args):
+            # #80 report is written alongside metrics by the experiment runner
+            # (see reports/grok-1-expert-precision-remedy-v3/results.md template).
+            # Avoid v2 table keys which assume denser/stacked/ceiling arms.
+            report = args.out / "results.md"
+            if not report.is_file():
+                report.write_text(
+                    _v3_results_md(payload),
+                    encoding="utf-8",
+                )
+            print(f"wrote {report}")
+        elif _is_v2_primary(args):
             write_remedy_v2_results_md(args.out / "results.md", payload)
         elif _is_remedy_arm(args.arm):
             write_remedy_results_md(args.out / "results.md", payload)
         else:
             write_results_md(args.out / "results.md", payload)
-        print(f"wrote {args.out / 'results.md'}")
+        if not _is_v3_primary(args):
+            print(f"wrote {args.out / 'results.md'}")
     return EXIT_OK
+
+
+def _v3_results_md(payload: dict) -> str:
+    """Minimal markdown for #80 when a pre-authored report is absent."""
+    decision = payload.get("decision") or {}
+    chain = payload.get("chain") or {}
+    prov = payload.get("provenance") or {}
+    lines = [
+        "# Expert middle-ground (INT4) multi-block fidelity",
+        "",
+        f"**Agent:** {prov.get('agent', REMEDY_V3_AGENT_LINE)}",
+        f"**Decision:** Option {decision.get('decision')} — {decision.get('decision_text')}",
+        f"**Arm:** `{chain.get('arm_label')}`",
+        "",
+        "## Rationale",
+        "",
+    ]
+    for item in decision.get("rationale") or []:
+        lines.append(f"- `{item}`")
+    lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
     arm = getattr(args, "arm", None)
+    if _is_v3_run(args):
+        return "GH #80 / Linear RM-468 / beads goz-d603r4", REMEDY_V3_AGENT_LINE
     if _is_v2_run(args):
         return "GH #75 / Linear RM-462 / beads goz-rvk", REMEDY_V2_AGENT_LINE
     remedy = _is_remedy_arm(arm or "ternary_baseline")
