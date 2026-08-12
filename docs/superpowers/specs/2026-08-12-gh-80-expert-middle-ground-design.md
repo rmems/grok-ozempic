@@ -104,13 +104,13 @@ Ternary GOZ1 packs remain for **cite-only** arms and any residual ternary path; 
 
 ### Public arms / modes
 
-| Public `--arm` (stable string; final names may match self-describing labels) | Expert source | HP schedule |
-|-----------------------------------------------------------------------------|---------------|-------------|
-| `int4` (P0 primary) | `Int4SideExperts` on all chain blocks | none / empty |
-| `int4_plus_periodic_hp` or `int4` + `--hp-blocks 1,2,3` (P1) | INT4 on non-HP; FP16 control experts on HP blocks | explicit `{1,2,3}` |
+| Public `--arm` | Expert source | HP schedule |
+|----------------|---------------|-------------|
+| `int4` (P0 primary) | `Int4SideExperts` on all chain blocks | none |
+| `int4` + `--hp-blocks 1,2,3` (P1) | INT4 on non-HP; FP16 control experts on HP blocks | explicit `{1,2,3}` |
 | Existing denser / ceiling | **Cite only** from committed #76 JSON | n/a |
 
-Prefer reusing existing `--hp-blocks` for P1 rather than a one-off schedule hardcode, so labels stay self-describing (`…_123`).
+P1 reuses existing `--hp-blocks` (not a second arm enum). Self-describing `arm_label` must include the schedule suffix (e.g. `expert_int4_123` when HP is `{1,2,3}`; `expert_int4` when no HP).
 
 ### Weight selection
 
