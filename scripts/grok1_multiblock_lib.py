@@ -612,7 +612,9 @@ def _compounding_label(resid_in: list[float], end_drift: float | None = None) ->
 
 def _chain_exit_metrics(chain: dict) -> dict | None:
     """Post-chain residual stream (residual into a virtual next block)."""
-    end = chain.get("end_of_chain") or {}
+    end = chain.get("end_of_chain")
+    if not isinstance(end, dict):
+        return None
     # Prefer new keys; accept legacy misnamed key for older metrics.json.
     for key in ("expert_only_chain_exit", "expert_only_end_residual_in"):
         val = end.get(key)
@@ -622,34 +624,25 @@ def _chain_exit_metrics(chain: dict) -> dict | None:
 
 
 def _safe_float(raw: object) -> float | None:
-    """Parse a finite float, or None if missing/non-numeric/non-finite/bool."""
-    # bool is a subclass of int; reject JSON true/false as drift metrics.
-    if isinstance(raw, bool) or raw is None:
+    """Finite float from a real int/float only (reject bool, str, None)."""
+    # bool is a subclass of int; reject JSON true/false and numeric strings.
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
-    try:
-        val = float(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
+    val = float(raw)
     if not math.isfinite(val):
         return None
     return val
 
 
 def _safe_int(raw: object, default: int | None = None) -> int | None:
-    """Parse a real int (not bool), or default/None on failure.
+    """Real non-bool int only — no float truncation or string coercion.
 
-    ``None`` and non-numeric values return ``default`` (default ``None``) so
-    callers can reject missing/malformed fields instead of inventing baseline
-    look-alikes (e.g. top_k→2).
+    Missing/malformed values return ``default`` (default ``None``) so callers
+    can reject them instead of inventing baseline look-alikes (e.g. top_k→2).
     """
-    if raw is None or isinstance(raw, bool):
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, int):
         return default
-    if isinstance(raw, int):
-        return raw
-    try:
-        return int(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
+    return raw
 
 
 def _exit_metric_from_map(exit_m: dict) -> float | None:
@@ -1584,12 +1577,36 @@ def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
     return "fp16_control" if block in hp_blocks else "research_int4_side"
 
 
+def _canonical_block_list(raw: object) -> list[int] | None:
+    """List of canonical block ids, or None if raw is not a valid list."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return None
+    out: list[int] = []
+    for item in raw:
+        block = _canonical_block_id(item)
+        if block is None:
+            return None
+        out.append(block)
+    return out
+
+
 def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
+    observed_hp = _canonical_block_list(chain.get("hp_blocks"))
+    observed_int4 = _canonical_block_list(chain.get("int4_blocks"))
+    observed_ternary = _canonical_block_list(chain.get("ternary_blocks"))
+    if observed_hp is None:
+        return [f"{label}:hp_blocks_not_block_list"]
+    if observed_int4 is None:
+        return [f"{label}:int4_blocks_not_block_list"]
+    if observed_ternary is None:
+        return [f"{label}:ternary_blocks_not_block_list"]
     checks = [
-        ("hp_blocks", list(chain.get("hp_blocks") or []), hp_blocks),
-        ("int4_blocks", list(chain.get("int4_blocks") or []), int4_blocks),
-        ("ternary_blocks", list(chain.get("ternary_blocks") or []), []),
+        ("hp_blocks", observed_hp, hp_blocks),
+        ("int4_blocks", observed_int4, int4_blocks),
+        ("ternary_blocks", observed_ternary, []),
         ("expert_mode", chain.get("expert_mode"), mode),
     ]
     return [
@@ -1647,16 +1664,19 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
         return shaped
     block, versions, pack_sources, applied = shaped
     expected = _v3_applied_source(block, hp_blocks)
-    checks = [
-        (versions != {3}, f"{label}:block_{block}:container_not_v3"),
-        (pack_sources != {"pack_v2"}, f"{label}:block_{block}:pack_scale_source_not_pack_v2"),
-        (
-            applied != {expected},
+    errors: list[str] = []
+    if versions != {3}:
+        errors.append(f"{label}:block_{block}:container_not_v3")
+    if pack_sources != {"pack_v2"}:
+        errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
+    if not all(isinstance(value, str) for value in applied):
+        errors.append(f"{label}:block_{block}:applied_scale_sources_not_strings")
+    elif applied != {expected}:
+        errors.append(
             f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
-            f"expected={expected}",
-        ),
-    ]
-    return [msg for bad, msg in checks if bad]
+            f"expected={expected}"
+        )
+    return errors
 
 
 def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
@@ -1679,6 +1699,9 @@ def _finite_number(value: object) -> bool:
 
 def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
     """Require a real post-chain residual metric (no silent block-output fallback)."""
+    end = chain.get("end_of_chain")
+    if end is not None and not isinstance(end, dict):
+        return f"{label}:end_of_chain_not_mapping"
     exit_m = _chain_exit_metrics(chain)
     if exit_m is None:
         return f"{label}:missing_chain_exit"
@@ -1697,16 +1720,20 @@ def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
 
 
 def _v3_control_error(chain: dict) -> str | None:
-    """FP16 control present, ≥0.99 cosine, and finite metrics."""
+    """FP16 control present, ≥0.99 cosine, finite, and in cosine domain."""
     error = _v2_control_error(chain)
     if error is not None:
         return error
     controls, _ = _v2_controls(chain)
+    cos_hi = 1.0 + 1e-9
     for control in controls:
         if not isinstance(control, dict):
             return "fp16_control_malformed"
-        if not _finite_number(control.get("block_output_cosine")):
+        cos = _safe_float(control.get("block_output_cosine"))
+        if cos is None:
             return "fp16_control_non_finite"
+        if cos < -1.0 or cos > cos_hi:
+            return "fp16_control_out_of_domain"
     return None
 
 
@@ -1745,6 +1772,7 @@ def _v3_metric_domain_error(row: dict, label: str) -> str | None:
         (expert.get("block_output_drift_relative_norm"), 0.0, None),
     )
     for raw, lo, hi in checks:
+        # Require real numbers (not numeric strings) before domain checks.
         val = _safe_float(raw)
         if val is None or val < lo or (hi is not None and val > hi):
             return f"{label}:block_{row.get('block')}:metric_out_of_domain"
@@ -1818,6 +1846,8 @@ def _v3_secondary_entry(
     if not isinstance(chain, dict):
         return None, None, errors + ["secondary evidence missing chain object"]
     label = chain.get("arm_label")
+    if not isinstance(label, str):
+        return None, None, errors + ["secondary arm_label must be a string"]
     if label in mapped:
         return None, None, errors + [f"duplicate secondary arm {label!r}"]
     if label not in _V3_SECONDARY_ARMS:
