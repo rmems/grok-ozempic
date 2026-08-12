@@ -1749,6 +1749,15 @@ def _v3_block_order_error(chain: dict, label: str) -> str | None:
     return None
 
 
+def _explicit_topk_raw(expert: dict) -> object:
+    """Top-k set agreement without falling back to top-1 (locked top_k=2)."""
+    if "router_topk_set_agreement" in expert:
+        return expert["router_topk_set_agreement"]
+    if "router_top2_set_agreement" in expert:
+        return expert["router_top2_set_agreement"]
+    return None
+
+
 def _v3_metric_domain_error(row: dict, label: str) -> str | None:
     """Reject non-finite or out-of-domain metrics that feed viable / ranking."""
     expert = row.get("expert_only")
@@ -1756,10 +1765,9 @@ def _v3_metric_domain_error(row: dict, label: str) -> str | None:
         return None
     residual = expert.get("residual_stream_in")
     residual = residual if isinstance(residual, dict) else {}
-    topk = expert.get(
-        "router_topk_set_agreement",
-        expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
-    )
+    topk = _explicit_topk_raw(expert)
+    if topk is None:
+        return f"{label}:block_{row.get('block')}:missing_top2_agreement"
     # (raw, lo, hi) — lo/hi inclusive; hi=None means only lower bound.
     # Cosine upper bound allows tiny float noise above 1.0 (seen in-repo as 1+2e-16).
     cos_hi = 1.0 + 1e-9
