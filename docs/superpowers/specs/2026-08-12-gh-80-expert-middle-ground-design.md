@@ -2,7 +2,7 @@
 
 **Issue:** [GH #80](https://github.com/rmems/grok-ozempic/issues/80) / Linear RM-468 / beads `goz-d603r4`
 
-**Agent:** Grok Build: Grok 4.5 (xAI)
+**Agent:** Grok Build: Grok 4.5 (high) (xAI)
 
 **Status:** Design lock 2026-08-12 (brainstorming)
 
@@ -131,9 +131,9 @@ Extend `_expert_primary` / arm identity so:
 
 ### Comparison / decision (v3)
 
-Add (names indicative):
+Add:
 
-- `BASELINE_76_DENSER` / `BASELINE_76_CEILING` (or embed cite structs from #76 report).
+- `BASELINE_76_DENSER` / `BASELINE_76_CEILING` cite structs (values from committed #76 `metrics.json`).
 - `assemble_remedy_v3_comparison(primary_chain, secondary_payloads, …)`.
 - `decide_remedy_v3(comparison)` → exactly one option.
 
@@ -166,7 +166,7 @@ reports/grok-1-expert-precision-remedy-v3/
 └── (optional) int4-export/      # or external path documented in provenance
 ```
 
-Agent citation line on results.md (Grok Build / model / #80 / RM-468).
+Agent citation line on results.md: **Grok Build: Grok 4.5 (high)** · Issue #80 / RM-468.
 
 ---
 
@@ -250,4 +250,4 @@ Verification ladder:
 
 ---
 
-*Design lock by Grok Build brainstorming 2026-08-12. Cite: Grok 4.5 (xAI).*
+*Design lock by Grok Build: Grok 4.5 (high) (xAI), 2026-08-12. Commits: `Co-Authored-By: Grok <noreply@x.ai>`.*
