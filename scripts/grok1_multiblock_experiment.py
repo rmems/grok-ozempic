@@ -471,7 +471,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="ternary_baseline",
         help=(
             "ternary_baseline=#68; periodic_hp=#73 arm C; channel_alpha=#73 arm A; "
-            "int4=#80; int4_channel_alpha=#85 (INT4 codes × LS channel-α @ 131072 tokens)"
+            "int4=#80; int4_channel_alpha=#85 (INT4 codes × LS channel-α @ 8192 tokens)"
         ),
     )
     p.add_argument(
@@ -597,7 +597,7 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
         )
     # Locked P1 secondary schedule — reject before the expensive forward pass.
     # Exception: #85 re-measured absmax INT4 baseline is --arm int4 --evidence-only
-    # --tokens 131072 with **no** --hp-blocks (arm_label expert_int4).
+    # --tokens 8192 with **no** --hp-blocks (arm_label expert_int4).
     if args.arm in _INT4_FAMILY_ARMS and evidence_only:
         hp = getattr(args, "hp_blocks", None)
         tokens = getattr(args, "tokens", None)
@@ -610,11 +610,11 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
             raise ForwardError(
                 f"--arm {args.arm} --evidence-only denser-HP secondary: require "
                 f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
-                "or for #85 absmax INT4 baseline use --arm int4 --tokens 131072 "
+                "or for #85 absmax INT4 baseline use --arm int4 --tokens 8192 "
                 "--evidence-only without --hp-blocks"
             )
     # Locked #80 sample settings (bit-comparable to #72 / #76 cites),
-    # or #85 same-budget re-measure when --tokens 131072 --evidence-only.
+    # or #85 same-budget re-measure when --tokens 8192 --evidence-only.
     if args.arm == "int4":
         tokens = getattr(args, "tokens", None)
         if (
@@ -695,8 +695,8 @@ def _remedy_issue_meta(*, v2: bool, v3: bool, v4: bool = False) -> tuple[str, st
             "GH #85 / Linear RM-608 / beads goz-3h3",
             REMEDY_V4_AGENT_LINE,
             "Grok-4.5",
-            "Grok Build design lock: INT4 codes × LS channel-α stack at full Grok-1 "
-            "token budget (131072); re-measure INT4 baseline same-budget; #80@2048 historical only",
+            "Grok Build design lock: INT4 codes × LS channel-α stack at Grok-1 "
+            "max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
         )
     if v3:
         return (

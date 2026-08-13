@@ -46,18 +46,28 @@ REMEDY_V4_AGENT_LINE = (
     "Grok Build: Grok 4.5 (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
 )
 
-# #85 / RM-608 — full Grok-1 embedding vocab (token_ids without replacement).
+# #85 / RM-608 — Grok-1 max *sequence* budget for the real causal forward.
+#
+# Do not confuse with embedding vocab 131072: token_ids can sample that many
+# unique rows without replacement, but ``attention`` allocates logits of shape
+# (kv_heads, groups, T, T) ≈ O(T²). At T=131072 that is ~3 TiB and is not
+# runnable. Published Grok-1 context is 8192 tokens; that is the locked T.
 BASELINE_85 = {
-    "source": "GH #85 / RM-608 — protocol lock (owner 2026-08-13)",
-    "tokens": 131072,
+    "source": "GH #85 / RM-608 — protocol lock (Grok-1 max context sequence)",
+    "tokens": 8192,
     "token_seed": 2026 * 10_000 + 806,
     "blocks": [0, 1, 2, 3],
     "top_k": 2,
+    "tokens_note": (
+        "8192 = Grok-1 published max context (causal sequence). "
+        "Vocab size 131072 is the sampler ceiling only — not a valid T for "
+        "dense attention in this harness."
+    ),
 }
 
 V4_PRIMARY_ARM = "expert_int4_channel_alpha"
 V4_SECONDARY_ARM = "expert_int4_channel_alpha_123"
-V4_INT4_BASELINE_ARM = "expert_int4"  # re-measured at 131072; not #80 historical
+V4_INT4_BASELINE_ARM = "expert_int4"  # re-measured at 8192; not #80 historical
 INT4_SCALE_ABSMAX = "absmax"
 INT4_SCALE_LS_CHANNEL_ALPHA = "ls_channel_alpha"
 
@@ -2452,7 +2462,7 @@ def _v4_secondary_map(
     if V4_INT4_BASELINE_ARM not in mapped:
         errors.append(
             f"missing secondary arm {V4_INT4_BASELINE_ARM!r} "
-            "(re-measure absmax INT4 at 131072 for same-budget comparison)"
+            "(re-measure absmax INT4 at 8192 for same-budget comparison)"
         )
     return mapped
 
@@ -2466,7 +2476,8 @@ def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
     blocks = list(chain.get("blocks") or [])
     if tokens != int(BASELINE_85["tokens"]):
         errors.append(
-            f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} (#85 full vocab)"
+            f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} "
+            "(#85 Grok-1 max context sequence)"
         )
     if seed != int(BASELINE_85["token_seed"]):
         errors.append(f"{label}: token_seed={seed} != locked {BASELINE_85['token_seed']}")
@@ -2495,7 +2506,7 @@ def assemble_remedy_v4_comparison(
     primary_provenance: dict | None = None,
     load_errors: list[str] | None = None,
 ) -> dict:
-    """Assemble #85 stacked INT4+LS-α evidence at full token budget."""
+    """Assemble #85 stacked INT4+LS-α evidence at Grok-1 max context (8192)."""
     errors = list(load_errors or [])
     implementation = (primary_provenance or {}).get("implementation")
     if not isinstance(implementation, dict):
@@ -2546,7 +2557,7 @@ def _v4_int4_baseline_context(
     early = _decision_payload(
         4,
         "Inconclusive — stacked arm not viable and no same-budget INT4 baseline "
-        "to rank improvement (pass --comparison-metrics with expert_int4 at 131072).",
+        "to rank improvement (pass --comparison-metrics with expert_int4 at 8192).",
         [base_note, "missing_same_budget_int4_baseline"],
         best.get("compounding", "unknown"),
     )
@@ -2557,7 +2568,7 @@ def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
     if best.get("viable"):
         return (
             1,
-            "Stacked INT4 + LS channel-α restores multi-block viability at full token budget.",
+            "Stacked INT4 + LS channel-α restores multi-block viability at Grok-1 max context.",
         )
     if any_improved:
         return (

@@ -1297,7 +1297,7 @@ class RemedyV3DecisionTests(unittest.TestCase):
 
 
 class RemedyV4DecisionTests(unittest.TestCase):
-    """GH #85: INT4 codes × LS channel-α at full vocab token budget."""
+    """GH #85: INT4 codes × LS channel-α at Grok-1 max context (8192)."""
 
     def test_ls_channel_alpha_mse_not_worse_than_absmax(self) -> None:
         import numpy as np
@@ -1328,14 +1328,14 @@ class RemedyV4DecisionTests(unittest.TestCase):
             comparison_metrics=[],
             skip_fp16_control=False,
         )
-        with self.assertRaisesRegex(ForwardError, r"131072"):
+        with self.assertRaisesRegex(ForwardError, r"8192"):
             _validate_v2_cli(args)
 
-    def test_accepts_full_vocab_tokens_for_v4_primary(self) -> None:
+    def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
         seed = 2026 * 10_000 + 806
         args = argparse.Namespace(
             arm="int4_channel_alpha",
-            tokens=131072,
+            tokens=8192,
             seed=seed,
             top_k=2,
             blocks="0,1,2,3",
@@ -1359,7 +1359,7 @@ class RemedyV4DecisionTests(unittest.TestCase):
             return {
                 "arm_label": label,
                 "blocks": blocks,
-                "tokens": 131072,
+                "tokens": 8192,
                 # YYYYMMDD decision-run seed; arithmetic form avoids Bandit B105.
                 "token_seed": 2026 * 10_000 + 806,
                 "top_k": 2,
