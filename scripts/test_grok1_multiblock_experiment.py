@@ -1410,6 +1410,317 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertEqual(decision["decision"], 1)
         self.assertEqual(decision["best_remedy_arm"], V4_PRIMARY_ARM)
 
+    def test_mismatched_blocks_rejected(self) -> None:
+        from grok1_multiblock_lib import (
+            BASELINE_85,
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+        )
+
+        def _chain(label: str, blocks: list[int]) -> dict:
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": int(BASELINE_85["tokens"]),
+                "token_seed": int(BASELINE_85["token_seed"]),
+                "top_k": int(BASELINE_85["top_k"]),
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 0.97,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, [0, 1, 2, 3]),
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": _chain(V4_INT4_BASELINE_ARM, [0, 1, 2]),
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("blocks=" in e for e in comparison["validation_errors"]),
+            f"Expected blocks error in {comparison['validation_errors']}"
+        )
+
+    def test_mismatched_tokens_rejected(self) -> None:
+        from grok1_multiblock_lib import (
+            BASELINE_85,
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+        )
+
+        def _chain(label: str, tokens: int) -> dict:
+            blocks = [0, 1, 2, 3]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": tokens,
+                "token_seed": int(BASELINE_85["token_seed"]),
+                "top_k": int(BASELINE_85["top_k"]),
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 0.97,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, int(BASELINE_85["tokens"])),
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": _chain(V4_INT4_BASELINE_ARM, 2048),
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("tokens=" in e for e in comparison["validation_errors"]),
+            f"Expected tokens error in {comparison['validation_errors']}"
+        )
+
+    def test_mismatched_seed_rejected(self) -> None:
+        from grok1_multiblock_lib import (
+            BASELINE_85,
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+        )
+
+        def _chain(label: str, seed: int) -> dict:
+            blocks = [0, 1, 2, 3]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": int(BASELINE_85["tokens"]),
+                "token_seed": seed,
+                "top_k": int(BASELINE_85["top_k"]),
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 0.97,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, int(BASELINE_85["token_seed"])),
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": _chain(V4_INT4_BASELINE_ARM, 99999),
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("token_seed=" in e for e in comparison["validation_errors"]),
+            f"Expected token_seed error in {comparison['validation_errors']}"
+        )
+
+    def test_mismatched_top_k_rejected(self) -> None:
+        from grok1_multiblock_lib import (
+            BASELINE_85,
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+        )
+
+        def _chain(label: str, top_k: int) -> dict:
+            blocks = [0, 1, 2, 3]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": int(BASELINE_85["tokens"]),
+                "token_seed": int(BASELINE_85["token_seed"]),
+                "top_k": top_k,
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 0.97,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, int(BASELINE_85["top_k"])),
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": _chain(V4_INT4_BASELINE_ARM, 4),
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("top_k=" in e for e in comparison["validation_errors"]),
+            f"Expected top_k error in {comparison['validation_errors']}"
+        )
+
+    def test_missing_int4_baseline_payload(self) -> None:
+        from grok1_multiblock_lib import (
+            BASELINE_85,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+        )
+
+        def _chain(label: str, top1_last: float) -> dict:
+            blocks = [0, 1, 2, 3]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": int(BASELINE_85["tokens"]),
+                "token_seed": int(BASELINE_85["token_seed"]),
+                "top_k": int(BASELINE_85["top_k"]),
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 1.0 if b < 3 else top1_last,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        # No secondary payloads (missing INT4 baseline)
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, 0.90),
+            [],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v4(comparison)
+        # Should get decision 4 (inconclusive) when baseline is missing and not viable
+        self.assertEqual(decision["decision"], 4)
+
 
 class RemedyV2ReportTests(unittest.TestCase):
     def test_report_has_one_canonical_decision_and_both_controls(self) -> None:

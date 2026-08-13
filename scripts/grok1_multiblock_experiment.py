@@ -575,16 +575,8 @@ def _validate_locked_protocol(
         )
 
 
-def _validate_v2_cli(args: argparse.Namespace) -> None:
-    evidence_only = bool(getattr(args, "evidence_only", False))
-    comparison_paths = list(getattr(args, "comparison_metrics", []))
-    if args.arm in _V2_REMEDY_ARMS and not evidence_only:
-        raise ForwardError(f"--arm {args.arm} requires --evidence-only")
-    if evidence_only and args.arm not in _V2_REMEDY_ARMS | _INT4_FAMILY_ARMS:
-        raise ForwardError(
-            "--evidence-only is reserved for #75 stacked/HP-ceiling, #80 int4, "
-            "or #85 int4_channel_alpha secondary"
-        )
+def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None:
+    """Validate INT4-family arms including --hp-blocks and #85 baseline exception."""
     # #80/#85 P1 (int4 family + explicit HP) is evidence-only.
     if (
         args.arm in _INT4_FAMILY_ARMS
@@ -649,6 +641,19 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
             top_k=int(BASELINE_85["top_k"]),
             blocks_want=list(BASELINE_85["blocks"]),
         )
+
+
+def _validate_v2_cli(args: argparse.Namespace) -> None:
+    evidence_only = bool(getattr(args, "evidence_only", False))
+    comparison_paths = list(getattr(args, "comparison_metrics", []))
+    if args.arm in _V2_REMEDY_ARMS and not evidence_only:
+        raise ForwardError(f"--arm {args.arm} requires --evidence-only")
+    if evidence_only and args.arm not in _V2_REMEDY_ARMS | _INT4_FAMILY_ARMS:
+        raise ForwardError(
+            "--evidence-only is reserved for #75 stacked/HP-ceiling, #80 int4, "
+            "or #85 int4_channel_alpha secondary"
+        )
+    _validate_int4_family(args, evidence_only)
     if comparison_paths and not (
         _is_v2_primary(args) or _is_v3_primary(args) or _is_v4_primary(args)
     ):
@@ -931,9 +936,7 @@ def run(args: argparse.Namespace) -> int:
     assert decision is not None
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        if _is_v4_primary(args):
-            _write_v3_report(args.out / "results.md", payload)
-        elif _is_v3_primary(args):
+        if _is_v4_primary(args) or _is_v3_primary(args):
             _write_v3_report(args.out / "results.md", payload)
         elif _is_v2_primary(args):
             write_remedy_v2_results_md(args.out / "results.md", payload)

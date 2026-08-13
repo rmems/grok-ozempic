@@ -2488,6 +2488,41 @@ def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
     return errors
 
 
+def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
+    """Comprehensive validation for v4 chains (protocol + structure + controls)."""
+    label = chain.get("arm_label")
+    if label != expected_label:
+        return [f"arm_label={label!r} expected={expected_label!r}"]
+    errors: list[str] = []
+    # Protocol field validation (tokens, seed, top_k, blocks)
+    errors.extend(_v4_protocol_field_errors(chain, expected_label))
+    # Per-block structure validation
+    per_block_errors = _v2_per_block_errors(chain, expected_label)
+    errors.extend(per_block_errors)
+    # Settings/pack probes subscript per_block rows — skip when structure is invalid.
+    if per_block_errors:
+        return errors
+    # Block ordering
+    _append_optional(errors, _v3_block_order_error(chain, expected_label))
+    # Finite metrics
+    errors.extend(_v3_finite_chain_errors(chain, expected_label))
+    # FP16 control validation
+    control_error = _v3_control_error(chain)
+    if control_error is not None:
+        errors.append(f"{label}:{control_error}")
+    # Settings mismatch
+    mismatch = settings_mismatch_reason(chain)
+    if mismatch is not None:
+        errors.append(f"{label}:{mismatch}")
+    # Schedule validation
+    errors.extend(_v3_schedule_errors(chain, expected_label))
+    # Chain exit validation
+    _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
+    # Scale source validation
+    errors.extend(_v3_scale_source_errors(chain, expected_label))
+    return errors
+
+
 def _v4_all_protocol_errors(
     primary_chain: dict, secondary: dict[str, dict], primary_label: object
 ) -> list[str]:
@@ -2513,12 +2548,10 @@ def assemble_remedy_v4_comparison(
         errors.append("primary evidence missing implementation provenance")
         implementation = {}
     secondary = _v4_secondary_map(secondary_payloads, errors, implementation)
-    primary_label = primary_chain.get("arm_label")
-    if primary_label != V4_PRIMARY_ARM:
-        errors.append(
-            f"primary arm_label={primary_label!r} expected={V4_PRIMARY_ARM!r}"
-        )
-    errors.extend(_v4_all_protocol_errors(primary_chain, secondary, primary_label))
+    # Use comprehensive chain validation instead of protocol-only
+    errors.extend(_v4_chain_errors(primary_chain, V4_PRIMARY_ARM))
+    for label, payload in secondary.items():
+        errors.extend(_v4_chain_errors(payload["chain"], label))
     summaries = {V4_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
     summaries.update(
         {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
