@@ -35,16 +35,20 @@ from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_74,
     BASELINE_76_CEILING,
     BASELINE_76_DENSER,
+    BASELINE_85,
     REMEDY_AGENT_LINE,
     REMEDY_V2_AGENT_LINE,
     REMEDY_V3_AGENT_LINE,
+    REMEDY_V4_AGENT_LINE,
     LegacyOracleError,
     assemble_remedy_v2_comparison,
     assemble_remedy_v3_comparison,
+    assemble_remedy_v4_comparison,
     decide,
     decide_remedy,
     decide_remedy_v2,
     decide_remedy_v3,
+    decide_remedy_v4,
     load_block_sources,
     pack_provenance_row,
     parse_blocks,
@@ -82,10 +86,13 @@ _ARM_TO_MODE = {
     "stacked_hp_channel_alpha": "periodic_hp_plus_channel_alpha",
     "hp_ceiling": "all_hp",
     "int4": "int4",
+    "int4_channel_alpha": "int4_channel_alpha",
 }
 _REMEDY_ARMS = frozenset(_ARM_TO_MODE) - {"ternary_baseline"}
 _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 _V3_ARMS = frozenset({"int4"})
+_V4_ARMS = frozenset({"int4_channel_alpha"})
+_INT4_FAMILY_ARMS = _V3_ARMS | _V4_ARMS
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -268,6 +275,21 @@ def _arm_identity(
             f"{{{_block_set_text(hp_blocks)}}}."
         )
         return label, prose, []
+    if expert_mode == "int4_channel_alpha":
+        if not hp_blocks:
+            return (
+                "expert_int4_channel_alpha",
+                "INT4 codes × LS channel-α scales (research_int4_channel_alpha_side) "
+                "on all chain blocks.",
+                [],
+            )
+        label = f"expert_int4_channel_alpha_{schedule}"
+        prose = (
+            f"Stacked INT4+LS-α label `{label}`: INT4 codes with LS channel-α on "
+            f"{{{_block_set_text(ternary_blocks)}}}, HP (FP16 experts) on "
+            f"{{{_block_set_text(hp_blocks)}}}."
+        )
+        return label, prose, []
     return expert_mode, None, ternary_blocks
 
 
@@ -301,9 +323,13 @@ def _arm_meta(
         channel_blocks = non_hp_blocks
     elif expert_mode == "periodic_hp_plus_channel_alpha":
         channel_blocks = ternary_blocks
+    elif expert_mode == "int4_channel_alpha":
+        channel_blocks = non_hp_blocks
     else:
         channel_blocks = []
-    int4_blocks = non_hp_blocks if expert_mode == "int4" else []
+    int4_blocks = (
+        non_hp_blocks if expert_mode in ("int4", "int4_channel_alpha") else []
+    )
     return {
         "expert_mode": expert_mode,
         "hp_period": stored_period,
@@ -354,12 +380,13 @@ def _resolve_hp_blocks(
         if explicit is not None:
             return explicit
         return periodic_hp_blocks(blocks, hp_period)
-    if expert_mode == "int4":
-        # #80 P1: optional explicit HP set; default all-INT4 (P0).
+    if expert_mode in ("int4", "int4_channel_alpha"):
+        # #80/#85: optional explicit HP set; default all-INT4 / all-INT4+α (P0).
         return explicit if explicit is not None else set()
     if explicit is not None:
         raise ForwardError(
-            f"--hp-blocks is only valid for scheduled HP arms or int4, got mode {expert_mode!r}"
+            f"--hp-blocks is only valid for scheduled HP arms or int4 family, "
+            f"got mode {expert_mode!r}"
         )
     return set()
 
@@ -442,7 +469,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--arm",
         choices=sorted(_ARM_TO_MODE),
         default="ternary_baseline",
-        help="ternary_baseline=#68; periodic_hp=#73 arm C; channel_alpha=#73 arm A",
+        help=(
+            "ternary_baseline=#68; periodic_hp=#73 arm C; channel_alpha=#73 arm A; "
+            "int4=#80; int4_channel_alpha=#85 (INT4 codes × LS channel-α @ 131072 tokens)"
+        ),
     )
     p.add_argument(
         "--hp-period",
@@ -504,61 +534,140 @@ def _is_v3_run(args: argparse.Namespace) -> bool:
     return args.arm in _V3_ARMS
 
 
+def _is_v4_primary(args: argparse.Namespace) -> bool:
+    """#85 primary: INT4 + LS channel-α on all blocks."""
+    return (
+        args.arm == "int4_channel_alpha"
+        and not bool(getattr(args, "evidence_only", False))
+        and not getattr(args, "hp_blocks", None)
+    )
+
+
+def _is_v4_run(args: argparse.Namespace) -> bool:
+    return args.arm in _V4_ARMS
+
+
+def _validate_locked_protocol(
+    args: argparse.Namespace,
+    *,
+    issue: str,
+    tokens: int,
+    seed: int,
+    top_k: int,
+    blocks_want: list[int],
+) -> None:
+    locked = (
+        ("tokens", int(args.tokens), int(tokens)),
+        ("seed", int(args.seed), int(seed)),
+        ("top_k", int(args.top_k), int(top_k)),
+    )
+    for name, got, want in locked:
+        if got != want:
+            raise ForwardError(
+                f"{issue} runs require --{name.replace('_', '-')} {want} "
+                f"(got {got}); noncanonical settings cannot produce comparison evidence"
+            )
+    blocks = parse_blocks(args.blocks)
+    if blocks != list(blocks_want):
+        raise ForwardError(
+            f"{issue} runs require --blocks {','.join(str(b) for b in blocks_want)} "
+            f"(got {blocks}); noncanonical chains cannot produce comparison evidence"
+        )
+
+
 def _validate_v2_cli(args: argparse.Namespace) -> None:
     evidence_only = bool(getattr(args, "evidence_only", False))
     comparison_paths = list(getattr(args, "comparison_metrics", []))
     if args.arm in _V2_REMEDY_ARMS and not evidence_only:
         raise ForwardError(f"--arm {args.arm} requires --evidence-only")
-    if evidence_only and args.arm not in _V2_REMEDY_ARMS | _V3_ARMS:
+    if evidence_only and args.arm not in _V2_REMEDY_ARMS | _INT4_FAMILY_ARMS:
         raise ForwardError(
-            "--evidence-only is reserved for #75 stacked/HP-ceiling or #80 int4 secondary"
+            "--evidence-only is reserved for #75 stacked/HP-ceiling, #80 int4, "
+            "or #85 int4_channel_alpha secondary"
         )
-    # #80 P1 (int4 + explicit HP) is evidence-only; never a legacy primary decision.
-    if args.arm == "int4" and getattr(args, "hp_blocks", None) and not evidence_only:
+    # #80/#85 P1 (int4 family + explicit HP) is evidence-only.
+    if (
+        args.arm in _INT4_FAMILY_ARMS
+        and getattr(args, "hp_blocks", None)
+        and not evidence_only
+    ):
         raise ForwardError(
-            "--arm int4 with --hp-blocks is #80 P1 secondary: pass --evidence-only "
-            "(primary is --arm int4 with no --hp-blocks)"
+            f"--arm {args.arm} with --hp-blocks is P1 secondary: pass --evidence-only "
+            f"(primary is --arm {args.arm} with no --hp-blocks)"
         )
-    # Locked P1 secondary schedule only — reject before the expensive forward pass.
-    if args.arm == "int4" and evidence_only:
+    # Locked P1 secondary schedule — reject before the expensive forward pass.
+    # Exception: #85 re-measured absmax INT4 baseline is --arm int4 --evidence-only
+    # --tokens 131072 with **no** --hp-blocks (arm_label expert_int4).
+    if args.arm in _INT4_FAMILY_ARMS and evidence_only:
         hp = getattr(args, "hp_blocks", None)
-        if hp != {1, 2, 3}:
-            raise ForwardError(
-                "--arm int4 --evidence-only is #80 P1 secondary: require "
-                f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None})"
-            )
-    # Locked #80 sample settings (bit-comparable to #72 / #76 cites).
-    if args.arm == "int4":
-        locked = (
-            ("tokens", int(args.tokens), int(BASELINE_72["tokens"])),
-            ("seed", int(args.seed), int(BASELINE_72["token_seed"])),
-            ("top_k", int(args.top_k), int(BASELINE_72["top_k"])),
+        tokens = getattr(args, "tokens", None)
+        is_85_budget = (
+            tokens is not None and int(tokens) == int(BASELINE_85["tokens"])
         )
-        for name, got, want in locked:
-            if got != want:
-                raise ForwardError(
-                    f"#80 int4 runs require --{name.replace('_', '-')} {want} "
-                    f"(got {got}); noncanonical settings cannot produce comparison evidence"
-                )
-        # Exact locked chain before any real-weight forward work.
-        blocks = parse_blocks(args.blocks)
-        want_blocks = list(BASELINE_72["blocks"])
-        if blocks != want_blocks:
+        if args.arm == "int4" and is_85_budget and hp is None:
+            pass  # same-budget absmax INT4 baseline
+        elif hp != {1, 2, 3}:
             raise ForwardError(
-                f"#80 int4 runs require --blocks {','.join(str(b) for b in want_blocks)} "
-                f"(got {blocks}); noncanonical chains cannot produce comparison evidence"
+                f"--arm {args.arm} --evidence-only denser-HP secondary: require "
+                f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
+                "or for #85 absmax INT4 baseline use --arm int4 --tokens 131072 "
+                "--evidence-only without --hp-blocks"
             )
-    if comparison_paths and not (_is_v2_primary(args) or _is_v3_primary(args)):
+    # Locked #80 sample settings (bit-comparable to #72 / #76 cites),
+    # or #85 same-budget re-measure when --tokens 131072 --evidence-only.
+    if args.arm == "int4":
+        tokens = getattr(args, "tokens", None)
+        if (
+            evidence_only
+            and tokens is not None
+            and int(tokens) == int(BASELINE_85["tokens"])
+        ):
+            _validate_locked_protocol(
+                args,
+                issue="#85 re-measured absmax int4",
+                tokens=int(BASELINE_85["tokens"]),
+                seed=int(BASELINE_85["token_seed"]),
+                top_k=int(BASELINE_85["top_k"]),
+                blocks_want=list(BASELINE_85["blocks"]),
+            )
+        else:
+            _validate_locked_protocol(
+                args,
+                issue="#80 int4",
+                tokens=int(BASELINE_72["tokens"]),
+                seed=int(BASELINE_72["token_seed"]),
+                top_k=int(BASELINE_72["top_k"]),
+                blocks_want=list(BASELINE_72["blocks"]),
+            )
+    # #85 full Grok-1 token budget (owner lock — not 2048).
+    if args.arm == "int4_channel_alpha":
+        _validate_locked_protocol(
+            args,
+            issue="#85 int4_channel_alpha",
+            tokens=int(BASELINE_85["tokens"]),
+            seed=int(BASELINE_85["token_seed"]),
+            top_k=int(BASELINE_85["top_k"]),
+            blocks_want=list(BASELINE_85["blocks"]),
+        )
+    if comparison_paths and not (
+        _is_v2_primary(args) or _is_v3_primary(args) or _is_v4_primary(args)
+    ):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "
-            "(--arm periodic_hp --hp-blocks 1,2,3) or #80 primary (--arm int4, no --hp-blocks)"
+            "(--arm periodic_hp --hp-blocks 1,2,3), #80 primary (--arm int4), "
+            "or #85 primary (--arm int4_channel_alpha)"
         )
     if _is_v3_primary(args) and evidence_only:
         raise ForwardError("#80 primary cannot be --evidence-only")
+    if _is_v4_primary(args) and evidence_only:
+        raise ForwardError("#85 primary cannot be --evidence-only")
     # Primary and locked P1 secondary both need FP16 control (HP blocks use it).
-    if args.arm == "int4" and bool(getattr(args, "skip_fp16_control", False)):
+    if args.arm in _INT4_FAMILY_ARMS and bool(
+        getattr(args, "skip_fp16_control", False)
+    ):
         raise ForwardError(
-            "#80 int4 runs require FP16 control (do not pass --skip-fp16-control)"
+            f"#{'85' if args.arm == 'int4_channel_alpha' else '80'} "
+            f"{args.arm} runs require FP16 control (do not pass --skip-fp16-control)"
         )
 
 
@@ -579,8 +688,16 @@ def _load_comparison_payloads(paths: list[Path]) -> tuple[list[dict], list[str]]
     return payloads, errors
 
 
-def _remedy_issue_meta(*, v2: bool, v3: bool) -> tuple[str, str, str, str]:
+def _remedy_issue_meta(*, v2: bool, v3: bool, v4: bool = False) -> tuple[str, str, str, str]:
     """Return (issue, agent, model, design) for remedy provenance."""
+    if v4:
+        return (
+            "GH #85 / Linear RM-608 / beads goz-3h3",
+            REMEDY_V4_AGENT_LINE,
+            "Grok-4.5",
+            "Grok Build design lock: INT4 codes × LS channel-α stack at full Grok-1 "
+            "token budget (131072); re-measure INT4 baseline same-budget; #80@2048 historical only",
+        )
     if v3:
         return (
             "GH #80 / Linear RM-468 / beads goz-d603r4",
@@ -604,7 +721,12 @@ def _remedy_issue_meta(*, v2: bool, v3: bool) -> tuple[str, str, str, str]:
     )
 
 
-def _remedy_scale_policy(*, v3: bool) -> str:
+def _remedy_scale_policy(*, v3: bool, v4: bool = False) -> str:
+    if v4:
+        return (
+            "research_int4_channel_alpha_side: INT4 codes × LS channel-α scales; "
+            "absmax INT4 baseline uses research_int4_side; abort on legacy_oracle"
+        )
     if v3:
         return (
             "research_int4_side per-output-channel absmax on INT4 path; "
@@ -620,6 +742,7 @@ def _provenance(
     *,
     v2: bool = False,
     v3: bool = False,
+    v4: bool = False,
 ) -> dict:
     if not _is_remedy_arm(arm):
         return {
@@ -638,7 +761,7 @@ def _provenance(
             "ternary_policy": "experts only; attention/routers/norms high precision",
             "scale_policy": "GOZ1 v3 pack-only; abort on legacy_oracle",
         }
-    issue, agent, model, design = _remedy_issue_meta(v2=v2, v3=v3)
+    issue, agent, model, design = _remedy_issue_meta(v2=v2, v3=v3, v4=v4)
     return {
         "issue": issue,
         "agent": agent,
@@ -646,9 +769,10 @@ def _provenance(
         "design": design,
         "baseline_64": BASELINE_64,
         "baseline_72": BASELINE_72,
-        "baseline_74": BASELINE_74 if (v2 or v3) else None,
+        "baseline_74": BASELINE_74 if (v2 or v3 or v4) else None,
         "baseline_76_denser": BASELINE_76_DENSER if v3 else None,
         "baseline_76_ceiling": BASELINE_76_CEILING if v3 else None,
+        "baseline_85": BASELINE_85 if v4 else None,
         "implementation": implementation_commit(),
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
         "numpy": np.__version__,
@@ -657,7 +781,7 @@ def _provenance(
         "skip_fp16_control": bool(skip_fp16),
         "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
         "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
-        "scale_policy": _remedy_scale_policy(v3=v3),
+        "scale_policy": _remedy_scale_policy(v3=v3, v4=v4),
         "arm": arm,
         "metrics_filename": "metrics.json",
         # metrics_note filled after chain when comparability is known
@@ -682,7 +806,7 @@ def run(args: argparse.Namespace) -> int:
     args.out = args.out.expanduser()
     expert_mode = _ARM_TO_MODE[args.arm]
     int4_side_root = None
-    if expert_mode == "int4":
+    if expert_mode in ("int4", "int4_channel_alpha"):
         raw_side = getattr(args, "int4_side_root", None)
         int4_side_root = (
             raw_side.expanduser()
@@ -704,8 +828,14 @@ def run(args: argparse.Namespace) -> int:
     )
     is_v2 = _is_v2_run(args)
     is_v3 = _is_v3_run(args)
+    is_v4 = _is_v4_run(args)
     prov = _provenance(
-        paths, args.skip_fp16_control, args.arm, v2=is_v2 and not is_v3, v3=is_v3
+        paths,
+        args.skip_fp16_control,
+        args.arm,
+        v2=is_v2 and not is_v3 and not is_v4,
+        v3=is_v3 and not is_v4,
+        v4=is_v4,
     )
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
@@ -714,6 +844,34 @@ def run(args: argparse.Namespace) -> int:
         prov["evidence_role"] = "secondary; no independent decision"
         payload = {"provenance": prov, "chain": chain}
         decision = None
+    elif _is_v4_primary(args):
+        secondary, load_errors = _load_comparison_payloads(
+            list(getattr(args, "comparison_metrics", []))
+        )
+        comparison = assemble_remedy_v4_comparison(
+            chain,
+            secondary,
+            primary_provenance=prov,
+            load_errors=load_errors,
+        )
+        rows = chain.get("per_block") or []
+        fp16_hit = _fp16_gate(chain, rows, [], "unknown")
+        if fp16_hit is not None:
+            decision = fp16_hit
+            comparison = {
+                **comparison,
+                "validation_errors": list(comparison.get("validation_errors") or [])
+                + list(fp16_hit.get("rationale") or []),
+            }
+        else:
+            decision = decide_remedy_v4(comparison)
+        prov["evidence_role"] = "primary; sole canonical #85 decision"
+        payload = {
+            "provenance": prov,
+            "chain": chain,
+            "comparison": comparison,
+            "decision": decision,
+        }
     elif _is_v3_primary(args):
         secondary, load_errors = _load_comparison_payloads(
             list(getattr(args, "comparison_metrics", []))
@@ -773,7 +931,9 @@ def run(args: argparse.Namespace) -> int:
     assert decision is not None
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
-        if _is_v3_primary(args):
+        if _is_v4_primary(args):
+            _write_v3_report(args.out / "results.md", payload)
+        elif _is_v3_primary(args):
             _write_v3_report(args.out / "results.md", payload)
         elif _is_v2_primary(args):
             write_remedy_v2_results_md(args.out / "results.md", payload)

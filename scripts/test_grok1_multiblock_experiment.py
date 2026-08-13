@@ -1296,6 +1296,118 @@ class RemedyV3DecisionTests(unittest.TestCase):
             _validate_v2_cli(args)
 
 
+class RemedyV4DecisionTests(unittest.TestCase):
+    """GH #85: INT4 codes × LS channel-α at full vocab token budget."""
+
+    def test_ls_channel_alpha_mse_not_worse_than_absmax(self) -> None:
+        import numpy as np
+        from grok1_multiblock_lib import (
+            int4_absmax_quantize,
+            int4_dequant_from_codes,
+            int4_ls_channel_alpha_scale,
+        )
+
+        rng = np.random.default_rng(7)
+        w = rng.standard_normal((48, 24)).astype(np.float32)
+        q, s_abs = int4_absmax_quantize(w)
+        s_ls = int4_ls_channel_alpha_scale(w, q)
+        err_abs = float(np.mean((w - int4_dequant_from_codes(q, s_abs)) ** 2))
+        err_ls = float(np.mean((w - int4_dequant_from_codes(q, s_ls)) ** 2))
+        self.assertLessEqual(err_ls, err_abs + 1e-9)
+
+    def test_rejects_2048_tokens_for_v4_primary(self) -> None:
+        args = argparse.Namespace(
+            arm="int4_channel_alpha",
+            tokens=2048,
+            seed=20260806,
+            top_k=2,
+            blocks="0,1,2,3",
+            evidence_only=False,
+            hp_blocks=None,
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        with self.assertRaisesRegex(ForwardError, r"131072"):
+            _validate_v2_cli(args)
+
+    def test_accepts_full_vocab_tokens_for_v4_primary(self) -> None:
+        args = argparse.Namespace(
+            arm="int4_channel_alpha",
+            tokens=131072,
+            seed=20260806,
+            top_k=2,
+            blocks="0,1,2,3",
+            evidence_only=False,
+            hp_blocks=None,
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        _validate_v2_cli(args)
+
+    def test_option_1_when_stack_is_viable(self) -> None:
+        from grok1_multiblock_lib import (
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+        )
+
+        def _chain(label: str, top1_last: float) -> dict:
+            blocks = [0, 1, 2, 3]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": 131072,
+                "token_seed": 20260806,
+                "top_k": 2,
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 1.0 if b < 3 else top1_last,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+            }
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            _chain(V4_PRIMARY_ARM, 0.97),
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": _chain(V4_INT4_BASELINE_ARM, 0.90),
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v4(comparison)
+        self.assertEqual(decision["decision"], 1)
+        self.assertEqual(decision["best_remedy_arm"], V4_PRIMARY_ARM)
+
+
 class RemedyV2ReportTests(unittest.TestCase):
     def test_report_has_one_canonical_decision_and_both_controls(self) -> None:
         comparison = _v2_comparison("help", "failed", "viable")
