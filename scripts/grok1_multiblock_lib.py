@@ -2457,6 +2457,37 @@ def _v4_secondary_map(
     return mapped
 
 
+def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
+    """Fail closed when chain settings differ from BASELINE_85."""
+    errors: list[str] = []
+    tokens = _safe_int(chain.get("tokens"))
+    seed = _safe_int(chain.get("token_seed"))
+    top_k = _safe_int(chain.get("top_k"))
+    blocks = list(chain.get("blocks") or [])
+    if tokens != int(BASELINE_85["tokens"]):
+        errors.append(
+            f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} (#85 full vocab)"
+        )
+    if seed != int(BASELINE_85["token_seed"]):
+        errors.append(f"{label}: token_seed={seed} != locked {BASELINE_85['token_seed']}")
+    if top_k != int(BASELINE_85["top_k"]):
+        errors.append(f"{label}: top_k={top_k} != locked {BASELINE_85['top_k']}")
+    if blocks != list(BASELINE_85["blocks"]):
+        errors.append(f"{label}: blocks={blocks} != locked {list(BASELINE_85['blocks'])}")
+    return errors
+
+
+def _v4_all_protocol_errors(
+    primary_chain: dict, secondary: dict[str, dict], primary_label: object
+) -> list[str]:
+    chains = [(primary_chain, str(primary_label or V4_PRIMARY_ARM))]
+    chains.extend((payload["chain"], label) for label, payload in secondary.items())
+    errors: list[str] = []
+    for chain, label in chains:
+        errors.extend(_v4_protocol_field_errors(chain, label))
+    return errors
+
+
 def assemble_remedy_v4_comparison(
     primary_chain: dict,
     secondary_payloads: list[dict],
@@ -2476,24 +2507,7 @@ def assemble_remedy_v4_comparison(
         errors.append(
             f"primary arm_label={primary_label!r} expected={V4_PRIMARY_ARM!r}"
         )
-    # Protocol: tokens must match BASELINE_85 (not #72's 2048).
-    for chain, label in [(primary_chain, str(primary_label or V4_PRIMARY_ARM))] + [
-        (payload["chain"], label) for label, payload in secondary.items()
-    ]:
-        tokens = _safe_int(chain.get("tokens"))
-        seed = _safe_int(chain.get("token_seed"))
-        top_k = _safe_int(chain.get("top_k"))
-        blocks = list(chain.get("blocks") or [])
-        if tokens != int(BASELINE_85["tokens"]):
-            errors.append(
-                f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} (#85 full vocab)"
-            )
-        if seed != int(BASELINE_85["token_seed"]):
-            errors.append(f"{label}: token_seed={seed} != locked {BASELINE_85['token_seed']}")
-        if top_k != int(BASELINE_85["top_k"]):
-            errors.append(f"{label}: top_k={top_k} != locked {BASELINE_85['top_k']}")
-        if blocks != list(BASELINE_85["blocks"]):
-            errors.append(f"{label}: blocks={blocks} != locked {list(BASELINE_85['blocks'])}")
+    errors.extend(_v4_all_protocol_errors(primary_chain, secondary, primary_label))
     summaries = {V4_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
     summaries.update(
         {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
@@ -2513,6 +2527,65 @@ def assemble_remedy_v4_comparison(
         },
         "primary_provenance": {"implementation": implementation},
     }
+
+
+def _v4_int4_baseline_context(
+    summaries: dict, stack_labels: list[str], best: dict
+) -> tuple[bool, str, dict | None]:
+    """Return (any_improved, base_note, early_option4_or_None)."""
+    int4_base = summaries.get(V4_INT4_BASELINE_ARM)
+    if int4_base is not None and _v3_middle_complete(int4_base):
+        any_improved = any(
+            _v4_improved_vs_int4(summaries[label], int4_base) for label in stack_labels
+        )
+        base_top1 = float(int4_base["router_top1"][-1])
+        return any_improved, f"remeasured_int4_b3_top1={base_top1:.6f}", None
+    base_note = "remeasured_int4_baseline=missing"
+    if best.get("viable"):
+        return False, base_note, None
+    early = _decision_payload(
+        4,
+        "Inconclusive — stacked arm not viable and no same-budget INT4 baseline "
+        "to rank improvement (pass --comparison-metrics with expert_int4 at 131072).",
+        [base_note, "missing_same_budget_int4_baseline"],
+        best.get("compounding", "unknown"),
+    )
+    return False, base_note, early
+
+
+def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
+    if best.get("viable"):
+        return (
+            1,
+            "Stacked INT4 + LS channel-α restores multi-block viability at full token budget.",
+        )
+    if any_improved:
+        return (
+            2,
+            "Stacked INT4 + LS channel-α helps vs re-measured INT4 baseline, but still "
+            "compounds / misses the ~0.95 viability band.",
+        )
+    return (
+        3,
+        "Stacked INT4 + LS channel-α fails to beat re-measured INT4 alone — gap is not "
+        "LS-α on INT4 codes.",
+    )
+
+
+def _v4_decision_rationale(
+    best_label: str, best: dict, *, base_note: str, any_improved: bool
+) -> list[str]:
+    return [
+        f"best_stack_arm={best_label}",
+        f"best_b3_top1={float(best['router_top1'][-1]):.6f}",
+        f"best_b3_cos={float(best['block_output_cosine'][-1]):.6f}",
+        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
+        base_note,
+        f"any_stack_improved_vs_remeasured_int4={any_improved}",
+        f"tokens={BASELINE_85['tokens']}",
+        "codec=research_int4_channel_alpha_side INT4 codes × LS channel-α",
+        "#80_historical_b3_top1=0.925293@2048 (cite only; not same-budget)",
+    ]
 
 
 def decide_remedy_v4(comparison: dict) -> dict:
@@ -2536,53 +2609,15 @@ def decide_remedy_v4(comparison: dict) -> dict:
         )
     best_label = max(stack_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
     best = summaries[best_label]
-    int4_base = summaries.get(V4_INT4_BASELINE_ARM)
-    if int4_base is not None and _v3_middle_complete(int4_base):
-        any_improved = any(
-            _v4_improved_vs_int4(summaries[label], int4_base) for label in stack_labels
-        )
-        base_top1 = float(int4_base["router_top1"][-1])
-        base_note = f"remeasured_int4_b3_top1={base_top1:.6f}"
-    else:
-        # Without same-budget INT4 baseline, only viability can decide option 1.
-        any_improved = False
-        base_note = "remeasured_int4_baseline=missing"
-        if not best.get("viable"):
-            return _decision_payload(
-                4,
-                "Inconclusive — stacked arm not viable and no same-budget INT4 baseline "
-                "to rank improvement (pass --comparison-metrics with expert_int4 at 131072).",
-                [base_note, "missing_same_budget_int4_baseline"],
-                best.get("compounding", "unknown"),
-            )
-    if best.get("viable"):
-        decision, text = (
-            1,
-            "Stacked INT4 + LS channel-α restores multi-block viability at full token budget.",
-        )
-    elif any_improved:
-        decision, text = (
-            2,
-            "Stacked INT4 + LS channel-α helps vs re-measured INT4 baseline, but still "
-            "compounds / misses the ~0.95 viability band.",
-        )
-    else:
-        decision, text = (
-            3,
-            "Stacked INT4 + LS channel-α fails to beat re-measured INT4 alone — gap is not "
-            "LS-α on INT4 codes.",
-        )
-    rationale = [
-        f"best_stack_arm={best_label}",
-        f"best_b3_top1={float(best['router_top1'][-1]):.6f}",
-        f"best_b3_cos={float(best['block_output_cosine'][-1]):.6f}",
-        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
-        base_note,
-        f"any_stack_improved_vs_remeasured_int4={any_improved}",
-        f"tokens={BASELINE_85['tokens']}",
-        "codec=research_int4_channel_alpha_side INT4 codes × LS channel-α",
-        "#80_historical_b3_top1=0.925293@2048 (cite only; not same-budget)",
-    ]
+    any_improved, base_note, early = _v4_int4_baseline_context(
+        summaries, stack_labels, best
+    )
+    if early is not None:
+        return early
+    decision, text = _v4_outcome(best, any_improved=any_improved)
+    rationale = _v4_decision_rationale(
+        best_label, best, base_note=base_note, any_improved=any_improved
+    )
     payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
     payload["best_remedy_arm"] = best_label
     return payload
