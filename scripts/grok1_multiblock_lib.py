@@ -2,6 +2,8 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -35,6 +37,43 @@ REMEDY_AGENT_LINE = (
 REMEDY_V2_AGENT_LINE = (
     "OpenAI Codex: GPT-5.6 Sol (xhigh) · Issue: #75 / Linear RM-462 · beads goz-rvk"
 )
+
+REMEDY_V3_AGENT_LINE = (
+    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #80 / Linear RM-468 · beads goz-d603r4"
+)
+
+# Cited from reports/grok-1-expert-precision-remedy-v2/ (PR #76 option 2).
+BASELINE_76_DENSER = {
+    "source": "reports/grok-1-expert-precision-remedy-v2/ (PR #76 / #75 / RM-462)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "decision": 2,
+    "block_output_cosine": [0.963572, 0.963211, 0.939684, 0.913853],
+    "residual_in_drift": [0.0, 0.277351, 0.279321, 0.348475],
+    "router_top1": [1.0, 0.887695, 0.729004, 0.615723],
+    "router_top2": [1.0, 0.680664, 0.592773, 0.408691],
+    "chain_exit_residual_drift": 0.4370545723375058,
+    "arm_label": "expert_periodic_hp_123",
+}
+
+BASELINE_76_CEILING = {
+    "source": "reports/grok-1-expert-precision-remedy-v2/hp-ceiling/ (PR #76)",
+    "tokens": 2048,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "block_output_cosine": [1.0, 0.999997, 0.999998, 0.999984],
+    "router_top1": [1.0, 1.0, 1.0, 1.0],
+    "chain_exit_residual_drift": 0.005690267932494616,
+    "arm_label": "expert_hp_ceiling",
+    "viable": True,
+}
+
+V3_PRIMARY_ARM = "expert_int4"
+V3_SECONDARY_ARM = "expert_int4_123"
+INT4_QMAX = 7
 
 # Cited from reports/grok-1-expert-only-multiblock/ (PR #72); bit-identical
 # settings: tokens=2048, seed=20260806, blocks=0..3, pack-only v3 experts.
@@ -244,6 +283,202 @@ def channel_alpha_dequant(weights: np.ndarray, trits: np.ndarray) -> np.ndarray:
     return trits.astype(np.float32) * alpha.astype(np.float32)
 
 
+def _require_finite_array(arr: np.ndarray, what: str) -> None:
+    if not np.isfinite(arr).all():
+        raise ForwardError(f"int4 dequant: non-finite {what}")
+
+
+def _int4_reduce_axes(ndim: int) -> tuple[int, ...]:
+    """Axes to reduce for absmax: contracting dims only.
+
+    Rank-2 ``(K, N)`` reduces K. Rank ≥3 ``(E, K, N, …)`` preserves the leading
+    expert axis and the last output-channel axis (matches per-expert 2-D path).
+    """
+    if ndim <= 1:
+        return ()
+    if ndim == 2:
+        return (0,)
+    return tuple(range(1, ndim - 1))
+
+
+def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-output-channel absmax INT4 codes (int8) + scale (f32).
+
+    ``q ∈ [-INT4_QMAX, INT4_QMAX]`` stored as int8. Scale reduces contracting
+    axes only (preserves expert lead dim when present). Scale shape is
+    ``(N,)`` for 2-D and ``(E, N)`` for 3-D expert tensors.
+    """
+    w = np.asarray(weights, dtype=np.float32)
+    if w.size == 0:
+        raise ForwardError("int4 dequant: empty weight tensor")
+    _require_finite_array(w, "source weights (NaN/Inf)")
+    if w.ndim == 1:
+        amax = np.asarray(np.max(np.abs(w)), dtype=np.float32)
+        _require_finite_array(amax, "absmax")
+        scale = np.float32(max(float(amax) / float(INT4_QMAX), 1e-12))
+        q = np.clip(np.rint(w / scale), -INT4_QMAX, INT4_QMAX).astype(np.int8)
+        return q, np.asarray([scale], dtype=np.float32)
+    axes = _int4_reduce_axes(w.ndim)
+    amax = np.max(np.abs(w), axis=axes)
+    _require_finite_array(amax, "absmax")
+    scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
+    scale_b = scale
+    for ax in sorted(axes):
+        scale_b = np.expand_dims(scale_b, ax)
+    q = np.clip(np.rint(w / scale_b), -INT4_QMAX, INT4_QMAX).astype(np.int8)
+    _require_finite_array(scale, "scales")
+    return q, scale
+
+
+def int4_dequant_from_codes(q: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    """Dequant INT4 codes × scale (research side-table load path)."""
+    q_arr = np.asarray(q, dtype=np.float32)
+    scale_arr = np.asarray(scale, dtype=np.float32)
+    if scale_arr.ndim == q_arr.ndim - 1 and q_arr.ndim >= 2:
+        # Broadcast scale over contracting axis between lead and last dims.
+        # e.g. q (E,K,N) × scale (E,N) → expand to (E,1,N).
+        for ax in range(1, q_arr.ndim - 1):
+            scale_arr = np.expand_dims(scale_arr, ax)
+    deq = (q_arr * scale_arr).astype(np.float32)
+    _require_finite_array(deq, "dequantized weights")
+    return deq
+
+
+def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Quantize then dequant (convenience); prefer side-table codes for runs."""
+    q, scale = int4_absmax_quantize(weights)
+    return int4_dequant_from_codes(q, scale), scale
+
+
+class Int4SideExperts:
+    """Expert primary from a **persisted** INT4 research side-table.
+
+    Scale provenance tag is ``research_int4_side`` — never claim pack_v2.
+    Layout under ``side_root/block_{BBB}/``: ``{tensor}__q_int8.npy``,
+    ``{tensor}__scale_f32.npy``, ``sidecar.json``. Missing tables are built
+    once from the FP32 reference and written before any forward access.
+    """
+
+    label = "research_int4_side"
+
+    def __init__(
+        self,
+        reference: NpyWeights,
+        *,
+        side_root: Path,
+        block: int,
+    ) -> None:
+        self._ref = reference
+        self.roles = {r: reference.roles[r] for r in EXPERT_ROLES if r in reference.roles}
+        missing = sorted(EXPERT_ROLES - set(self.roles))
+        if missing:
+            raise ForwardError(f"int4 primary lacks expert roles {missing}")
+        self.scale_sources = {self.roles[r]: "research_int4_side" for r in self.roles}
+        self._block = int(block)
+        self._side_dir = Path(side_root).expanduser() / f"block_{self._block:03d}"
+        self._side_dir.mkdir(parents=True, exist_ok=True)
+        self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        sidecar: dict[str, dict] = {
+            "block": self._block,
+            "codec": "int4_absmax_per_output_channel",
+            "qmax": INT4_QMAX,
+            "tensors": {},
+        }
+        for role, name in self.roles.items():
+            self._cache[role] = self._load_or_build(name)
+            q, scale = self._cache[role]
+            sidecar["tensors"][name] = {
+                "q_file": f"{name.replace('.', '__')}__q_int8.npy",
+                "scale_file": f"{name.replace('.', '__')}__scale_f32.npy",
+                "shape": list(q.shape),
+                "scale_shape": list(scale.shape),
+            }
+        (self._side_dir / "sidecar.json").write_text(
+            json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _paths(self, name: str) -> tuple[Path, Path]:
+        stem = name.replace(".", "__")
+        return (
+            self._side_dir / f"{stem}__q_int8.npy",
+            self._side_dir / f"{stem}__scale_f32.npy",
+        )
+
+    def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Scale layout for preserved-expert absmax (matches int4_absmax_quantize)."""
+        if len(ref_shape) >= 3:
+            return (ref_shape[0], ref_shape[-1])
+        if len(ref_shape) == 2:
+            return (ref_shape[-1],)
+        return (1,) if ref_shape else ()
+
+    def _validate_side_codes(
+        self, name: str, q: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> np.ndarray:
+        if q.dtype != np.int8:
+            raise ForwardError(f"int4 side-table {name}: codes dtype {q.dtype} != int8")
+        q_i = np.asarray(q, dtype=np.int8)
+        if not np.all((q_i >= -INT4_QMAX) & (q_i <= INT4_QMAX)):
+            raise ForwardError(
+                f"int4 side-table {name}: codes outside [-{INT4_QMAX}, {INT4_QMAX}]"
+            )
+        if tuple(int(d) for d in q_i.shape) != ref_shape:
+            raise ForwardError(
+                f"int4 side-table {name}: codes shape {q_i.shape} != reference {ref_shape}"
+            )
+        return q_i
+
+    def _validate_side_scale(
+        self, name: str, scale: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> np.ndarray:
+        scale_f = np.asarray(scale, dtype=np.float32)
+        _require_finite_array(scale_f, "loaded scales")
+        expected = self._expected_side_scale_shape(ref_shape)
+        if tuple(int(d) for d in scale_f.shape) != expected:
+            raise ForwardError(
+                f"int4 side-table {name}: scale shape {scale_f.shape} != expected {expected}"
+            )
+        return scale_f
+
+    def _validate_side_pair(
+        self, name: str, q: np.ndarray, scale: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Fail-closed checks for loaded side-table codes + scales."""
+        q_i = self._validate_side_codes(name, q, ref_shape)
+        scale_f = self._validate_side_scale(name, scale, ref_shape)
+        return q_i, scale_f
+
+    def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
+        role = next(r for r, n in self.roles.items() if n == name)
+        ref = np.asarray(self._ref.vector(role), dtype=np.float32)
+        ref_shape = tuple(int(d) for d in ref.shape)
+        q_path, s_path = self._paths(name)
+        if q_path.is_file() and s_path.is_file():
+            q = np.load(q_path)
+            scale = np.load(s_path)
+            return self._validate_side_pair(name, q, scale, ref_shape)
+        q, scale = int4_absmax_quantize(ref)
+        np.save(q_path, q)
+        np.save(s_path, scale)
+        return q, scale
+
+    def vector(self, role: str) -> np.ndarray:
+        q, scale = self._cache[role]
+        return int4_dequant_from_codes(q, scale)
+
+    def matrix(self, role: str) -> np.ndarray:
+        return self.vector(role)
+
+    def expert(self, role: str, index: int) -> np.ndarray:
+        q, scale = self._cache[role]
+        if q.ndim < 1 or not 0 <= index < int(q.shape[0]):
+            raise ForwardError(f"int4 side-table {role}: expert {index} out of range")
+        # Per-expert scale when lead dim was preserved (shape (E, N)).
+        if scale.ndim >= 2 and scale.shape[0] == q.shape[0]:
+            return int4_dequant_from_codes(q[index], scale[index])
+        return int4_dequant_from_codes(q[index], scale)
+
+
 class ChannelAlphaExperts:
     """Expert primary source: pack trits × research per-channel α (not pack scalar).
 
@@ -301,6 +536,7 @@ def _expert_primary(
     hp_blocks: set[int],
     hp_period: int = 2,
     hp_label: str | None = None,
+    int4_side_root: Path | None = None,
 ) -> tuple[object, str]:
     """Return (primary WeightSource for experts, arm label)."""
     if mode == "ternary":
@@ -334,6 +570,24 @@ def _expert_primary(
         return control, "expert_hp_ceiling"
     if mode == "channel_alpha":
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
+    if mode == "int4":
+        if block in hp_blocks:
+            if control is None:
+                raise ForwardError(
+                    f"block {block}: int4+HP needs FP16 expert source "
+                    "(do not --skip-fp16-control on decision runs)"
+                )
+            schedule = hp_label or f"n{int(hp_period)}"
+            return control, f"expert_int4_{schedule}"
+        if int4_side_root is None:
+            raise ForwardError(
+                "int4 arm requires int4_side_root (persisted research side-table); "
+                "pass --int4-side-root or use the default under --out"
+            )
+        return (
+            Int4SideExperts(reference, side_root=int4_side_root, block=block),
+            "research_int4_side",
+        )
     raise ForwardError(f"unknown expert mode {mode!r}")
 
 
@@ -351,7 +605,7 @@ def _applied_expert_scale_sources(
     if hasattr(primary, "scale_sources"):
         applied.update(dict(primary.scale_sources))
     elif expert_mode == "all_hp" or (
-        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha")
+        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha", "int4")
         and block in hp_blocks
     ):
         for name in _expert_names(reference):
@@ -369,6 +623,7 @@ def load_block_sources(
     hp_blocks: set[int] | None = None,
     hp_period: int = 2,
     hp_label: str | None = None,
+    int4_side_root: Path | None = None,
 ) -> tuple[NpyWeights, PackWeights, MixedWeights, F16Weights | None]:
     """Load reference, pack, expert mix (arm-aware), optional fp16 control."""
     expect = f"block_{block:03d}"
@@ -391,6 +646,7 @@ def load_block_sources(
         hp_blocks=hp,
         hp_period=hp_period,
         hp_label=hp_label,
+        int4_side_root=int4_side_root,
     )
     mixed = MixedWeights(primary, reference, frozenset(EXPERT_ROLES), label)
     mixed.applied_scale_sources = _applied_expert_scale_sources(  # type: ignore[attr-defined]
@@ -511,7 +767,9 @@ def _compounding_label(resid_in: list[float], end_drift: float | None = None) ->
 
 def _chain_exit_metrics(chain: dict) -> dict | None:
     """Post-chain residual stream (residual into a virtual next block)."""
-    end = chain.get("end_of_chain") or {}
+    end = chain.get("end_of_chain")
+    if not isinstance(end, dict):
+        return None
     # Prefer new keys; accept legacy misnamed key for older metrics.json.
     for key in ("expert_only_chain_exit", "expert_only_end_residual_in"):
         val = end.get(key)
@@ -520,14 +778,49 @@ def _chain_exit_metrics(chain: dict) -> dict | None:
     return None
 
 
+def _safe_float(raw: object) -> float | None:
+    """Finite float from a real int/float only (reject bool, str, None)."""
+    # bool is a subclass of int; reject JSON true/false and numeric strings.
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(val):
+        return None
+    return val
+
+
+def _safe_int(raw: object, default: int | None = None) -> int | None:
+    """Real non-bool int only — no float truncation or string coercion.
+
+    Missing/malformed values return ``default`` (default ``None``) so callers
+    can reject them instead of inventing baseline look-alikes (e.g. top_k→2).
+    """
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, int):
+        return default
+    return raw
+
+
+def _exit_metric_from_map(exit_m: dict) -> float | None:
+    """First finite exit drift from preferred then legacy key; skip null/bad values."""
+    for key in ("residual_drift_relative_norm", "residual_in_drift_relative_norm"):
+        if exit_m.get(key) is None:
+            continue
+        val = _safe_float(exit_m[key])
+        if val is not None:
+            return val
+    return None
+
+
 def _exit_drift(chain: dict, out_drift: list[float]) -> float | None:
     """Drift after the final block (includes last hop). Prefer chain_exit keys."""
     exit_m = _chain_exit_metrics(chain)
     if exit_m is not None:
-        if "residual_drift_relative_norm" in exit_m:
-            return float(exit_m["residual_drift_relative_norm"])
-        if "residual_in_drift_relative_norm" in exit_m:
-            return float(exit_m["residual_in_drift_relative_norm"])
+        val = _exit_metric_from_map(exit_m)
+        if val is not None:
+            return val
     return out_drift[-1] if out_drift else None
 
 
@@ -832,12 +1125,17 @@ def _chain_blocks(chain: dict) -> list[int]:
 def _schedule_match_72(chain: dict) -> bool:
     """Blocks/tokens/seed/top_k match the #72 decision run."""
     b72 = BASELINE_72
-    observed = (
-        _chain_blocks(chain),
-        int(chain.get("tokens") or 0),
-        int(chain.get("token_seed") or -1),
-        int(chain.get("top_k") or 2),
-    )
+    # No baseline-shaped defaults: missing/malformed fields must not match #72.
+    tokens = _safe_int(chain.get("tokens"))
+    seed = _safe_int(chain.get("token_seed"))
+    top_k = _safe_int(chain.get("top_k"))
+    if tokens is None or seed is None or top_k is None:
+        return False
+    try:
+        blocks = _chain_blocks(chain)
+    except (TypeError, KeyError, AttributeError):
+        return False
+    observed = (blocks, tokens, seed, top_k)
     expected = (
         list(b72["blocks"]),
         int(b72["tokens"]),
@@ -1061,38 +1359,56 @@ def _v2_per_block_errors(chain: dict, label: str) -> list[str]:
     if sorted(blocks) != expected_blocks:
         return [f"{label}:per_block_blocks={sorted(blocks)} expected={expected_blocks}"]
     for row in rows:
-        try:
-            expert = row.get("expert_only")
-            if not isinstance(expert, dict):
-                return [f"{label}:block_{row.get('block')}:missing_expert_only"]
-            _ = float(expert["block_output_cosine"])
-            _ = float(expert["residual_stream_in"]["residual_in_drift_relative_norm"])
-            _ = float(expert["router_top1_agreement"])
-            _ = float(expert.get("router_topk_set_agreement", expert.get("router_top2_set_agreement", expert["router_top1_agreement"])))
-            _ = float(expert["expert_load_js_bits"])
-            _ = float(expert["block_output_drift_relative_norm"])
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            return [f"{label}:block_{row.get('block')}:malformed_expert_only:{exc}"]
+        expert = row.get("expert_only")
+        if not isinstance(expert, dict):
+            return [f"{label}:block_{row.get('block')}:missing_expert_only"]
+        residual = expert.get("residual_stream_in")
+        residual = residual if isinstance(residual, dict) else {}
+        topk = expert.get(
+            "router_topk_set_agreement",
+            expert.get("router_top2_set_agreement", expert.get("router_top1_agreement")),
+        )
+        probes = (
+            expert.get("block_output_cosine"),
+            residual.get("residual_in_drift_relative_norm"),
+            expert.get("router_top1_agreement"),
+            topk,
+            expert.get("expert_load_js_bits"),
+            expert.get("block_output_drift_relative_norm"),
+        )
+        for raw in probes:
+            if _safe_float(raw) is None:
+                return [f"{label}:block_{row.get('block')}:malformed_expert_only"]
     return []
+
+
+def _malformed_exit_object(chain: dict) -> bool:
+    """True when end_of_chain exit is present but yields no finite drift."""
+    exit_m = _chain_exit_metrics(chain)
+    if exit_m is None:
+        return False
+    return _exit_metric_from_map(exit_m) is None
 
 
 def _v2_chain_summary(chain: dict) -> dict:
     rows = chain.get("per_block") or []
     if not rows:
         return {"arm_label": chain.get("arm_label"), "empty": True}
+    if _malformed_exit_object(chain):
+        return {"arm_label": chain.get("arm_label"), "empty": True, "malformed": True}
     try:
         metrics = _metric_series(rows)
+        exit_drift = _exit_drift(chain, metrics["out_drift"])
+        compounding = _compounding_label(metrics["resid_in"], exit_drift)
+        viable = _remedy_option_1(
+            metrics["cos"][-1],
+            min(metrics["top1"]),
+            min(metrics["topk"]),
+            exit_drift,
+            metrics["cos"],
+        )
     except (KeyError, TypeError, ValueError, AttributeError):
         return {"arm_label": chain.get("arm_label"), "empty": True, "malformed": True}
-    exit_drift = _exit_drift(chain, metrics["out_drift"])
-    compounding = _compounding_label(metrics["resid_in"], exit_drift)
-    viable = _remedy_option_1(
-        metrics["cos"][-1],
-        min(metrics["top1"]),
-        min(metrics["topk"]),
-        exit_drift,
-        metrics["cos"],
-    )
     return {
         "arm_label": chain.get("arm_label"),
         "block_output_cosine": metrics["cos"],
@@ -1396,6 +1712,591 @@ def _v2_outcome(
     if not any_improved and not ceiling_viable:
         return 3, "Even denser, stacked, and HP-ceiling expert remedies fail under the current policy."
     return 4, "Inconclusive — measured outcomes do not satisfy a locked decision branch."
+
+
+def _v3_improved_vs_denser(summary: dict) -> bool:
+    if summary.get("empty"):
+        return False
+    top1_gain = summary["router_top1"][-1] - BASELINE_76_DENSER["router_top1"][-1]
+    cos_gain = summary["block_output_cosine"][-1] - BASELINE_76_DENSER["block_output_cosine"][-1]
+    exit_drift = summary.get("chain_exit_residual_drift")
+    denser_exit = BASELINE_76_DENSER["chain_exit_residual_drift"]
+    drift_gain = 0.0 if exit_drift is None else denser_exit - float(exit_drift)
+    return top1_gain >= 0.05 or cos_gain >= 0.03 or drift_gain >= 0.08
+
+
+# #80 locked schedule: P0 all-INT4 primary + P1 denser-HP secondary (blocks 1,2,3).
+_V3_SECONDARY_ARMS = frozenset({V3_SECONDARY_ARM})
+_V3_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
+
+
+def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
+    """Return (hp_blocks, int4_blocks, expert_mode) for a locked #80 arm label."""
+    schedules = {
+        V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
+        V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
+    }
+    return schedules[label]
+
+
+def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
+    return "fp16_control" if block in hp_blocks else "research_int4_side"
+
+
+def _canonical_block_list(raw: object) -> list[int] | None:
+    """List of canonical block ids, or None if raw is not a list (incl. missing)."""
+    if not isinstance(raw, list):
+        return None
+    out: list[int] = []
+    for item in raw:
+        block = _canonical_block_id(item)
+        if block is None:
+            return None
+        out.append(block)
+    return out
+
+
+_V3_SCHEDULE_FIELDS = (
+    "hp_blocks",
+    "int4_blocks",
+    "ternary_blocks",
+    "channel_alpha_blocks",
+)
+
+
+def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
+    hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
+    # Missing fields are not the same as explicit empty lists.
+    for field in _V3_SCHEDULE_FIELDS:
+        if field not in chain:
+            return [f"{label}:{field}_missing"]
+    observed = {field: _canonical_block_list(chain.get(field)) for field in _V3_SCHEDULE_FIELDS}
+    for field, value in observed.items():
+        if value is None:
+            return [f"{label}:{field}_not_block_list"]
+    # INT4 arms never use channel-α; require empty list for provenance honesty.
+    checks = [
+        ("hp_blocks", observed["hp_blocks"], hp_blocks),
+        ("int4_blocks", observed["int4_blocks"], int4_blocks),
+        ("ternary_blocks", observed["ternary_blocks"], []),
+        ("channel_alpha_blocks", observed["channel_alpha_blocks"], []),
+        ("expert_mode", chain.get("expert_mode"), mode),
+    ]
+    return [
+        f"{label}:{field}={obs!r} expected={exp!r}"
+        for field, obs, exp in checks
+        if obs != exp
+    ]
+
+
+def _value_set(mapping: object) -> set | None:
+    """Values of a mapping as a set, or None if not a mapping / unhashable values."""
+    if not isinstance(mapping, dict):
+        return None
+    try:
+        return set(mapping.values())
+    except TypeError:
+        return None
+
+
+def _version_set(versions: object) -> set | None:
+    if not isinstance(versions, list):
+        return None
+    try:
+        return set(versions)
+    except TypeError:
+        return None
+
+
+def _canonical_container_versions(raw: object) -> list[int] | None:
+    """Exact list of non-bool ints (no float 3.0, no set-equality tricks)."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[int] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, int):
+            return None
+        out.append(item)
+    return out
+
+
+_STRUCTURAL_EXPERT_SUFFIXES = frozenset({"gate", "down", "up"})
+
+
+def structural_expert_scale_map(block: int, source: str) -> dict[str, str]:
+    """Three structural expert tensor names for pack/applied scale provenance."""
+    return {
+        f"block_{block:03d}.slot_00.moe_expert.gate": source,
+        f"block_{block:03d}.slot_01.moe_expert.down": source,
+        f"block_{block:03d}.slot_02.moe_expert.up": source,
+    }
+
+
+def _expert_tensor_keys_ok(keys: set[str], block: int) -> bool:
+    """Full structural gate/up/down set for block (no aggregate fixture sentinel)."""
+    if len(keys) != 3 or not all(isinstance(k, str) for k in keys):
+        return False
+    prefix = f"block_{block:03d}."
+    suffixes: set[str] = set()
+    for key in keys:
+        if "moe_expert." not in key or not key.startswith(prefix):
+            return False
+        suffixes.add(key.rsplit(".", 1)[-1])
+    return suffixes == _STRUCTURAL_EXPERT_SUFFIXES
+
+
+def _v3_pack_row_shape(
+    row: object, label: str, index: int
+) -> tuple[int, set, dict, dict] | list[str]:
+    """Return (block, versions, pack_map, scale_map) or a hard-error list."""
+    row_tag = f"pack_provenance[{index}]"
+    if not isinstance(row, dict):
+        return [f"{label}:{row_tag}:not_a_mapping"]
+    block = _canonical_block_id(row.get("block"))
+    if block is None:
+        return [f"{label}:{row_tag}:invalid_block_id"]
+    versions = _canonical_container_versions(row.get("container_versions"))
+    if versions is None:
+        return [f"{label}:block_{block}:container_versions_not_list"]
+    pack_map = row.get("pack_scale_sources")
+    scale_map = row.get("scale_sources")
+    if not isinstance(pack_map, dict):
+        return [f"{label}:block_{block}:pack_scale_sources_not_mapping"]
+    if not isinstance(scale_map, dict):
+        return [f"{label}:block_{block}:scale_sources_not_mapping"]
+    return block, versions, pack_map, scale_map
+
+
+def _v3_scale_value_errors(
+    label: str, block: int, pack_map: dict, scale_map: dict, expected: str
+) -> list[str]:
+    """Value-level pack/applied source checks after keys are known good."""
+    try:
+        pack_sources = set(pack_map.values())
+        applied = set(scale_map.values())
+    except TypeError:
+        return [f"{label}:block_{block}:scale_sources_unhashable"]
+    errors: list[str] = []
+    if pack_sources != {"pack_v2"}:
+        errors.append(f"{label}:block_{block}:pack_scale_source_not_pack_v2")
+    if not all(isinstance(value, str) for value in applied):
+        errors.append(f"{label}:block_{block}:applied_scale_sources_not_strings")
+    elif applied != {expected}:
+        errors.append(
+            f"{label}:block_{block}:applied_scale_sources={sorted(applied)} "
+            f"expected={expected}"
+        )
+    return errors
+
+
+def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index: int) -> list[str]:
+    """Pack-honest row checks for #80 (v3 container + pack_v2 + INT4/HP applied)."""
+    shaped = _v3_pack_row_shape(row, label, index)
+    if isinstance(shaped, list):
+        return shaped
+    block, versions, pack_map, scale_map = shaped
+    errors: list[str] = []
+    # Exact list [3] — not set equality (rejects [3.0] and [3, 3]).
+    if versions != [3]:
+        errors.append(f"{label}:block_{block}:container_not_v3")
+    pack_keys = set(pack_map.keys())
+    scale_keys = set(scale_map.keys())
+    if not _expert_tensor_keys_ok(pack_keys, block) or not _expert_tensor_keys_ok(
+        scale_keys, block
+    ):
+        return errors + [f"{label}:block_{block}:scale_source_keys_not_expert"]
+    if pack_keys != scale_keys:
+        return errors + [f"{label}:block_{block}:scale_source_key_mismatch"]
+    expected = _v3_applied_source(block, hp_blocks)
+    errors.extend(_v3_scale_value_errors(label, block, pack_map, scale_map, expected))
+    return errors
+
+
+def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
+    hp_blocks, _, _ = _v3_expected_schedule(label)
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list) or len(packs) != len(BASELINE_72["blocks"]):
+        return [f"{label}:missing_pack_provenance"]
+    errors: list[str] = []
+    for index, row in enumerate(packs):
+        errors.extend(_v3_pack_row_errors(row, label, hp_blocks, index=index))
+    return errors
+
+
+def _finite_number(value: object) -> bool:
+    """True for real int/float (not bool) that is finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(float(value))
+
+
+def _v3_chain_exit_error(chain: dict, label: str) -> str | None:
+    """Require a real post-chain residual metric (no silent block-output fallback)."""
+    end = chain.get("end_of_chain")
+    if end is not None and not isinstance(end, dict):
+        return f"{label}:end_of_chain_not_mapping"
+    exit_m = _chain_exit_metrics(chain)
+    if exit_m is None:
+        return f"{label}:missing_chain_exit"
+    val = _exit_metric_from_map(exit_m)
+    if val is None:
+        # Distinguish empty keys vs present-but-unparseable.
+        if (
+            exit_m.get("residual_drift_relative_norm") is None
+            and exit_m.get("residual_in_drift_relative_norm") is None
+        ):
+            return f"{label}:chain_exit_missing_drift"
+        return f"{label}:chain_exit_malformed"
+    if val < 0.0:
+        return f"{label}:chain_exit_out_of_domain"
+    return None
+
+
+def _v3_control_error(chain: dict) -> str | None:
+    """FP16 control present, ≥0.99 cosine, finite, and in cosine domain."""
+    error = _v2_control_error(chain)
+    if error is not None:
+        return error
+    controls, _ = _v2_controls(chain)
+    cos_hi = 1.0 + 1e-9
+    for control in controls:
+        if not isinstance(control, dict):
+            return "fp16_control_malformed"
+        cos = _safe_float(control.get("block_output_cosine"))
+        if cos is None:
+            return "fp16_control_non_finite"
+        if cos < -1.0 or cos > cos_hi:
+            return "fp16_control_out_of_domain"
+    return None
+
+
+def _v3_block_order_error(chain: dict, label: str) -> str | None:
+    """Require per_block order [0,1,2,3] (not merely the same multiset)."""
+    rows = chain.get("per_block")
+    if not isinstance(rows, list) or not rows:
+        return None
+    blocks = [_canonical_block_id(row.get("block")) for row in rows if isinstance(row, dict)]
+    expected = list(BASELINE_72["blocks"])
+    if blocks != expected:
+        return f"{label}:per_block_order={blocks} expected={expected}"
+    return None
+
+
+def _explicit_topk_raw(expert: dict) -> object:
+    """Top-k set agreement without falling back to top-1 (locked top_k=2)."""
+    if "router_topk_set_agreement" in expert:
+        return expert["router_topk_set_agreement"]
+    if "router_top2_set_agreement" in expert:
+        return expert["router_top2_set_agreement"]
+    return None
+
+
+def _in_metric_domain(raw: object, lo: float, hi: float | None) -> bool:
+    """True when raw is a real number inside [lo, hi] (hi=None → unbounded above)."""
+    val = _safe_float(raw)
+    if val is None or val < lo:
+        return False
+    return hi is None or val <= hi
+
+
+def _v3_metric_domain_error(row: dict, label: str) -> str | None:
+    """Reject non-finite or out-of-domain metrics that feed viable / ranking."""
+    expert = row.get("expert_only")
+    if not isinstance(expert, dict):
+        return None
+    residual = expert.get("residual_stream_in")
+    if not isinstance(residual, dict):
+        residual = {}
+    topk = _explicit_topk_raw(expert)
+    if topk is None:
+        return f"{label}:block_{row.get('block')}:missing_top2_agreement"
+    # Cosine upper bound allows tiny float noise above 1.0 (seen in-repo as 1+2e-16).
+    cos_hi = 1.0 + 1e-9
+    checks = (
+        (expert.get("block_output_cosine"), -1.0, cos_hi),
+        (residual.get("residual_in_drift_relative_norm"), 0.0, None),
+        (expert.get("router_top1_agreement"), 0.0, 1.0),
+        (topk, 0.0, 1.0),
+        (expert.get("expert_load_js_bits"), 0.0, None),
+        (expert.get("block_output_drift_relative_norm"), 0.0, None),
+    )
+    for raw, lo, hi in checks:
+        if not _in_metric_domain(raw, lo, hi):
+            return f"{label}:block_{row.get('block')}:metric_out_of_domain"
+    return None
+
+
+def _append_optional(errors: list[str], message: str | None) -> None:
+    if message is not None:
+        errors.append(message)
+
+
+def _v3_finite_chain_errors(chain: dict, label: str) -> list[str]:
+    for row in chain.get("per_block") or []:
+        if isinstance(row, dict):
+            message = _v3_metric_domain_error(row, label)
+            if message is not None:
+                return [message]
+    return []
+
+
+def _v3_chain_errors(chain: dict, expected_label: str) -> list[str]:
+    label = chain.get("arm_label")
+    if label != expected_label:
+        return [f"arm_label={label!r} expected={expected_label!r}"]
+    errors: list[str] = []
+    per_block_errors = _v2_per_block_errors(chain, expected_label)
+    errors.extend(per_block_errors)
+    # Settings/pack probes subscript per_block rows — skip when structure is invalid.
+    if per_block_errors:
+        return errors
+    _append_optional(errors, _v3_block_order_error(chain, expected_label))
+    errors.extend(_v3_finite_chain_errors(chain, expected_label))
+    control_error = _v3_control_error(chain)
+    if control_error is not None:
+        errors.append(f"{label}:{control_error}")
+    mismatch = settings_mismatch_reason(chain)
+    if mismatch is not None:
+        errors.append(f"{label}:{mismatch}")
+    errors.extend(_v3_schedule_errors(chain, expected_label))
+    _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
+    errors.extend(_v3_scale_source_errors(chain, expected_label))
+    return errors
+
+
+def _v3_secondary_provenance_errors(
+    payload: dict, label: str, expected_implementation: dict
+) -> list[str]:
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        return [f"{label}:secondary evidence missing provenance object"]
+    errors: list[str] = []
+    if provenance.get("evidence_role") != _V3_SECONDARY_EVIDENCE_ROLE:
+        errors.append(f"{label}:secondary evidence role is not locked")
+    if provenance.get("implementation") != expected_implementation:
+        errors.append(f"{label}:secondary implementation differs from primary")
+    return errors
+
+
+def _v3_secondary_entry(
+    payload: object,
+    mapped: dict[str, dict],
+    expected_implementation: dict,
+) -> tuple[str | None, dict | None, list[str]]:
+    """Return (label, payload, errors) for one secondary evidence item."""
+    if not isinstance(payload, dict):
+        return None, None, ["secondary evidence must be a JSON object"]
+    errors: list[str] = []
+    if "decision" in payload:
+        errors.append("secondary evidence contains a decision")
+    chain = payload.get("chain")
+    if not isinstance(chain, dict):
+        return None, None, errors + ["secondary evidence missing chain object"]
+    label = chain.get("arm_label")
+    if not isinstance(label, str):
+        return None, None, errors + ["secondary arm_label must be a string"]
+    if label in mapped:
+        return None, None, errors + [f"duplicate secondary arm {label!r}"]
+    if label not in _V3_SECONDARY_ARMS:
+        return None, None, errors + [f"unexpected secondary arm {label!r}"]
+    errors.extend(
+        _v3_secondary_provenance_errors(payload, label, expected_implementation)
+    )
+    return label, payload, errors
+
+
+def _v3_secondary_map(
+    payloads: list[dict],
+    errors: list[str],
+    expected_implementation: dict,
+) -> dict[str, dict]:
+    mapped: dict[str, dict] = {}
+    for payload in payloads:
+        label, accepted, item_errors = _v3_secondary_entry(
+            payload, mapped, expected_implementation
+        )
+        errors.extend(item_errors)
+        if label is not None and accepted is not None:
+            mapped[label] = accepted
+    missing = sorted(_V3_SECONDARY_ARMS - set(mapped))
+    if missing:
+        errors.append(f"missing secondary arms {missing}")
+    return mapped
+
+
+def _v3_cited_summaries() -> dict[str, dict]:
+    return {
+        "cited_denser_76": {
+            "arm_label": BASELINE_76_DENSER["arm_label"],
+            "block_output_cosine": list(BASELINE_76_DENSER["block_output_cosine"]),
+            "residual_in_drift": list(BASELINE_76_DENSER["residual_in_drift"]),
+            "router_top1": list(BASELINE_76_DENSER["router_top1"]),
+            "router_top2": list(BASELINE_76_DENSER["router_top2"]),
+            "chain_exit_residual_drift": BASELINE_76_DENSER["chain_exit_residual_drift"],
+            "compounding": "cited",
+            "viable": False,
+            "cited": True,
+        },
+        "cited_ceiling_76": {
+            "arm_label": BASELINE_76_CEILING["arm_label"],
+            "block_output_cosine": list(BASELINE_76_CEILING["block_output_cosine"]),
+            "router_top1": list(BASELINE_76_CEILING["router_top1"]),
+            "chain_exit_residual_drift": BASELINE_76_CEILING["chain_exit_residual_drift"],
+            "compounding": "cited",
+            "viable": True,
+            "cited": True,
+        },
+    }
+
+
+def assemble_remedy_v3_comparison(
+    primary_chain: dict,
+    secondary_payloads: list[dict],
+    *,
+    primary_provenance: dict,
+    load_errors: list[str] | None = None,
+) -> dict:
+    """Validate #80 evidence and return a decision-ready comparison payload."""
+    errors = list(load_errors or [])
+    implementation = (primary_provenance or {}).get("implementation")
+    if not isinstance(implementation, dict):
+        errors.append("primary evidence missing implementation provenance")
+        implementation = {}
+    secondary = _v3_secondary_map(secondary_payloads, errors, implementation)
+    errors.extend(_v3_chain_errors(primary_chain, V3_PRIMARY_ARM))
+    for label, payload in secondary.items():
+        errors.extend(_v3_chain_errors(payload["chain"], label))
+    summaries = {V3_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
+    summaries.update(_v3_cited_summaries())
+    summaries.update(
+        {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
+    )
+    return {
+        "primary_arm": V3_PRIMARY_ARM,
+        "secondary_arms": secondary,
+        "summaries": summaries,
+        "validation_errors": errors,
+        "baselines_cited": {
+            "denser": BASELINE_76_DENSER,
+            "ceiling": BASELINE_76_CEILING,
+            "baseline_74": BASELINE_74,
+            "baseline_72": BASELINE_72,
+        },
+        "primary_provenance": {"implementation": implementation},
+    }
+
+
+def _finite_series(series: object) -> bool:
+    """True when series is a non-empty list of finite numbers (every element)."""
+    if not isinstance(series, list) or not series:
+        return False
+    return all(_finite_number(value) for value in series)
+
+
+def _v3_middle_complete(summary: dict) -> bool:
+    """Complete middle-ground arm: finite viability inputs on every block."""
+    if not isinstance(summary, dict) or "viable" not in summary:
+        return False
+    return (
+        _finite_series(summary.get("router_top1"))
+        and _finite_series(summary.get("router_top2"))
+        and _finite_series(summary.get("block_output_cosine"))
+        and _finite_number(summary.get("chain_exit_residual_drift"))
+    )
+
+
+def _v3_middle_labels(summaries: dict) -> list[str]:
+    return [
+        label
+        for label, summary in summaries.items()
+        if str(label).startswith("expert_int4")
+        and not summary.get("cited")
+        and _v3_middle_complete(summary)
+    ]
+
+
+def _v3_outcome(
+    best: dict,
+    *,
+    any_improved: bool,
+    ceiling_viable: bool,
+) -> tuple[int, str]:
+    if best.get("viable"):
+        return (
+            1,
+            "Middle-ground INT4 experts restore multi-block viability for the measured chain.",
+        )
+    if any_improved and ceiling_viable:
+        return (
+            2,
+            "INT4 middle-ground helps vs denser ternary, but full-HP experts or another "
+            "correction remain required.",
+        )
+    if not any_improved:
+        return (
+            3,
+            "INT4 middle-ground fails to beat denser ternary meaningfully — gap is not "
+            "payload-width alone.",
+        )
+    return 4, "Inconclusive — measured outcomes do not satisfy a locked decision branch."
+
+
+def _v3_decision_rationale(
+    best_label: str,
+    best: dict,
+    *,
+    any_improved: bool,
+    ceiling_viable: bool,
+) -> list[str]:
+    top1 = best["router_top1"]
+    cos = best["block_output_cosine"]
+    return [
+        f"best_middle_ground_arm={best_label}",
+        f"best_b3_top1={float(top1[-1]):.6f}",
+        f"best_b3_cos={float(cos[-1]):.6f}",
+        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
+        f"#76_denser_b3_top1={BASELINE_76_DENSER['router_top1'][-1]:.6f} (cited)",
+        f"#76_denser_b3_cos={BASELINE_76_DENSER['block_output_cosine'][-1]:.6f} (cited)",
+        f"#76_denser_exit_drift={BASELINE_76_DENSER['chain_exit_residual_drift']:.6f} (cited)",
+        f"#76_ceiling_viable={ceiling_viable} (cited)",
+        f"any_middle_ground_improved_vs_denser={any_improved}",
+        f"codec=research_int4_side per-output-channel absmax qmax={INT4_QMAX}",
+    ]
+
+
+def decide_remedy_v3(comparison: dict) -> dict:
+    """Pick exactly one #80 decision across INT4 middle-ground arms vs #76 bounds."""
+    errors = list(comparison.get("validation_errors") or [])
+    if errors:
+        return _decision_payload(
+            4,
+            "Inconclusive — required multi-arm evidence is incomplete or incomparable.",
+            errors,
+            "unknown",
+        )
+    summaries = comparison["summaries"]
+    middle_labels = _v3_middle_labels(summaries)
+    if not middle_labels:
+        return _decision_payload(
+            4,
+            "Inconclusive — no complete INT4 middle-ground arm summaries present.",
+            ["no_int4_summaries"],
+            "unknown",
+        )
+    best_label = max(middle_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
+    best = summaries[best_label]
+    ceiling = summaries.get("cited_ceiling_76") or {"viable": True}
+    any_improved = any(_v3_improved_vs_denser(summaries[label]) for label in middle_labels)
+    ceiling_viable = bool(ceiling.get("viable", True))
+    decision, text = _v3_outcome(
+        best, any_improved=any_improved, ceiling_viable=ceiling_viable
+    )
+    rationale = _v3_decision_rationale(
+        best_label, best, any_improved=any_improved, ceiling_viable=ceiling_viable
+    )
+    payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
+    payload["best_remedy_arm"] = best_label
+    return payload
 
 
 def decide_remedy_v2(comparison: dict) -> dict:

@@ -36,12 +36,17 @@ from grok1_multiblock_lib import (  # noqa: E402
     V2_CEILING_ARM,
     V2_PRIMARY_ARM,
     V2_STACKED_ARM,
+    V3_PRIMARY_ARM,
+    V3_SECONDARY_ARM,
     _applied_expert_scale_sources,
     _expert_primary,
     assemble_remedy_v2_comparison,
+    assemble_remedy_v3_comparison,
     channel_alpha_dequant,
     decide_remedy_v2,
+    decide_remedy_v3,
     settings_mismatch_reason,
+    structural_expert_scale_map,
 )
 
 
@@ -1017,6 +1022,278 @@ class RemedyV2DecisionTests(unittest.TestCase):
             payload = json.loads((out / "metrics.json").read_text())
             self.assertNotIn("decision", payload)
             self.assertFalse((out / "results.md").exists())
+
+
+_V3_FIXTURE_SCHEDULES = {
+    V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
+    V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
+}
+
+
+def _v3_fixture_source(block: int, hp_blocks: list[int]) -> str:
+    return "fp16_control" if block in hp_blocks else "research_int4_side"
+
+
+def _v3_chain(label: str, quality: str) -> dict:
+    hp_blocks, int4_blocks, mode = _V3_FIXTURE_SCHEDULES[label]
+    metrics = _V2_FIXTURE_METRICS[quality]
+    rows = []
+    provenance = []
+    for index, block in enumerate(BASELINE_72["blocks"]):
+        rows.append(
+            _expert_row(
+                block,
+                {
+                    "cos": metrics["cos"][index],
+                    "resid_in_drift": metrics["drift"][index],
+                    "top1": metrics["top1"][index],
+                    "top2": metrics["top2"][index],
+                },
+            )
+        )
+        applied = _v3_fixture_source(block, hp_blocks)
+        provenance.append(
+            {
+                "block": block,
+                "pack_sha256": BASELINE_72["pack_sha256"][block],
+                "container_versions": [3],
+                "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
+                "scale_sources": structural_expert_scale_map(block, applied),
+            }
+        )
+    return {
+        "blocks": list(BASELINE_72["blocks"]),
+        "tokens": BASELINE_72["tokens"],
+        "token_seed": BASELINE_72["token_seed"],
+        "top_k": BASELINE_72["top_k"],
+        "per_block": rows,
+        "pack_provenance": provenance,
+        "skip_fp16_control": False,
+        "expert_mode": mode,
+        "arm_label": label,
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": [],
+        "end_of_chain": {
+            "expert_only_chain_exit": {
+                "residual_drift_relative_norm": metrics["exit"],
+            }
+        },
+    }
+
+
+def _v3_secondary(quality: str) -> dict:
+    return {
+        "provenance": {
+            "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            "evidence_role": "secondary; no independent decision",
+        },
+        "chain": _v3_chain(V3_SECONDARY_ARM, quality),
+    }
+
+
+def _v3_comparison(primary: str, secondary: str) -> dict:
+    return assemble_remedy_v3_comparison(
+        _v3_chain(V3_PRIMARY_ARM, primary),
+        [_v3_secondary(secondary)],
+        primary_provenance={
+            "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            "evidence_role": "primary; sole canonical #80 decision",
+        },
+    )
+
+
+class RemedyV3DecisionTests(unittest.TestCase):
+    def test_option_2_when_int4_helps_but_is_not_viable(self) -> None:
+        # Beat #76 denser (top1 0.616 / cos 0.914 / exit 0.437) without full viability.
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][3]["expert_only"]["router_top1_agreement"] = 0.70
+        primary["per_block"][3]["expert_only"]["block_output_cosine"] = 0.92
+        primary["end_of_chain"]["expert_only_chain_exit"][
+            "residual_drift_relative_norm"
+        ] = 0.30
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("failed")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+                "evidence_role": "primary; sole canonical #80 decision",
+            },
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v3(comparison)
+        self.assertEqual(decision["decision"], 2)
+        self.assertEqual(decision["best_remedy_arm"], V3_PRIMARY_ARM)
+
+    def test_option_4_when_secondary_missing(self) -> None:
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_fp16_control_skipped(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["skip_fp16_control"] = True
+        for row in primary["per_block"]:
+            row.pop("fp16_control", None)
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("fp16_control" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_ternary_blocks_mislabel_int4(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["ternary_blocks"] = list(BASELINE_72["blocks"])
+        primary["int4_blocks"] = []
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("int4_blocks" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_rejects_wrong_applied_scale_source(self) -> None:
+        secondary = _v3_secondary("help")
+        # Corrupt all applied sources for block 0 (INT4 expected).
+        secondary["chain"]["pack_provenance"][0]["scale_sources"] = (
+            structural_expert_scale_map(0, "pack_v2")
+        )
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [secondary],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(
+            any("research_int4_side" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_chain_exit_missing(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary.pop("end_of_chain", None)
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={
+                "implementation": dict(_V2_FIXTURE_IMPLEMENTATION),
+            },
+        )
+        self.assertTrue(any("missing_chain_exit" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_decision_metrics_non_finite(self) -> None:
+        comparison = _v3_comparison("help", "failed")
+        self.assertEqual(comparison["validation_errors"], [])
+        # Corrupt summary after assembly so ranking sees NaN (simulates bad payload).
+        comparison["summaries"][V3_PRIMARY_ARM]["router_top1"][-1] = float("nan")
+        comparison["summaries"][V3_PRIMARY_ARM]["block_output_cosine"][-1] = 0.92
+        comparison["summaries"][V3_PRIMARY_ARM]["chain_exit_residual_drift"] = 0.3
+        secondary_label = V3_SECONDARY_ARM
+        comparison["summaries"][secondary_label]["router_top1"][-1] = float("nan")
+        comparison["summaries"][secondary_label]["chain_exit_residual_drift"] = 0.3
+        decision = decide_remedy_v3(comparison)
+        self.assertEqual(decision["decision"], 4)
+
+    def test_option_4_when_mid_chain_topk_non_finite(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][1]["expert_only"]["router_top2_set_agreement"] = float("nan")
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("malformed_expert_only" in e for e in errors),
+            errors,
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_agreement_out_of_domain(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][0]["expert_only"]["router_top1_agreement"] = 2.0
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(
+            any("metric_out_of_domain" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_malformed_per_block_does_not_raise_on_settings(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"][1] = "not-a-row"  # type: ignore[call-arg]
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(comparison["validation_errors"])
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_malformed_chain_exit_does_not_raise_in_summary(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["end_of_chain"] = {
+            "expert_only_chain_exit": {"residual_drift_relative_norm": "nope"}
+        }
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(any("chain_exit" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_per_block_order_permuted(self) -> None:
+        primary = _v3_chain(V3_PRIMARY_ARM, "help")
+        primary["per_block"] = list(reversed(primary["per_block"]))
+        primary["pack_provenance"] = list(reversed(primary["pack_provenance"]))
+        comparison = assemble_remedy_v3_comparison(
+            primary,
+            [_v3_secondary("help")],
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(any("per_block_order" in e for e in comparison["validation_errors"]))
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_option_4_when_secondary_payload_not_object(self) -> None:
+        comparison = assemble_remedy_v3_comparison(
+            _v3_chain(V3_PRIMARY_ARM, "help"),
+            [[], "not-a-mapping"],  # type: ignore[list-item]
+            primary_provenance={"implementation": dict(_V2_FIXTURE_IMPLEMENTATION)},
+        )
+        self.assertTrue(
+            any("JSON object" in e or "must be a JSON object" in e for e in comparison["validation_errors"])
+        )
+        self.assertEqual(decide_remedy_v3(comparison)["decision"], 4)
+
+    def test_int4_evidence_only_requires_hp_123(self) -> None:
+        args = argparse.Namespace(
+            arm="int4",
+            evidence_only=True,
+            hp_blocks={0, 2},
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        with self.assertRaisesRegex(ForwardError, r"hp-blocks 1,2,3"):
+            _validate_v2_cli(args)
 
 
 class RemedyV2ReportTests(unittest.TestCase):
