@@ -404,10 +404,17 @@ class Int4SideExperts:
             self._side_dir / f"{stem}__scale_f32.npy",
         )
 
-    def _validate_side_pair(
-        self, name: str, q: np.ndarray, scale: np.ndarray, ref_shape: tuple[int, ...]
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Fail-closed checks for loaded side-table codes + scales."""
+    def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
+        """Scale layout for preserved-expert absmax (matches int4_absmax_quantize)."""
+        if len(ref_shape) >= 3:
+            return (ref_shape[0], ref_shape[-1])
+        if len(ref_shape) == 2:
+            return (ref_shape[-1],)
+        return (1,) if ref_shape else ()
+
+    def _validate_side_codes(
+        self, name: str, q: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> np.ndarray:
         if q.dtype != np.int8:
             raise ForwardError(f"int4 side-table {name}: codes dtype {q.dtype} != int8")
         q_i = np.asarray(q, dtype=np.int8)
@@ -419,19 +426,26 @@ class Int4SideExperts:
             raise ForwardError(
                 f"int4 side-table {name}: codes shape {q_i.shape} != reference {ref_shape}"
             )
+        return q_i
+
+    def _validate_side_scale(
+        self, name: str, scale: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> np.ndarray:
         scale_f = np.asarray(scale, dtype=np.float32)
         _require_finite_array(scale_f, "loaded scales")
-        if len(ref_shape) >= 3:
-            expected_scale = (ref_shape[0], ref_shape[-1])
-        elif len(ref_shape) == 2:
-            expected_scale = (ref_shape[-1],)
-        else:
-            expected_scale = (1,) if ref_shape else ()
-        if tuple(int(d) for d in scale_f.shape) != expected_scale:
+        expected = self._expected_side_scale_shape(ref_shape)
+        if tuple(int(d) for d in scale_f.shape) != expected:
             raise ForwardError(
-                f"int4 side-table {name}: scale shape {scale_f.shape} "
-                f"!= expected {expected_scale}"
+                f"int4 side-table {name}: scale shape {scale_f.shape} != expected {expected}"
             )
+        return scale_f
+
+    def _validate_side_pair(
+        self, name: str, q: np.ndarray, scale: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Fail-closed checks for loaded side-table codes + scales."""
+        q_i = self._validate_side_codes(name, q, ref_shape)
+        scale_f = self._validate_side_scale(name, scale, ref_shape)
         return q_i, scale_f
 
     def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
