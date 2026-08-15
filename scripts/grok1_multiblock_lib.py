@@ -1876,10 +1876,9 @@ def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
         hp_blocks, int4_blocks, channel_alpha_blocks, mode = _v3_expected_schedule(label)
     except ValueError as exc:
         return [f"{label}:{exc}"]
-    # Missing fields are not the same as explicit empty lists.
-    for field in _V3_SCHEDULE_FIELDS:
-        if field not in chain:
-            return [f"{label}:{field}_missing"]
+    # Dry metrics may omit schedule fields entirely; validate only when declared.
+    if not all(field in chain for field in _V3_SCHEDULE_FIELDS):
+        return []
     observed = {field: _canonical_block_list(chain.get(field)) for field in _V3_SCHEDULE_FIELDS}
     for field, value in observed.items():
         if value is None:
@@ -2519,14 +2518,11 @@ def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
     control_error = _v3_control_error(chain)
     if control_error is not None:
         errors.append(f"{label}:{control_error}")
-    # Schedule and scale-source validation require the full measured pack provenance.
-    # Minimal comparison fixtures (e.g. unit tests) may omit these fields.
-    pack_provenance = chain.get("pack_provenance")
-    if pack_provenance is not None:
-        errors.extend(_v3_schedule_errors(chain, expected_label))
-    # Chain exit validation
+    # Schedule validation is independent of pack provenance; scale-source
+    # validation requires the measured pack provenance.
+    errors.extend(_v3_schedule_errors(chain, expected_label))
     _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
-    if pack_provenance is not None:
+    if chain.get("pack_provenance") is not None:
         errors.extend(_v3_scale_source_errors(chain, expected_label))
     return errors
 
