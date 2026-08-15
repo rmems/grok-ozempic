@@ -1455,6 +1455,22 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertIn("RM-608", issue)
         self.assertIn("#85", agent)
 
+    def test_same_budget_int4_baseline_cites_issue_85(self) -> None:
+        """The 8192 evidence-only INT4 control is #85 evidence, not a #80 run."""
+        baseline = argparse.Namespace(
+            arm="int4", tokens=8192, evidence_only=True, hp_blocks=None
+        )
+        self.assertTrue(multiblock._is_v4_run(baseline))
+        issue, agent = multiblock._agent_for_args(baseline)
+        self.assertIn("#85", issue)
+        self.assertIn("RM-608", issue)
+        # A genuine #80 run at the 2048 ladder must still cite #80.
+        historical = argparse.Namespace(
+            arm="int4", tokens=2048, evidence_only=True, hp_blocks=None
+        )
+        self.assertFalse(multiblock._is_v4_run(historical))
+        self.assertIn("#80", multiblock._agent_for_args(historical)[0])
+
     def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
         seed = 2026 * 10_000 + 806
         args = argparse.Namespace(
@@ -1537,6 +1553,30 @@ class RemedyV4DecisionTests(unittest.TestCase):
             any("blocks=" in e for e in comparison["validation_errors"]),
             f"Expected blocks error in {comparison['validation_errors']}"
         )
+
+    def test_non_list_blocks_fails_closed(self) -> None:
+        """Malformed `blocks` in loaded evidence must be an error, not a TypeError."""
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        for label, bad in (("secondary", 4), ("primary", "0,1,2,3")):
+            with self.subTest(chain=label):
+                primary = _v4_chain(V4_PRIMARY_ARM)
+                secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+                if label == "primary":
+                    primary["blocks"] = bad
+                else:
+                    secondary["blocks"] = bad
+                comparison = assemble_remedy_v4_comparison(
+                    primary,
+                    [_v4_secondary_payload(secondary, impl)],
+                    primary_provenance={"implementation": impl},
+                )
+                self.assertTrue(
+                    any("is not a list" in e for e in comparison["validation_errors"]),
+                    f"Expected non-list blocks error in {comparison['validation_errors']}",
+                )
+                self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
 
     def test_mismatched_tokens_rejected(self) -> None:
         from grok1_multiblock_lib import assemble_remedy_v4_comparison
