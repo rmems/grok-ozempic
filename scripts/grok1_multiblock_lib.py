@@ -493,7 +493,11 @@ class Int4SideExperts:
         )
 
     def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
-        """Scale layout for preserved-expert absmax (matches int4_absmax_quantize)."""
+        """Scale layout for preserved-expert INT4 scales.
+
+        Shared by absmax and LS channel-α, which reduce the same axes
+        (``int4_absmax_quantize`` / ``int4_ls_channel_alpha_scale``).
+        """
         if len(ref_shape) >= 3:
             return (ref_shape[0], ref_shape[-1])
         if len(ref_shape) == 2:
@@ -2532,17 +2536,6 @@ def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
     _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
     if chain.get("pack_provenance") is not None:
         errors.extend(_v3_scale_source_errors(chain, expected_label))
-    return errors
-
-
-def _v4_all_protocol_errors(
-    primary_chain: dict, secondary: dict[str, dict], primary_label: object
-) -> list[str]:
-    chains = [(primary_chain, str(primary_label or V4_PRIMARY_ARM))]
-    chains.extend((payload["chain"], label) for label, payload in secondary.items())
-    errors: list[str] = []
-    for chain, label in chains:
-        errors.extend(_v4_protocol_field_errors(chain, label))
     return errors
 
 

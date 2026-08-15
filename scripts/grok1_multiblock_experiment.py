@@ -1012,12 +1012,20 @@ def _v3_results_md(payload: dict) -> str:
     prov = _mapping(payload, "provenance")
     summaries = _mapping(_mapping(payload, "comparison"), "summaries")
     agent = prov.get("agent", REMEDY_V3_AGENT_LINE)
+    issue = str(prov.get("issue") or "")
+    arm = str(chain.get("arm_label") or "")
+    if "#85" in issue or arm.startswith("expert_int4_channel_alpha"):
+        title = "# Expert stacked INT4 + LS channel-α multi-block fidelity (#85)"
+        best_hdr = "Best stack arm"
+    else:
+        title = "# Expert middle-ground (INT4) multi-block fidelity"
+        best_hdr = "Best middle-ground arm"
     header = (
-        "# Expert middle-ground (INT4) multi-block fidelity\n\n"
+        f"{title}\n\n"
         f"**Agent:** {agent}\n"
         f"**Decision:** Option {decision.get('decision')} — {decision.get('decision_text')}\n"
-        f"**Arm:** `{chain.get('arm_label')}`\n"
-        f"**Best middle-ground arm:** `{decision.get('best_remedy_arm')}`"
+        f"**Arm:** `{arm}`\n"
+        f"**{best_hdr}:** `{decision.get('best_remedy_arm')}`"
     )
     rationale = "\n".join(f"- `{item}`" for item in decision.get("rationale", ()))
     arms = "\n".join(f"- `{label}`" for label in sorted(summaries))
