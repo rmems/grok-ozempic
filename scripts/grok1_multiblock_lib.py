@@ -1531,7 +1531,11 @@ def _v2_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
         V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
         V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
     }
-    return schedules[label]
+    try:
+        return schedules[label]
+    except KeyError as exc:
+        # v4 labels must not KeyError if this helper is ever called on them.
+        raise ValueError(f"unknown v2 schedule label={label!r}") from exc
 
 
 def _v2_controls(chain: dict) -> tuple[list[dict], str | None]:
@@ -2754,6 +2758,16 @@ def _remedy_baseline_section(*, mismatch: str | None) -> list[str]:
 
 def remedy_metrics_note(chain: dict) -> str:
     """Human metrics_note reflecting schedule vs pack mismatch precisely."""
+    tokens = _safe_int(chain.get("tokens"))
+    arm = str(chain.get("arm_label") or "")
+    # #85 is locked to BASELINE_85 (8192). Do not stamp those runs as
+    # incomparable to the historical #72 2048 ladder — that is expected.
+    if tokens == int(BASELINE_85["tokens"]) or arm.startswith("expert_int4_channel_alpha"):
+        return (
+            "#85 protocol (Grok-1 max context tokens=8192). "
+            "#72/#80 2048-token figures are historical cites only; "
+            "not same-budget and not a validation failure."
+        )
     reason = settings_mismatch_reason(chain)
     if reason is None:
         return (

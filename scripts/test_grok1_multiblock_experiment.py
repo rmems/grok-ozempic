@@ -1417,6 +1417,112 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertEqual(decision["decision"], 1)
         self.assertEqual(decision["best_remedy_arm"], V4_PRIMARY_ARM)
 
+    def test_v4_pack_provenance_does_not_keyerror_or_cite_72_incomparability(self) -> None:
+        """Regression: Devin Review BUGs — v4 labels KeyError / always incomparable to #72."""
+        from grok1_multiblock_lib import (
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            remedy_metrics_note,
+            settings_mismatch_reason,
+            structural_expert_scale_map,
+            _v3_scale_source_errors,
+            _v3_schedule_errors,
+            _v4_chain_errors,
+        )
+
+        def _pack_row(block: int, source: str) -> dict:
+            return {
+                "block": block,
+                "container_versions": [3],
+                "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
+                "scale_sources": structural_expert_scale_map(block, source),
+            }
+
+        def _chain(label: str, source: str, hp: list[int]) -> dict:
+            blocks = [0, 1, 2, 3]
+            int4 = [b for b in blocks if b not in hp]
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": 8192,
+                "token_seed": 2026 * 10_000 + 806,
+                "top_k": 2,
+                "expert_mode": (
+                    "int4_channel_alpha" if "channel_alpha" in label else "int4"
+                ),
+                "hp_blocks": list(hp),
+                "int4_blocks": int4,
+                "ternary_blocks": [],
+                "channel_alpha_blocks": int4 if "channel_alpha" in label else [],
+                "per_block": [
+                    {
+                        "block": b,
+                        "expert_only": {
+                            "block_output_cosine": 0.995,
+                            "router_top1_agreement": 0.97,
+                            "router_top2_set_agreement": 0.95,
+                            "expert_load_js_bits": 0.0,
+                            "block_output_drift_relative_norm": 0.01,
+                            "residual_stream_in": {
+                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                            },
+                        },
+                        "fp16_control": {
+                            "block_output_cosine": 1.0,
+                            "router_top1_agreement": 1.0,
+                            "router_top2_set_agreement": 1.0,
+                        },
+                        "pilot_label": "x",
+                    }
+                    for b in blocks
+                ],
+                "end_of_chain": {
+                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+                },
+                "pack_provenance": [
+                    _pack_row(b, source if b not in hp else "fp16_control")
+                    for b in blocks
+                ],
+            }
+
+        primary = _chain(
+            V4_PRIMARY_ARM, "research_int4_channel_alpha_side", []
+        )
+        baseline = _chain(V4_INT4_BASELINE_ARM, "research_int4_side", [])
+        self.assertEqual(_v3_schedule_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v3_scale_source_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v4_chain_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v4_chain_errors(baseline, V4_INT4_BASELINE_ARM), [])
+        # #72 mismatch is expected at 8192 and must not enter v4 validation_errors.
+        self.assertEqual(settings_mismatch_reason(primary), "settings_not_comparable_to_72")
+        note = remedy_metrics_note(primary)
+        self.assertIn("#85", note)
+        self.assertNotIn("not comparable", note.lower())
+
+        impl = {"commit": "abc", "dirty": False}
+        comparison = assemble_remedy_v4_comparison(
+            primary,
+            [
+                {
+                    "provenance": {
+                        "evidence_role": "secondary; no independent decision",
+                        "implementation": dict(impl),
+                    },
+                    "chain": baseline,
+                }
+            ],
+            primary_provenance={"implementation": dict(impl)},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        self.assertFalse(
+            any("settings_not_comparable_to_72" in e for e in comparison["validation_errors"])
+        )
+        decision = decide_remedy_v4(comparison)
+        self.assertEqual(decision["decision"], 1)
+
     def test_mismatched_blocks_rejected(self) -> None:
         from grok1_multiblock_lib import (
             BASELINE_85,
