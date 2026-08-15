@@ -76,6 +76,13 @@ FFN_SIZE = 32768
 # 1/sqrt(128); upstream hardcodes the decimal expansion.
 ATTN_OUTPUT_MULTIPLIER = 0.08838834764831845
 MAX_ATTN_VAL = 30.0
+
+# Query positions per attention chunk. With the real Grok-1 head geometry
+# (8 kv heads x 6 groups) a 1024-token chunk allocates ~1.6 GiB of float32
+# logits, against ~12.9 GiB for the unchunked (kv_h, groups, T, T) tensor at
+# T=8192. This is a ceiling, not just a default: `attention` clamps any
+# caller-supplied chunk_size down to it, so the bound cannot be opted out of.
+ATTENTION_CHUNK_TOKENS = 1024
 ROPE_BASE = 10000
 RMS_EPS = 1e-5
 # ``Transformer.__call__`` does ``input_embeddings *= embedding_multiplier_scale``
@@ -357,12 +364,17 @@ def attention(
     if mask is None:
         mask = causal_mask(tokens)
 
-    # Bound the per-chunk logits/weights allocation. A 1024-token chunk with the
-    # real Grok-1 head geometry allocates ~1.6 GiB of logits, well below the
-    # unchunked ~12.9 GiB peak at T=8192.
+    # Bound the per-chunk logits/weights allocation. Clamping to
+    # ATTENTION_CHUNK_TOKENS is what makes this a bound: `min(chunk_size,
+    # tokens)` alone only limits upward-to-T, so chunk_size=8192 at T=8192 would
+    # materialize the very ~12.9 GiB tensor the chunking exists to avoid.
     if chunk_size is None or chunk_size <= 0:
-        chunk_size = 1024
-    chunk_size = min(chunk_size, tokens)
+        chunk_size = ATTENTION_CHUNK_TOKENS
+    chunk_size = min(chunk_size, ATTENTION_CHUNK_TOKENS, tokens)
+    # An empty sequence leaves chunk_size == 0, and range() rejects a zero step.
+    # The empty result is well defined, so keep the step positive and let the
+    # loop body not execute.
+    chunk_size = max(1, chunk_size)
 
     ctx = np.empty((tokens, n_kv_heads, heads.groups, head_dim), dtype=np.float32)
     cap = np.float32(MAX_ATTN_VAL)
@@ -378,6 +390,9 @@ def attention(
         )
         weights = _softmax_fp32(logits)
         ctx[start:end] = np.einsum("hHcT,Thd->chHd", weights, v, dtype=np.float32)
+        # Drop the chunk buffers before the next iteration allocates its own;
+        # otherwise two chunks' worth of logits/weights are live at the peak.
+        del logits, weights
 
     return ctx.reshape(tokens, n_q_heads * head_dim) @ w_out
 
