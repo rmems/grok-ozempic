@@ -657,9 +657,21 @@ def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None
     _validate_int4_protocols(args, evidence_only)
 
 
+def _is_primary_arm(args: argparse.Namespace) -> bool:
+    """Primary arms may receive --comparison-metrics payloads."""
+    return _is_v2_primary(args) or _is_v3_primary(args) or _is_v4_primary(args)
+
+
 def _validate_v2_cli(args: argparse.Namespace) -> None:
     evidence_only = bool(getattr(args, "evidence_only", False))
     comparison_paths = list(getattr(args, "comparison_metrics", []))
+    _validate_v2_evidence_only_arm(args, evidence_only)
+    _validate_int4_family(args, evidence_only)
+    _validate_v2_comparison_paths(args, comparison_paths)
+    _validate_v2_fp16_control(args)
+
+
+def _validate_v2_evidence_only_arm(args: argparse.Namespace, evidence_only: bool) -> None:
     if args.arm in _V2_REMEDY_ARMS and not evidence_only:
         raise ForwardError(f"--arm {args.arm} requires --evidence-only")
     if evidence_only and args.arm not in _V2_REMEDY_ARMS | _INT4_FAMILY_ARMS:
@@ -667,22 +679,24 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
             "--evidence-only is reserved for #75 stacked/HP-ceiling, #80 int4, "
             "or #85 int4_channel_alpha secondary"
         )
-    _validate_int4_family(args, evidence_only)
-    if comparison_paths and not (
-        _is_v2_primary(args) or _is_v3_primary(args) or _is_v4_primary(args)
-    ):
+
+
+def _validate_v2_comparison_paths(
+    args: argparse.Namespace, comparison_paths: list[Path]
+) -> None:
+    if comparison_paths and not _is_primary_arm(args):
         raise ForwardError(
             "--comparison-metrics is only valid for #75 primary "
             "(--arm periodic_hp --hp-blocks 1,2,3), #80 primary (--arm int4), "
             "or #85 primary (--arm int4_channel_alpha)"
         )
-    # Primary and locked P1 secondary both need FP16 control (HP blocks use it).
-    if args.arm in _INT4_FAMILY_ARMS and bool(
-        getattr(args, "skip_fp16_control", False)
-    ):
+
+
+def _validate_v2_fp16_control(args: argparse.Namespace) -> None:
+    if args.arm in _INT4_FAMILY_ARMS and bool(getattr(args, "skip_fp16_control", False)):
+        issue = "85" if args.arm == "int4_channel_alpha" else "80"
         raise ForwardError(
-            f"#{'85' if args.arm == 'int4_channel_alpha' else '80'} "
-            f"{args.arm} runs require FP16 control (do not pass --skip-fp16-control)"
+            f"#{issue} {args.arm} runs require FP16 control (do not pass --skip-fp16-control)"
         )
 
 

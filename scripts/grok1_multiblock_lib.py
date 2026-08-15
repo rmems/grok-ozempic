@@ -478,7 +478,9 @@ class Int4SideExperts:
         scale_mode: str = INT4_SCALE_ABSMAX,
     ) -> None:
         if scale_mode not in (INT4_SCALE_ABSMAX, INT4_SCALE_LS_CHANNEL_ALPHA):
-            raise ForwardError(f"int4 scale_mode must be absmax or ls_channel_alpha, got {scale_mode!r}")
+            raise ForwardError(
+                f"int4 scale_mode must be absmax or ls_channel_alpha, got {scale_mode!r}"
+            )
         self._scale_mode = scale_mode
         if scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
             self.label = "research_int4_channel_alpha_side"
@@ -487,19 +489,24 @@ class Int4SideExperts:
             self.label = "research_int4_side"
             codec = "int4_absmax_per_output_channel"
         self._ref = reference
-        self.roles = {r: reference.roles[r] for r in EXPERT_ROLES if r in reference.roles}
+        self.roles = self._expert_role_map(reference)
         missing = sorted(EXPERT_ROLES - set(self.roles))
         if missing:
             raise ForwardError(f"int4 primary lacks expert roles {missing}")
         self.scale_sources = {self.roles[r]: self.label for r in self.roles}
         self._block = int(block)
-        # Absmax keeps the #80 layout ``side_root/block_BBB/``. LS-α nests under
-        # ``side_root/ls-alpha/block_BBB/`` for the scale file, but the bit-identical
-        # INT4 codes are shared with the absmax table in ``side_root/block_BBB/``
-        # so they are not written twice.
-        root = Path(side_root).expanduser()
+        self._set_paths(Path(side_root).expanduser())
+        self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        self._write_sidecar(self._build_sidecar(codec))
+
+    def _set_paths(self, root: Path) -> None:
+        """Absmax keeps the #80 layout; LS-α nests the scale under ``ls-alpha/``.
+
+        The bit-identical INT4 codes are shared with the absmax table so they are
+        not written twice.
+        """
         absmax_dir = root / f"block_{self._block:03d}"
-        if scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
+        if self._scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
             self._side_dir = root / "ls-alpha" / f"block_{self._block:03d}"
             self._q_dir = absmax_dir
         else:
@@ -507,11 +514,22 @@ class Int4SideExperts:
             self._q_dir = absmax_dir
         self._q_dir.mkdir(parents=True, exist_ok=True)
         self._side_dir.mkdir(parents=True, exist_ok=True)
-        self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    @staticmethod
+    def _expert_role_map(reference: NpyWeights) -> dict[str, str]:
+        """Filter the reference roles down to the expert tensors we quantize."""
+        roles: dict[str, str] = {}
+        for role in EXPERT_ROLES:
+            if role in reference.roles:
+                roles[role] = reference.roles[role]
+        return roles
+
+    def _build_sidecar(self, codec: str) -> dict[str, object]:
+        """Assemble the sidecar metadata after all side tables are loaded."""
         sidecar: dict[str, object] = {
             "block": self._block,
             "codec": codec,
-            "scale_mode": scale_mode,
+            "scale_mode": self._scale_mode,
             "qmax": INT4_QMAX,
             "tensors": {},
         }
@@ -520,13 +538,17 @@ class Int4SideExperts:
             q, scale = self._cache[role]
             q_path, s_path = self._paths(name)
             tensors = sidecar["tensors"]
-            assert isinstance(tensors, dict)
+            if not isinstance(tensors, dict):
+                raise TypeError("sidecar tensors field is not a mapping")
             tensors[name] = {
                 "q_file": os.path.relpath(str(q_path), str(self._side_dir)),
                 "scale_file": os.path.relpath(str(s_path), str(self._side_dir)),
                 "shape": list(q.shape),
                 "scale_shape": list(scale.shape),
             }
+        return sidecar
+
+    def _write_sidecar(self, sidecar: dict[str, object]) -> None:
         (self._side_dir / "sidecar.json").write_text(
             json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
         )
@@ -1944,34 +1966,40 @@ _V3_SCHEDULE_FIELDS = (
 )
 
 
+def _v3_schedule_field_errors(
+    chain: dict, label: str, field: str, expected: object
+) -> list[str]:
+    """Errors for one schedule field: missing, malformed, or mismatched."""
+    if field not in chain:
+        return [f"{label}:{field}_missing"]
+    value = _canonical_block_list(chain[field])
+    if value is None:
+        return [f"{label}:{field}_not_block_list"]
+    if value != expected:
+        return [f"{label}:{field}={value!r} expected={expected!r}"]
+    return []
+
+
 def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     try:
         hp_blocks, int4_blocks, channel_alpha_blocks, mode = _v3_expected_schedule(label)
     except ValueError as exc:
         return [f"{label}:{exc}"]
-    schedule_fields = list(_V3_SCHEDULE_FIELDS) + ["expert_mode"]
-    missing = [field for field in schedule_fields if field not in chain]
-    errors: list[str] = [f"{label}:{field}_missing" for field in missing]
-    observed = {
-        field: _canonical_block_list(chain.get(field))
-        for field in _V3_SCHEDULE_FIELDS
-        if field in chain
+    expected: dict[str, object] = {
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": channel_alpha_blocks,
     }
-    for field, value in observed.items():
-        if value is None:
-            errors.append(f"{label}:{field}_not_block_list")
-    checks = [
-        ("hp_blocks", observed.get("hp_blocks"), hp_blocks),
-        ("int4_blocks", observed.get("int4_blocks"), int4_blocks),
-        ("ternary_blocks", observed.get("ternary_blocks"), []),
-        ("channel_alpha_blocks", observed.get("channel_alpha_blocks"), channel_alpha_blocks),
-        ("expert_mode", chain.get("expert_mode"), mode),
-    ]
-    errors.extend(
-        f"{label}:{field}={obs!r} expected={exp!r}"
-        for field, obs, exp in checks
-        if obs is not None and obs != exp
-    )
+    errors: list[str] = []
+    for field in _V3_SCHEDULE_FIELDS:
+        errors.extend(_v3_schedule_field_errors(chain, label, field, expected[field]))
+    if "expert_mode" not in chain:
+        errors.append(f"{label}:expert_mode_missing")
+    elif chain.get("expert_mode") != mode:
+        errors.append(
+            f"{label}:expert_mode={chain.get('expert_mode')!r} expected={mode!r}"
+        )
     return errors
 
 
@@ -2585,7 +2613,7 @@ def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
     """Require every pack_provenance row to declare the pack SHA-256 it was measured from."""
     packs = chain.get("pack_provenance")
     if not isinstance(packs, list):
-        return []
+        return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
     for index, row in enumerate(packs):
         if not isinstance(row, dict) or not isinstance(row.get("pack_sha256"), str):
@@ -2597,37 +2625,52 @@ def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
     return errors
 
 
+def _v4_pack_sha_by_block(packs: object) -> dict[int, str]:
+    """Extract a block -> pack_sha256 map from a pack_provenance list."""
+    sha_by_block: dict[int, str] = {}
+    if not isinstance(packs, list):
+        return sha_by_block
+    for row in packs:
+        if (
+            isinstance(row, dict)
+            and isinstance(row.get("block"), int)
+            and isinstance(row.get("pack_sha256"), str)
+        ):
+            sha_by_block[row["block"]] = row["pack_sha256"]
+    return sha_by_block
+
+
+def _v4_payload_identity_errors(
+    label: str, payload: dict, primary_sha: dict[int, str]
+) -> list[str]:
+    """Compare one secondary payload's pack provenance against the primary."""
+    chain = payload.get("chain")
+    if not isinstance(chain, dict):
+        return []
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list):
+        return [f"{label}:missing_pack_provenance_for_identity"]
+    errors: list[str] = []
+    for row in packs:
+        if not isinstance(row, dict):
+            continue
+        block = row.get("block")
+        sha = row.get("pack_sha256")
+        if not isinstance(block, int) or not isinstance(sha, str):
+            continue
+        if primary_sha.get(block) != sha:
+            errors.append(f"{label}:pack_sha256_mismatch:block_{block:03d}")
+    return errors
+
+
 def _v4_pack_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[str]:
     """All #85 arms must be measured from the same GOZ1 pack (per block)."""
-    primary_packs = primary.get("pack_provenance")
-    if not isinstance(primary_packs, list) or not primary_packs:
-        return []
-    primary_sha: dict[int, str] = {}
-    for row in primary_packs:
-        if isinstance(row, dict) and isinstance(row.get("block"), int) and isinstance(row.get("pack_sha256"), str):
-            primary_sha[row["block"]] = row["pack_sha256"]
+    primary_sha = _v4_pack_sha_by_block(primary.get("pack_provenance"))
     if not primary_sha:
         return []
     errors: list[str] = []
     for label, payload in secondary.items():
-        chain = payload.get("chain")
-        if not isinstance(chain, dict):
-            continue
-        packs = chain.get("pack_provenance")
-        if not isinstance(packs, list):
-            errors.append(f"{label}:missing_pack_provenance_for_identity")
-            continue
-        for row in packs:
-            if not isinstance(row, dict):
-                continue
-            block = row.get("block")
-            sha = row.get("pack_sha256")
-            if not isinstance(block, int) or not isinstance(sha, str):
-                continue
-            if primary_sha.get(block) != sha:
-                errors.append(
-                    f"{label}:pack_sha256_mismatch:block_{block:03d}"
-                )
+        errors.extend(_v4_payload_identity_errors(label, payload, primary_sha))
     return errors
 
 
