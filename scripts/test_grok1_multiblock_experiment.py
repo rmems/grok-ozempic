@@ -33,13 +33,21 @@ from grok1_multiblock_experiment import (  # noqa: E402
 )
 from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_72,
+    BASELINE_85,
     V2_CEILING_ARM,
     V2_PRIMARY_ARM,
     V2_STACKED_ARM,
     V3_PRIMARY_ARM,
     V3_SECONDARY_ARM,
+    V4_INT4_BASELINE_ARM,
+    V4_PRIMARY_ARM,
+    Int4SideExperts,
+    INT4_SCALE_ABSMAX,
+    INT4_SCALE_LS_CHANNEL_ALPHA,
     _applied_expert_scale_sources,
     _expert_primary,
+    _v3_applied_source,
+    _v3_expected_schedule,
     assemble_remedy_v2_comparison,
     assemble_remedy_v3_comparison,
     channel_alpha_dequant,
@@ -48,6 +56,122 @@ from grok1_multiblock_lib import (  # noqa: E402
     settings_mismatch_reason,
     structural_expert_scale_map,
 )
+
+
+# ---------------------------------------------------------------------------
+# Shared v4 fixture builders
+# ---------------------------------------------------------------------------
+_V4_PACK_SHA256 = "a" * 64
+_V4_NPY_SHA256 = "c" * 64
+_V4_IMPL = {"commit": "abc", "dirty": False}
+
+
+def _v4_pack_row(
+    block: int,
+    source: str,
+    sha256: str = _V4_PACK_SHA256,
+    npy_sha256: str = _V4_NPY_SHA256,
+) -> dict:
+    """One pack_provenance row for #85 test fixtures."""
+    return {
+        "block": block,
+        "pack_sha256": sha256,
+        "npy_sha256": npy_sha256,
+        "container_versions": [3],
+        "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
+        "scale_sources": structural_expert_scale_map(block, source),
+    }
+
+
+def _v4_per_block_row(block: int, top1_last: float) -> dict:
+    """One per_block row for #85 test fixtures; only the last block carries top1_last."""
+    return {
+        "block": block,
+        "expert_only": {
+            "block_output_cosine": 0.995,
+            "router_top1_agreement": 1.0 if block < 3 else top1_last,
+            "router_top2_set_agreement": 0.95,
+            "expert_load_js_bits": 0.0,
+            "block_output_drift_relative_norm": 0.01,
+            "residual_stream_in": {
+                "residual_in_drift_relative_norm": 0.0 if block == 0 else 0.05
+            },
+        },
+        "fp16_control": {
+            "block_output_cosine": 1.0,
+            "router_top1_agreement": 1.0,
+            "router_top2_set_agreement": 1.0,
+        },
+        "pilot_label": "x",
+    }
+
+
+def _v4_protocol_fields(
+    blocks: list[int] | None,
+    tokens: int | None,
+    token_seed: int | None,
+    top_k: int | None,
+) -> tuple[list[int], int, int, int]:
+    """Resolve the four locked #85 protocol fields, defaulting to BASELINE_85."""
+    return (
+        list(blocks) if blocks is not None else list(BASELINE_85["blocks"]),
+        int(tokens) if tokens is not None else int(BASELINE_85["tokens"]),
+        int(token_seed) if token_seed is not None else int(BASELINE_85["token_seed"]),
+        int(top_k) if top_k is not None else int(BASELINE_85["top_k"]),
+    )
+
+
+def _v4_chain(
+    label: str,
+    *,
+    blocks: list[int] | None = None,
+    tokens: int | None = None,
+    token_seed: int | None = None,
+    top_k: int | None = None,
+    top1_last: float = 0.97,
+    pack_sha256: str = _V4_PACK_SHA256,
+) -> dict:
+    """Build a valid #85 v4 chain with all schedule and pack-provenance fields."""
+    blocks, tokens, token_seed, top_k = _v4_protocol_fields(
+        blocks, tokens, token_seed, top_k
+    )
+    hp_blocks, int4_blocks, channel_blocks, expert_mode = _v3_expected_schedule(label)
+    per_block = [_v4_per_block_row(b, top1_last) for b in blocks]
+    pack_rows = [
+        _v4_pack_row(b, _v3_applied_source(b, hp_blocks, label), pack_sha256)
+        for b in blocks
+    ]
+    return {
+        "arm_label": label,
+        "blocks": blocks,
+        "tokens": tokens,
+        "token_seed": token_seed,
+        "top_k": top_k,
+        "expert_mode": expert_mode,
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": channel_blocks,
+        "per_block": per_block,
+        "end_of_chain": {
+            "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+            "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+        },
+        "pack_provenance": pack_rows,
+    }
+
+
+def _v4_secondary_payload(
+    chain: dict, implementation: dict | None = None
+) -> dict:
+    impl = dict(implementation) if implementation is not None else dict(_V4_IMPL)
+    return {
+        "provenance": {
+            "evidence_role": "secondary; no independent decision",
+            "implementation": impl,
+        },
+        "chain": chain,
+    }
 
 
 class ParseBlocksTests(unittest.TestCase):
@@ -1296,6 +1420,432 @@ class RemedyV3DecisionTests(unittest.TestCase):
             _validate_v2_cli(args)
 
 
+class RemedyV4DecisionTests(unittest.TestCase):
+    """GH #85: INT4 codes × LS channel-α at Grok-1 max context (8192)."""
+
+    def test_ls_channel_alpha_mse_not_worse_than_absmax(self) -> None:
+        import numpy as np
+        from grok1_multiblock_lib import (
+            int4_absmax_quantize,
+            int4_dequant_from_codes,
+            int4_ls_channel_alpha_scale,
+        )
+
+        rng = np.random.default_rng(7)
+        w = rng.standard_normal((48, 24)).astype(np.float32)
+        q, s_abs = int4_absmax_quantize(w)
+        s_ls = int4_ls_channel_alpha_scale(w, q)
+        err_abs = float(np.mean((w - int4_dequant_from_codes(q, s_abs)) ** 2))
+        err_ls = float(np.mean((w - int4_dequant_from_codes(q, s_ls)) ** 2))
+        self.assertLessEqual(err_ls, err_abs + 1e-9)
+
+    def test_rejects_2048_tokens_for_v4_primary(self) -> None:
+        seed = 2026 * 10_000 + 806
+        args = argparse.Namespace(
+            arm="int4_channel_alpha",
+            tokens=2048,
+            seed=seed,
+            top_k=2,
+            blocks="0,1,2,3",
+            evidence_only=False,
+            hp_blocks=None,
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        with self.assertRaisesRegex(ForwardError, r"8192"):
+            _validate_v2_cli(args)
+
+    def test_v4_error_reports_cite_issue_85(self) -> None:
+        args = argparse.Namespace(arm="int4_channel_alpha")
+        issue, agent = multiblock._agent_for_args(args)
+        self.assertIn("#85", issue)
+        self.assertIn("RM-608", issue)
+        self.assertIn("#85", agent)
+
+    def test_same_budget_int4_baseline_cites_issue_85(self) -> None:
+        """The 8192 evidence-only INT4 control is #85 evidence, not a #80 run."""
+        baseline = argparse.Namespace(
+            arm="int4", tokens=8192, evidence_only=True, hp_blocks=None
+        )
+        self.assertTrue(multiblock._is_v4_run(baseline))
+        issue, _agent = multiblock._agent_for_args(baseline)
+        self.assertIn("#85", issue)
+        self.assertIn("RM-608", issue)
+        # A genuine #80 run at the 2048 ladder must still cite #80.
+        historical = argparse.Namespace(
+            arm="int4", tokens=2048, evidence_only=True, hp_blocks=None
+        )
+        self.assertFalse(multiblock._is_v4_run(historical))
+        self.assertIn("#80", multiblock._agent_for_args(historical)[0])
+
+    def test_budget_check_and_v4_classification_agree(self) -> None:
+        """`_validate_int4_evidence_hp` and `_is_v4_run` must use one token rule.
+
+        They disagreed once: bare `int()` in the former accepted a coerced
+        "8192" as the #85 baseline while the latter classed the run #80, so it
+        was taken as #85 evidence and stamped #80 provenance.
+        """
+        for tokens in (8192, "8192", 8192.0, "abc", None, True):
+            with self.subTest(tokens=tokens):
+                args = argparse.Namespace(
+                    arm="int4", tokens=tokens, evidence_only=True, hp_blocks=None
+                )
+                is_v4 = multiblock._is_v4_run(args)
+                try:
+                    multiblock._validate_int4_evidence_hp(args)
+                    accepted_as_85 = True
+                except ForwardError:
+                    accepted_as_85 = False
+                self.assertEqual(
+                    accepted_as_85,
+                    is_v4,
+                    f"tokens={tokens!r}: budget check says {accepted_as_85}, "
+                    f"_is_v4_run says {is_v4}",
+                )
+
+    def test_v4_run_classification_survives_malformed_tokens(self) -> None:
+        """`_is_v4_run` feeds provenance: malformed tokens classify, never raise."""
+        # "8192"/8192.0 are rejected too — a coerced value must not pass for a
+        # locked baseline setting (see `_safe_int`).
+        for tokens in ("abc", None, "8192", 8192.0, True, []):
+            with self.subTest(tokens=tokens):
+                args = argparse.Namespace(
+                    arm="int4", tokens=tokens, evidence_only=True, hp_blocks=None
+                )
+                self.assertFalse(multiblock._is_v4_run(args))
+                self.assertIn("#80", multiblock._agent_for_args(args)[0])
+
+    def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
+        seed = 2026 * 10_000 + 806
+        args = argparse.Namespace(
+            arm="int4_channel_alpha",
+            tokens=8192,
+            seed=seed,
+            top_k=2,
+            blocks="0,1,2,3",
+            evidence_only=False,
+            hp_blocks=None,
+            comparison_metrics=[],
+            skip_fp16_control=False,
+        )
+        _validate_v2_cli(args)
+
+    def test_option_1_when_stack_is_viable(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM, top1_last=0.97),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, top1_last=0.90), impl)],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v4(comparison)
+        self.assertEqual(decision["decision"], 1)
+        self.assertEqual(decision["best_remedy_arm"], V4_PRIMARY_ARM)
+
+    def test_v4_pack_provenance_does_not_keyerror_or_cite_72_incomparability(self) -> None:
+        """Regression: Devin Review BUGs — v4 labels KeyError / always incomparable to #72."""
+        from grok1_multiblock_lib import (
+            V4_INT4_BASELINE_ARM,
+            V4_PRIMARY_ARM,
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            remedy_metrics_note,
+            settings_mismatch_reason,
+            _v3_scale_source_errors,
+            _v3_schedule_errors,
+            _v4_chain_errors,
+        )
+
+        primary = _v4_chain(V4_PRIMARY_ARM)
+        baseline = _v4_chain(V4_INT4_BASELINE_ARM)
+        self.assertEqual(_v3_schedule_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v3_scale_source_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v4_chain_errors(primary, V4_PRIMARY_ARM), [])
+        self.assertEqual(_v4_chain_errors(baseline, V4_INT4_BASELINE_ARM), [])
+        # #72 mismatch is expected at 8192 and must not enter v4 validation_errors.
+        self.assertEqual(settings_mismatch_reason(primary), "settings_not_comparable_to_72")
+        note = remedy_metrics_note(primary)
+        self.assertIn("#85", note)
+        self.assertNotIn("not comparable", note.lower())
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            primary,
+            [_v4_secondary_payload(baseline, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        self.assertFalse(
+            any("settings_not_comparable_to_72" in e for e in comparison["validation_errors"])
+        )
+        decision = decide_remedy_v4(comparison)
+        self.assertEqual(decision["decision"], 1)
+
+    def test_mismatched_blocks_rejected(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, blocks=[0, 1, 2]), impl)],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("blocks=" in e for e in comparison["validation_errors"]),
+            f"Expected blocks error in {comparison['validation_errors']}"
+        )
+
+    def test_duplicate_pack_provenance_block_rejected(self) -> None:
+        """Four rows naming one block is not coverage for four blocks."""
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        source = _v3_applied_source(0, hp_blocks, V4_INT4_BASELINE_ARM)
+        # Internally consistent rows, correct count, all naming block 0: blocks
+        # 1-3 would otherwise never be pack-identity checked.
+        secondary["pack_provenance"] = [
+            _v4_pack_row(0, source, _V4_PACK_SHA256) for _ in range(4)
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        # Both halves: blocks 1-3 uncovered, and block 0 over-covered.
+        for block in (1, 2, 3):
+            self.assertTrue(
+                any(f"pack_provenance_rows_for_block_{block:03d}=0" in e for e in errors),
+                f"Expected missing-coverage error for block {block} in {errors}",
+            )
+        self.assertTrue(
+            any("pack_provenance_rows_for_block_000=4" in e for e in errors),
+            f"Expected duplicate-row error for block 0 in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_pack_provenance_block_outside_baseline_named(self) -> None:
+        """A stray block is reported as such, not only as a missing block."""
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        secondary["pack_provenance"] = [
+            _v4_pack_row(
+                blk, _v3_applied_source(blk, hp_blocks, V4_INT4_BASELINE_ARM), _V4_PACK_SHA256
+            )
+            for blk in (0, 1, 2, 5)
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("pack_provenance_unexpected_block=5" in e for e in errors),
+            f"Expected stray-block error in {errors}",
+        )
+        self.assertTrue(
+            any("pack_provenance_rows_for_block_003=0" in e for e in errors),
+            f"Expected missing block 3 in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_divergent_npy_inputs_rejected(self) -> None:
+        """Same pack, different FP32 inputs, is not same-budget evidence.
+
+        The pack SHA-256 covers the GOZ1 container only; INT4 codes, the
+        reference trajectory and all non-expert weights come from NpyWeights.
+        """
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        # Identical pack SHA per block, different npy content.
+        secondary["pack_provenance"] = [
+            _v4_pack_row(
+                blk,
+                _v3_applied_source(blk, hp_blocks, V4_INT4_BASELINE_ARM),
+                _V4_PACK_SHA256,
+                npy_sha256="d" * 64,
+            )
+            for blk in BASELINE_85["blocks"]
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("npy_sha256_mismatch" in e for e in errors),
+            f"Expected npy identity mismatch in {errors}",
+        )
+        # The pack check alone would have passed this evidence.
+        self.assertFalse(
+            any("pack_sha256_mismatch" in e for e in errors),
+            f"packs match; only the npy inputs differ: {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_partial_npy_sha256_is_not_partial_validation(self) -> None:
+        """A row without a digest must fail, not drop out of the comparison.
+
+        Omitting `npy_sha256` on one block while the rest match the primary
+        previously left that block uncompared and still decided option 1.
+        """
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        for row in secondary["pack_provenance"]:
+            if row["block"] == 3:
+                row.pop("npy_sha256")
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("missing_npy_sha256" in e for e in errors),
+            f"Expected a per-row missing-digest error in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_malformed_npy_sha256_rejected(self) -> None:
+        """Matching but invalid digests must not read as shared FP32 inputs."""
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        primary = _v4_chain(V4_PRIMARY_ARM)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        for row in primary["pack_provenance"] + secondary["pack_provenance"]:
+            row["npy_sha256"] = "not-a-sha256"
+        comparison = assemble_remedy_v4_comparison(
+            primary,
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("invalid_npy_sha256" in e for e in errors),
+            f"Expected an invalid-digest error in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_non_list_blocks_fails_closed(self) -> None:
+        """Malformed `blocks` in loaded evidence must be an error, not a TypeError."""
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        for label, bad in (("secondary", 4), ("primary", "0,1,2,3")):
+            with self.subTest(chain=label):
+                primary = _v4_chain(V4_PRIMARY_ARM)
+                secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+                if label == "primary":
+                    primary["blocks"] = bad
+                else:
+                    secondary["blocks"] = bad
+                comparison = assemble_remedy_v4_comparison(
+                    primary,
+                    [_v4_secondary_payload(secondary, impl)],
+                    primary_provenance={"implementation": impl},
+                )
+                self.assertTrue(
+                    any("is not a list" in e for e in comparison["validation_errors"]),
+                    f"Expected non-list blocks error in {comparison['validation_errors']}",
+                )
+                self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_mismatched_tokens_rejected(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [
+                _v4_secondary_payload(
+                    _v4_chain(V4_INT4_BASELINE_ARM, tokens=2048), impl
+                )
+            ],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("tokens=" in e for e in comparison["validation_errors"]),
+            f"Expected tokens error in {comparison['validation_errors']}"
+        )
+
+    def test_mismatched_seed_rejected(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, token_seed=99999), impl)],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("token_seed=" in e for e in comparison["validation_errors"]),
+            f"Expected token_seed error in {comparison['validation_errors']}"
+        )
+
+    def test_mismatched_top_k_rejected(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
+
+        impl = dict(_V4_IMPL)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, top_k=4), impl)],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertTrue(len(comparison["validation_errors"]) > 0)
+        self.assertTrue(
+            any("top_k=" in e for e in comparison["validation_errors"]),
+            f"Expected top_k error in {comparison['validation_errors']}"
+        )
+
+    def test_missing_int4_baseline_payload(self) -> None:
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        # No secondary payloads (missing INT4 baseline)
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM, top1_last=0.90),
+            [],
+            primary_provenance={"implementation": impl},
+        )
+        self.assertEqual(comparison["validation_errors"], [])
+        decision = decide_remedy_v4(comparison)
+        # Should get decision 4 (inconclusive) when baseline is missing and not viable
+        self.assertEqual(decision["decision"], 4)
+
+
 class RemedyV2ReportTests(unittest.TestCase):
     def test_report_has_one_canonical_decision_and_both_controls(self) -> None:
         comparison = _v2_comparison("help", "failed", "viable")
@@ -1325,6 +1875,150 @@ class RemedyV2ReportTests(unittest.TestCase):
         self.assertIn(f"#### FP16 control — `{V2_STACKED_ARM}`", body)
         self.assertIn(f"#### FP16 control — `{V2_CEILING_ARM}`", body)
         self.assertFalse(body.endswith("\n\n"))
+
+
+class Int4SideExpertsTests(unittest.TestCase):
+    """INT4 side-table persistence for absmax and LS channel-α scales."""
+
+    _FAKE_ROLES = {
+        "expert_gelu": "gate",
+        "expert_value": "up",
+        "expert_down": "down",
+    }
+
+    @staticmethod
+    def _fake_weights(rng: np.random.Generator | None = None) -> dict[str, np.ndarray]:
+        rng = rng or np.random.default_rng(0)
+        return {
+            name: rng.standard_normal((2, 8, 4)).astype(np.float32)
+            for name in Int4SideExpertsTests._FAKE_ROLES.values()
+        }
+
+    def _make_reference(self, arrays: dict[str, np.ndarray] | None = None):
+        arrays = arrays or self._fake_weights()
+        ref = mock.Mock(spec=["roles", "vector"])
+        ref.roles = dict(self._FAKE_ROLES)
+        ref.vector = lambda role: arrays[ref.roles[role]]
+        return ref
+
+    def test_absmax_sidecar_writes_local_q_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref,
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_ABSMAX,
+            )
+            sidecar = json.loads((side._side_dir / "sidecar.json").read_text())
+            gate = sidecar["tensors"]["gate"]
+            self.assertEqual(gate["q_file"], "gate__q_int8.npy")
+            self.assertEqual(gate["scale_file"], "gate__scale_f32.npy")
+            self.assertEqual(Path(td) / "block_000" / "gate__q_int8.npy", side._q_dir / "gate__q_int8.npy")
+            self.assertTrue((side._q_dir / "gate__q_int8.npy").is_file())
+
+    def test_ls_channel_alpha_label_and_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref,
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            self.assertEqual(side.label, "research_int4_channel_alpha_side")
+            self.assertEqual(side._side_dir, Path(td) / "ls-alpha" / "block_000")
+            self.assertEqual(side._q_dir, Path(td) / "block_000")
+            # The sidecar is the only on-disk record of which scale a persisted
+            # table carries; a report reads it back to attribute the codec.
+            sidecar = json.loads((side._side_dir / "sidecar.json").read_text())
+            self.assertEqual(sidecar["scale_mode"], INT4_SCALE_LS_CHANNEL_ALPHA)
+            self.assertIn("channel_alpha", str(sidecar["codec"]))
+
+    def test_stale_codes_are_rebuilt_not_reused(self) -> None:
+        """Codes from a different FP32 export must not be fit with a new scale.
+
+        dtype/range/shape all pass for stale codes, so only a reference
+        fingerprint catches it.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            first = self._fake_weights(np.random.default_rng(1))
+            side_a = Int4SideExperts(
+                self._make_reference(first),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            q_path, _ = side_a._paths("gate")
+            stale = np.load(q_path).copy()
+
+            # Same shape/dtype, different content: a re-export of the tensor.
+            second = self._fake_weights(np.random.default_rng(2))
+            side_b = Int4SideExperts(
+                self._make_reference(second),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            rebuilt = np.load(q_path)
+            self.assertFalse(
+                np.array_equal(stale, rebuilt),
+                "codes were reused across two different references",
+            )
+            # And the reconstruction tracks the new reference, not the old one.
+            got = side_b.vector("expert_gelu")
+            self.assertEqual(got.shape, second["gate"].shape)
+            new_err = float(np.abs(got - second["gate"]).mean())
+            old_err = float(np.abs(got - first["gate"]).mean())
+            self.assertLess(new_err, old_err)
+
+    def test_ls_channel_alpha_shares_q_codes_with_absmax(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            absmax = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_ABSMAX
+            )
+            ls = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            q_path, scale_path = ls._paths("gate")
+            self.assertTrue(q_path.is_file())
+            self.assertTrue(scale_path.is_file())
+            self.assertEqual(q_path, absmax._paths("gate")[0])
+            self.assertEqual(q_path.parent, Path(td) / "block_000")
+            self.assertEqual(scale_path.parent, Path(td) / "ls-alpha" / "block_000")
+            sidecar = json.loads((ls._side_dir / "sidecar.json").read_text())
+            self.assertIn("../", sidecar["tensors"]["gate"]["q_file"])
+            self.assertNotIn(
+                "../",
+                sidecar["tensors"]["gate"]["scale_file"],
+            )
+            self.assertFalse((ls._side_dir / "gate__q_int8.npy").exists())
+
+    def test_ls_channel_alpha_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            first = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            first_vec = first.vector("expert_gelu")
+            second = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            np.testing.assert_array_almost_equal(first.vector("expert_gelu"), second.vector("expert_gelu"), decimal=5)
+            self.assertEqual(first_vec.shape, (2, 8, 4))
+
+    def test_rank3_expert_dequant(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            full = side.vector("expert_value")
+            expert0 = side.expert("expert_value", 0)
+            self.assertEqual(full.shape, (2, 8, 4))
+            self.assertEqual(expert0.shape, (8, 4))
+            self.assertTrue(np.isfinite(expert0).all())
 
 
 if __name__ == "__main__":

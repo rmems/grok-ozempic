@@ -12,11 +12,13 @@ import math
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import grok1_block_forward  # noqa: E402
 from grok1_block_forward import (  # noqa: E402
     ATTN_OUTPUT_MULTIPLIER,
     EMBEDDING_MULTIPLIER,
@@ -326,6 +328,58 @@ class AttentionTests(unittest.TestCase):
             self.hn, self.wq, self.wk, self.wv, self.wo, self.n_q, self.n_kv, self.hd
         )
         np.testing.assert_allclose(self._call(), expect, rtol=1e-4, atol=1e-4)
+
+    def test_chunk_size_does_not_change_the_result(self):
+        """Chunking is a memory strategy: every chunk size must agree."""
+        expect = _naive_attention(
+            self.hn, self.wq, self.wk, self.wv, self.wo, self.n_q, self.n_kv, self.hd
+        )
+        # 1 = one token per chunk; 2 = does not divide tokens=5;
+        # 5 = exactly tokens; 8192 = far larger than tokens.
+        for chunk_size in (1, 2, 5, 8192, None):
+            with self.subTest(chunk_size=chunk_size):
+                got = self._call(chunk_size=chunk_size)
+                self.assertEqual(got.shape, (self.tokens, self.width))
+                np.testing.assert_allclose(got, expect, rtol=1e-4, atol=1e-4)
+
+    def test_chunk_size_is_clamped_to_the_documented_ceiling(self):
+        """A caller cannot opt out of the bound the chunking exists to enforce.
+
+        The sequence must exceed ATTENTION_CHUNK_TOKENS: below the ceiling the
+        `min(chunk_size, tokens)` term alone bounds the chunk, so the assertion
+        would hold even with the clamp removed.
+        """
+        from grok1_block_forward import ATTENTION_CHUNK_TOKENS
+
+        tokens = ATTENTION_CHUNK_TOKENS + 76  # over the ceiling, not a multiple
+        rng = np.random.default_rng(11)
+        hn = rng.standard_normal((tokens, self.width)).astype(np.float32)
+
+        seen: list[int] = []
+        real_softmax = grok1_block_forward._softmax_fp32
+
+        def spy(logits) -> np.ndarray:
+            seen.append(logits.shape[-2])  # query positions in this chunk
+            return real_softmax(logits)
+
+        with mock.patch.object(grok1_block_forward, "_softmax_fp32", spy):
+            out = attention(
+                hn, self.wq, self.wk, self.wv, self.wo,
+                heads=self.heads, chunk_size=8192,
+            )
+        self.assertEqual(out.shape, (tokens, self.width))
+        self.assertTrue(seen, "attention did not run a chunk")
+        self.assertLessEqual(max(seen), ATTENTION_CHUNK_TOKENS)
+        # And it really did split: one chunk would mean the clamp did nothing.
+        self.assertGreater(len(seen), 1)
+
+    def test_zero_tokens_returns_empty_without_raising(self):
+        """tokens == 0 drove chunk_size to 0 and range() rejects a zero step."""
+        empty = np.zeros((0, self.width), dtype=np.float32)
+        out = attention(
+            empty, self.wq, self.wk, self.wv, self.wo, heads=self.heads
+        )
+        self.assertEqual(out.shape, (0, self.width))
 
     def test_is_causal_first_token_ignores_the_future(self):
         """Perturbing a later token must not change the first token's output."""

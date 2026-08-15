@@ -76,6 +76,13 @@ FFN_SIZE = 32768
 # 1/sqrt(128); upstream hardcodes the decimal expansion.
 ATTN_OUTPUT_MULTIPLIER = 0.08838834764831845
 MAX_ATTN_VAL = 30.0
+
+# Query positions per attention chunk. With the real Grok-1 head geometry
+# (8 kv heads x 6 groups) a 1024-token chunk allocates ~1.6 GiB of float32
+# logits, against ~12.9 GiB for the unchunked (kv_h, groups, T, T) tensor at
+# T=8192. This is a ceiling, not just a default: `attention` clamps any
+# caller-supplied chunk_size down to it, so the bound cannot be opted out of.
+ATTENTION_CHUNK_TOKENS = 1024
 ROPE_BASE = 10000
 RMS_EPS = 1e-5
 # ``Transformer.__call__`` does ``input_embeddings *= embedding_multiplier_scale``
@@ -331,11 +338,16 @@ def attention(
     mask: np.ndarray | None = None,
     offset: int = 0,
     heads: HeadConfig = GROK1_HEADS,
+    chunk_size: int | None = None,
 ) -> np.ndarray:
     """Grouped-query self-attention over ``(T, MODEL_SIZE)`` normed activations.
 
     All Grok-1 ``Linear`` params are stored ``[in_size, out_size]``, so every
     projection is a plain ``x @ w`` with no transpose.
+
+    Query positions are processed in chunks so the ``(kv_h, groups, T, T)`` float32
+    logits/weights tensor is never materialized at the full sequence length. This
+    keeps the peak memory footprint bounded at ``T=8192`` and below.
     """
     tokens = h_normed.shape[0]
     n_q_heads, n_kv_heads, head_dim = heads.n_q_heads, heads.n_kv_heads, heads.head_dim
@@ -349,17 +361,39 @@ def attention(
     # Upstream does reshape(b, t, kv_h, h // kv_h, d), i.e. contiguous grouping.
     qg = q.reshape(tokens, n_kv_heads, heads.groups, head_dim)
 
-    logits = np.einsum("thHd,Thd->hHtT", qg, k, dtype=np.float32)
-    logits *= np.float32(ATTN_OUTPUT_MULTIPLIER)
-    # tanh soft-cap: bounds logits to +/-30 before masking.
-    cap = np.float32(MAX_ATTN_VAL)
-    logits = cap * np.tanh(logits / cap)
     if mask is None:
         mask = causal_mask(tokens)
-    logits = np.where(mask[None, None, :, :], logits, np.float32(-1e30))
 
-    weights = _softmax_fp32(logits)
-    ctx = np.einsum("hHtT,Thd->thHd", weights, v, dtype=np.float32)
+    # Bound the per-chunk logits/weights allocation. Clamping to
+    # ATTENTION_CHUNK_TOKENS is what makes this a bound: `min(chunk_size,
+    # tokens)` alone only limits upward-to-T, so chunk_size=8192 at T=8192 would
+    # materialize the very ~12.9 GiB tensor the chunking exists to avoid.
+    if chunk_size is None or chunk_size <= 0:
+        chunk_size = ATTENTION_CHUNK_TOKENS
+    chunk_size = min(chunk_size, ATTENTION_CHUNK_TOKENS, tokens)
+    # An empty sequence leaves chunk_size == 0, and range() rejects a zero step.
+    # The empty result is well defined, so keep the step positive and let the
+    # loop body not execute.
+    chunk_size = max(1, chunk_size)
+
+    ctx = np.empty((tokens, n_kv_heads, heads.groups, head_dim), dtype=np.float32)
+    cap = np.float32(MAX_ATTN_VAL)
+    for start in range(0, tokens, chunk_size):
+        end = start + chunk_size
+        qg_chunk = qg[start:end]
+        logits = np.einsum("chHd,Thd->hHcT", qg_chunk, k, dtype=np.float32)
+        logits *= np.float32(ATTN_OUTPUT_MULTIPLIER)
+        # tanh soft-cap: bounds logits to +/-30 before masking.
+        logits = cap * np.tanh(logits / cap)
+        logits = np.where(
+            mask[None, None, start:end, :], logits, np.float32(-1e30)
+        )
+        weights = _softmax_fp32(logits)
+        ctx[start:end] = np.einsum("hHcT,Thd->chHd", weights, v, dtype=np.float32)
+        # Drop the chunk buffers before the next iteration allocates its own;
+        # otherwise two chunks' worth of logits/weights are live at the peak.
+        del logits, weights
+
     return ctx.reshape(tokens, n_q_heads * head_dim) @ w_out
 
 

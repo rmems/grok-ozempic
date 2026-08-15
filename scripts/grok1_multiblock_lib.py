@@ -2,8 +2,11 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -41,6 +44,37 @@ REMEDY_V2_AGENT_LINE = (
 REMEDY_V3_AGENT_LINE = (
     "Grok Build: Grok 4.5 (high) (xAI) · Issue: #80 / Linear RM-468 · beads goz-d603r4"
 )
+
+REMEDY_V4_AGENT_LINE = (
+    "Grok Build: Grok 4.5 (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
+)
+
+# #85 / RM-608 — Grok-1 max *sequence* budget for the real causal forward.
+#
+# Do not confuse with embedding vocab 131072: token_ids can sample that many
+# unique rows without replacement, but ``attention`` allocates logits of shape
+# (kv_heads, groups, T, T) ≈ O(T²). At T=131072 that is ~3 TiB and is not
+# runnable. Published Grok-1 context is 8192 tokens; that is the locked T.
+BASELINE_85 = {
+    "source": "GH #85 / RM-608 — protocol lock (Grok-1 max context sequence)",
+    "tokens": 8192,
+    "token_seed": 2026 * 10_000 + 806,
+    "blocks": [0, 1, 2, 3],
+    "top_k": 2,
+    "tokens_note": (
+        "8192 = Grok-1 published max context (causal sequence). "
+        "Vocab size 131072 is the sampler ceiling only — not a valid T for "
+        "dense attention in this harness."
+    ),
+}
+
+V4_PRIMARY_ARM = "expert_int4_channel_alpha"
+V4_SECONDARY_ARM = "expert_int4_channel_alpha_123"
+V4_INT4_BASELINE_ARM = "expert_int4"  # re-measured at 8192; not #80 historical
+_V4_ARM_LABELS = frozenset({V4_PRIMARY_ARM, V4_SECONDARY_ARM, V4_INT4_BASELINE_ARM})
+V4_IMPROVEMENT_EPS = 1e-3  # above 1/8192 token-level granularity
+INT4_SCALE_ABSMAX = "absmax"
+INT4_SCALE_LS_CHANNEL_ALPHA = "ls_channel_alpha"
 
 # Cited from reports/grok-1-expert-precision-remedy-v2/ (PR #76 option 2).
 BASELINE_76_DENSER = {
@@ -301,6 +335,34 @@ def _int4_reduce_axes(ndim: int) -> tuple[int, ...]:
     return tuple(range(1, ndim - 1))
 
 
+def _reference_fingerprint(ref: np.ndarray) -> dict[str, object]:
+    """Content identity of the FP32 reference a side table was built from.
+
+    Shape and dtype alone do not identify an export -- two different runs of the
+    same tensor agree on both -- so hash the bytes as well.
+    """
+    contiguous = np.ascontiguousarray(ref, dtype=np.float32)
+    digest = hashlib.sha256(contiguous.tobytes()).hexdigest()
+    return {
+        "sha256": digest,
+        "dtype": str(contiguous.dtype),
+        "shape": [int(d) for d in contiguous.shape],
+    }
+
+
+def _fingerprint_matches(path: Path, fingerprint: dict[str, object]) -> bool:
+    """True only when ``path`` records exactly this reference identity."""
+    if not path.is_file():
+        return False
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(stored, dict):
+        return False
+    return all(stored.get(key) == value for key, value in fingerprint.items())
+
+
 def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-output-channel absmax INT4 codes (int8) + scale (f32).
 
@@ -331,14 +393,29 @@ def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def int4_dequant_from_codes(q: np.ndarray, scale: np.ndarray) -> np.ndarray:
-    """Dequant INT4 codes × scale (research side-table load path)."""
+    """Dequant INT4 codes × scale (research side-table load path).
+
+    Scale may carry only the output-channel dimension ``(N,)`` or the
+    per-expert output-channel dimensions ``(E, N)`` (and, in general, rank
+    ``q.ndim - 1`` after collapsing the contracting axes between the leading
+    expert axis and the trailing output axis). Missing middle axes are expanded
+    to singletons so the broadcast matches ``q`` without materializing a full
+    per-code scale tensor.
+    """
     q_arr = np.asarray(q, dtype=np.float32)
     scale_arr = np.asarray(scale, dtype=np.float32)
-    if scale_arr.ndim == q_arr.ndim - 1 and q_arr.ndim >= 2:
-        # Broadcast scale over contracting axis between lead and last dims.
-        # e.g. q (E,K,N) × scale (E,N) → expand to (E,1,N).
-        for ax in range(1, q_arr.ndim - 1):
-            scale_arr = np.expand_dims(scale_arr, ax)
+    if q_arr.ndim >= 2 and scale_arr.ndim >= 1 and scale_arr.ndim < q_arr.ndim:
+        if scale_arr.ndim >= 2 and scale_arr.shape[0] == q_arr.shape[0]:
+            # Scale has a matching leading (expert) axis and a trailing output
+            # axis. Insert singleton contracting axes between them.
+            for _ in range(q_arr.ndim - scale_arr.ndim):
+                scale_arr = np.expand_dims(scale_arr, 1)
+        else:
+            # One-dimensional scale (output channel only): prepend singleton
+            # batch/expert axes so the trailing dimension aligns with q's last
+            # axis.
+            for _ in range(q_arr.ndim - scale_arr.ndim):
+                scale_arr = np.expand_dims(scale_arr, 0)
     deq = (q_arr * scale_arr).astype(np.float32)
     _require_finite_array(deq, "dequantized weights")
     return deq
@@ -350,16 +427,77 @@ def int4_absmax_dequant(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return int4_dequant_from_codes(q, scale), scale
 
 
+def int4_ls_channel_alpha_scale(weights: np.ndarray, q: np.ndarray) -> np.ndarray:
+    """Per-output-channel LS scale for fixed INT4 codes: α = Σ w·q / Σ q².
+
+    Same axes as absmax INT4 (preserves expert lead dim). Stacks #74 channel-α
+    reconstruction with #80 INT4 codes — not pack_v2.
+
+    Operates in float32 and chunks over the leading expert axis for rank ≥3 so
+    the ``w * codes`` product is never a second full-size copy of the weight
+    tensor.
+    """
+    w_f = np.asarray(weights, dtype=np.float32)
+    q_i = np.asarray(q, dtype=np.int8)
+    if w_f.shape != q_i.shape:
+        raise ForwardError(
+            f"int4 LS-α shape mismatch: weights {w_f.shape} vs codes {q_i.shape}"
+        )
+    if w_f.size == 0:
+        raise ForwardError("int4 LS-α: empty weight tensor")
+    _require_finite_array(w_f, "LS-α source weights")
+    if w_f.ndim == 1:
+        den = float((q_i * q_i).sum())
+        alpha = (float((w_f * q_i).sum()) / den) if den > 0 else 0.0
+        return np.asarray([alpha], dtype=np.float32)
+    if w_f.ndim == 2:
+        axes = (0,)
+        num = (w_f * q_i).sum(axis=axes, dtype=np.float64)
+        den = (q_i * q_i).sum(axis=axes, dtype=np.float64)
+        alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+        scale = alpha.astype(np.float32)
+        _require_finite_array(scale, "LS-α scales")
+        return scale
+    # Rank ≥ 3: chunk over the leading (expert) axis to limit peak memory.
+    n_experts = w_f.shape[0]
+    n_out = w_f.shape[-1]
+    num = np.zeros((n_experts, n_out), dtype=np.float64)
+    den = np.zeros((n_experts, n_out), dtype=np.float64)
+    for e in range(n_experts):
+        w_e = w_f[e]
+        q_e = q_i[e]
+        # Reduce all contracting axes (all but the trailing output axis).
+        reduce_axes = tuple(range(0, w_e.ndim - 1))
+        num[e] = (w_e * q_e).sum(axis=reduce_axes, dtype=np.float64)
+        den[e] = (q_e * q_e).sum(axis=reduce_axes, dtype=np.float64)
+    alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+    scale = alpha.astype(np.float32)
+    _require_finite_array(scale, "LS-α scales")
+    return scale
+
+
+def int4_quantize_with_scale_mode(
+    weights: np.ndarray, scale_mode: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """INT4 codes + scale under ``absmax`` or ``ls_channel_alpha``."""
+    q, absmax_scale = int4_absmax_quantize(weights)
+    if scale_mode == INT4_SCALE_ABSMAX:
+        return q, absmax_scale
+    if scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
+        return q, int4_ls_channel_alpha_scale(weights, q)
+    raise ForwardError(f"unknown int4 scale_mode {scale_mode!r}")
+
+
 class Int4SideExperts:
     """Expert primary from a **persisted** INT4 research side-table.
 
-    Scale provenance tag is ``research_int4_side`` — never claim pack_v2.
-    Layout under ``side_root/block_{BBB}/``: ``{tensor}__q_int8.npy``,
-    ``{tensor}__scale_f32.npy``, ``sidecar.json``. Missing tables are built
-    once from the FP32 reference and written before any forward access.
+    Scale provenance is ``research_int4_side`` (absmax) or
+    ``research_int4_channel_alpha_side`` (LS channel-α on INT4 codes) — never
+    claim pack_v2. Layout under ``side_root/block_{BBB}/``:
+    ``{tensor}__q_int8.npy``, ``{tensor}__scale_f32.npy``, ``sidecar.json``.
+    Missing tables are built once from the FP32 reference and written before
+    any forward access.
     """
-
-    label = "research_int4_side"
 
     def __init__(
         self,
@@ -367,32 +505,80 @@ class Int4SideExperts:
         *,
         side_root: Path,
         block: int,
+        scale_mode: str = INT4_SCALE_ABSMAX,
     ) -> None:
+        if scale_mode not in (INT4_SCALE_ABSMAX, INT4_SCALE_LS_CHANNEL_ALPHA):
+            raise ForwardError(
+                f"int4 scale_mode must be absmax or ls_channel_alpha, got {scale_mode!r}"
+            )
+        self._scale_mode = scale_mode
+        if scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
+            self.label = "research_int4_channel_alpha_side"
+            codec = "int4_ls_channel_alpha_per_output_channel"
+        else:
+            self.label = "research_int4_side"
+            codec = "int4_absmax_per_output_channel"
         self._ref = reference
-        self.roles = {r: reference.roles[r] for r in EXPERT_ROLES if r in reference.roles}
+        self.roles = self._expert_role_map(reference)
         missing = sorted(EXPERT_ROLES - set(self.roles))
         if missing:
             raise ForwardError(f"int4 primary lacks expert roles {missing}")
-        self.scale_sources = {self.roles[r]: "research_int4_side" for r in self.roles}
+        self.scale_sources = {self.roles[r]: self.label for r in self.roles}
         self._block = int(block)
-        self._side_dir = Path(side_root).expanduser() / f"block_{self._block:03d}"
-        self._side_dir.mkdir(parents=True, exist_ok=True)
+        self._set_paths(Path(side_root).expanduser())
         self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        sidecar: dict[str, dict] = {
+        self._write_sidecar(self._build_sidecar(codec))
+
+    def _set_paths(self, root: Path) -> None:
+        """Absmax keeps the #80 layout; LS-α nests the scale under ``ls-alpha/``.
+
+        The bit-identical INT4 codes are shared with the absmax table so they are
+        not written twice.
+        """
+        absmax_dir = root / f"block_{self._block:03d}"
+        if self._scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
+            self._side_dir = root / "ls-alpha" / f"block_{self._block:03d}"
+            self._q_dir = absmax_dir
+        else:
+            self._side_dir = absmax_dir
+            self._q_dir = absmax_dir
+        self._q_dir.mkdir(parents=True, exist_ok=True)
+        self._side_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _expert_role_map(reference: NpyWeights) -> dict[str, str]:
+        """Filter the reference roles down to the expert tensors we quantize."""
+        roles: dict[str, str] = {}
+        for role in EXPERT_ROLES:
+            if role in reference.roles:
+                roles[role] = reference.roles[role]
+        return roles
+
+    def _build_sidecar(self, codec: str) -> dict[str, object]:
+        """Assemble the sidecar metadata after all side tables are loaded."""
+        sidecar: dict[str, object] = {
             "block": self._block,
-            "codec": "int4_absmax_per_output_channel",
+            "codec": codec,
+            "scale_mode": self._scale_mode,
             "qmax": INT4_QMAX,
             "tensors": {},
         }
         for role, name in self.roles.items():
             self._cache[role] = self._load_or_build(name)
             q, scale = self._cache[role]
-            sidecar["tensors"][name] = {
-                "q_file": f"{name.replace('.', '__')}__q_int8.npy",
-                "scale_file": f"{name.replace('.', '__')}__scale_f32.npy",
+            q_path, s_path = self._paths(name)
+            tensors = sidecar["tensors"]
+            if not isinstance(tensors, dict):
+                raise TypeError("sidecar tensors field is not a mapping")
+            tensors[name] = {
+                "q_file": os.path.relpath(str(q_path), str(self._side_dir)),
+                "scale_file": os.path.relpath(str(s_path), str(self._side_dir)),
                 "shape": list(q.shape),
                 "scale_shape": list(scale.shape),
             }
+        return sidecar
+
+    def _write_sidecar(self, sidecar: dict[str, object]) -> None:
         (self._side_dir / "sidecar.json").write_text(
             json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
         )
@@ -400,12 +586,27 @@ class Int4SideExperts:
     def _paths(self, name: str) -> tuple[Path, Path]:
         stem = name.replace(".", "__")
         return (
-            self._side_dir / f"{stem}__q_int8.npy",
+            self._q_dir / f"{stem}__q_int8.npy",
             self._side_dir / f"{stem}__scale_f32.npy",
         )
 
+    def _fingerprint_path(self, name: str) -> Path:
+        """Identity of the reference the persisted codes were built from.
+
+        Lives beside the codes in the absmax directory, since both scale modes
+        share one code file and must agree on which reference produced it.
+        """
+        stem = name.replace(".", "__")
+        return self._q_dir / f"{stem}__q_int8.fingerprint.json"
+
     def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
-        """Scale layout for preserved-expert absmax (matches int4_absmax_quantize)."""
+        """Scale layout for preserved-expert INT4 scales.
+
+        Shared by absmax and LS channel-α, which reduce the same axes
+        (``int4_absmax_quantize`` / ``int4_ls_channel_alpha_scale``). For rank ≥3
+        the scale collapses all contracting axes between the leading expert axis
+        and the trailing output channel, giving ``(E, N)`` for 3-D and 4-D alike.
+        """
         if len(ref_shape) >= 3:
             return (ref_shape[0], ref_shape[-1])
         if len(ref_shape) == 2:
@@ -448,18 +649,55 @@ class Int4SideExperts:
         scale_f = self._validate_side_scale(name, scale, ref_shape)
         return q_i, scale_f
 
+    def _codes_for(
+        self, name: str, ref: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Reuse persisted INT4 codes only when they came from this reference.
+
+        The codes live in the absmax directory so absmax and LS-α never
+        duplicate them. dtype/range/shape do not establish provenance — codes
+        written from an earlier or different FP32 export pass all three, and the
+        LS-α scale would then be fit to stale codes while the side table still
+        claims ``research_int4_channel_alpha_side``. So gate reuse on a
+        fingerprint of the reference bytes.
+
+        Returns ``(codes, absmax_scale_or_None)``; the scale is a by-product of
+        quantizing, present only when the codes were just rebuilt.
+        """
+        q_path, s_path = self._paths(name)
+        fp_path = self._fingerprint_path(name)
+        fingerprint = _reference_fingerprint(ref)
+        if q_path.is_file() and _fingerprint_matches(fp_path, fingerprint):
+            return self._validate_side_codes(name, np.load(q_path), ref_shape), None
+        q, scale_abs = int4_absmax_quantize(ref)
+        np.save(q_path, q)
+        fp_path.write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+        # A scale persisted against the old codes is stale too. Drop it so the
+        # caller refits rather than loading a mismatched table.
+        s_path.unlink(missing_ok=True)
+        return q, scale_abs
+
     def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         role = next(r for r, n in self.roles.items() if n == name)
         ref = np.asarray(self._ref.vector(role), dtype=np.float32)
         ref_shape = tuple(int(d) for d in ref.shape)
-        q_path, s_path = self._paths(name)
-        if q_path.is_file() and s_path.is_file():
-            q = np.load(q_path)
+        _, s_path = self._paths(name)
+
+        q, scale_abs = self._codes_for(name, ref, ref_shape)
+
+        # Load or compute the scale for this specific scale_mode.
+        if s_path.is_file():
             scale = np.load(s_path)
-            return self._validate_side_pair(name, q, scale, ref_shape)
-        q, scale = int4_absmax_quantize(ref)
-        np.save(q_path, q)
-        np.save(s_path, scale)
+            scale = self._validate_side_scale(name, scale, ref_shape)
+        else:
+            if self._scale_mode == INT4_SCALE_ABSMAX:
+                if scale_abs is None:
+                    _, scale_abs = int4_absmax_quantize(ref)
+                scale = scale_abs
+            else:
+                scale = int4_ls_channel_alpha_scale(ref, q)
+            np.save(s_path, scale)
+
         return q, scale
 
     def vector(self, role: str) -> np.ndarray:
@@ -570,7 +808,12 @@ def _expert_primary(
         return control, "expert_hp_ceiling"
     if mode == "channel_alpha":
         return ChannelAlphaExperts(pack, reference), "research_per_channel_side"
-    if mode == "int4":
+    if mode in ("int4", "int4_channel_alpha"):
+        scale_mode = (
+            INT4_SCALE_LS_CHANNEL_ALPHA
+            if mode == "int4_channel_alpha"
+            else INT4_SCALE_ABSMAX
+        )
         if block in hp_blocks:
             if control is None:
                 raise ForwardError(
@@ -578,16 +821,21 @@ def _expert_primary(
                     "(do not --skip-fp16-control on decision runs)"
                 )
             schedule = hp_label or f"n{int(hp_period)}"
+            if mode == "int4_channel_alpha":
+                return control, f"expert_int4_channel_alpha_{schedule}"
             return control, f"expert_int4_{schedule}"
         if int4_side_root is None:
             raise ForwardError(
                 "int4 arm requires int4_side_root (persisted research side-table); "
                 "pass --int4-side-root or use the default under --out"
             )
-        return (
-            Int4SideExperts(reference, side_root=int4_side_root, block=block),
-            "research_int4_side",
+        experts = Int4SideExperts(
+            reference,
+            side_root=int4_side_root,
+            block=block,
+            scale_mode=scale_mode,
         )
+        return experts, experts.label
     raise ForwardError(f"unknown expert mode {mode!r}")
 
 
@@ -605,7 +853,8 @@ def _applied_expert_scale_sources(
     if hasattr(primary, "scale_sources"):
         applied.update(dict(primary.scale_sources))
     elif expert_mode == "all_hp" or (
-        expert_mode in ("periodic_hp", "periodic_hp_plus_channel_alpha", "int4")
+        expert_mode
+        in ("periodic_hp", "periodic_hp_plus_channel_alpha", "int4", "int4_channel_alpha")
         and block in hp_blocks
     ):
         for name in _expert_names(reference):
@@ -660,6 +909,27 @@ def _host_safe_name(path: Path) -> str:
     return Path(path).name
 
 
+def npy_dir_fingerprint(npy_dir: Path) -> str:
+    """Content identity of the FP32 inputs a block was measured from.
+
+    The pack SHA-256 covers the GOZ1 container only. INT4 codes, the reference
+    trajectory and every non-expert weight come from ``NpyWeights``, so two arms
+    can share a pack and still be measured against different checkpoints — the
+    directory basename recorded alongside cannot tell them apart.
+
+    Digest is over each ``*.npy`` file's name, size and bytes, sorted by name.
+    Costs one streaming read of the directory per block.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(Path(npy_dir).glob("*.npy"), key=lambda p: p.name):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(str(path.stat().st_size).encode("utf-8"))
+        with path.open("rb") as handle:
+            for block in iter(lambda h=handle: h.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 def pack_provenance_row(
     block: int,
     pack_path: Path,
@@ -678,6 +948,7 @@ def pack_provenance_row(
         "pack_sha256": pack.pack_sha256(),
         "pack_bytes": pack_path.stat().st_size,
         "npy_dir": _host_safe_name(npy_dir),
+        "npy_sha256": npy_dir_fingerprint(npy_dir),
         "container_versions": sorted(versions),
         "scale_sources": dict(applied_scale_sources or pack.scale_sources),
         "pack_scale_sources": dict(pack.scale_sources),
@@ -1428,7 +1699,11 @@ def _v2_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
         V2_STACKED_ARM: ([1, 3], [0, 2], "periodic_hp_plus_channel_alpha"),
         V2_CEILING_ARM: ([0, 1, 2, 3], [], "all_hp"),
     }
-    return schedules[label]
+    try:
+        return schedules[label]
+    except KeyError as exc:
+        # Fail closed with a clear message instead of a bare KeyError.
+        raise ValueError(f"unknown v2 schedule label={label!r}") from exc
 
 
 def _v2_controls(chain: dict) -> tuple[list[dict], str | None]:
@@ -1730,17 +2005,25 @@ _V3_SECONDARY_ARMS = frozenset({V3_SECONDARY_ARM})
 _V3_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
 
 
-def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
-    """Return (hp_blocks, int4_blocks, expert_mode) for a locked #80 arm label."""
-    schedules = {
-        V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
-        V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
-    }
-    return schedules[label]
+def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], list[int], str]:
+    """Return (hp_blocks, int4_blocks, channel_alpha_blocks, expert_mode) for a locked arm label."""
+    if label in (V3_PRIMARY_ARM, V4_INT4_BASELINE_ARM):
+        return ([], list(BASELINE_72["blocks"]), [], "int4")
+    if label == V3_SECONDARY_ARM:
+        return ([1, 2, 3], [0], [], "int4")
+    if label == V4_PRIMARY_ARM:
+        return ([], list(BASELINE_85["blocks"]), list(BASELINE_85["blocks"]), "int4_channel_alpha")
+    if label == V4_SECONDARY_ARM:
+        return ([1, 2, 3], [0], [0], "int4_channel_alpha")
+    raise ValueError(f"unknown locked schedule label={label!r}")
 
 
-def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
-    return "fp16_control" if block in hp_blocks else "research_int4_side"
+def _v3_applied_source(block: int, hp_blocks: list[int], label: str) -> str:
+    if block in hp_blocks:
+        return "fp16_control"
+    if label in (V4_PRIMARY_ARM, V4_SECONDARY_ARM):
+        return "research_int4_channel_alpha_side"
+    return "research_int4_side"
 
 
 def _canonical_block_list(raw: object) -> list[int] | None:
@@ -1764,29 +2047,41 @@ _V3_SCHEDULE_FIELDS = (
 )
 
 
+def _v3_schedule_field_errors(
+    chain: dict, label: str, field: str, expected: object
+) -> list[str]:
+    """Errors for one schedule field: missing, malformed, or mismatched."""
+    if field not in chain:
+        return [f"{label}:{field}_missing"]
+    value = _canonical_block_list(chain[field])
+    if value is None:
+        return [f"{label}:{field}_not_block_list"]
+    if value != expected:
+        return [f"{label}:{field}={value!r} expected={expected!r}"]
+    return []
+
+
 def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
-    hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
-    # Missing fields are not the same as explicit empty lists.
+    try:
+        hp_blocks, int4_blocks, channel_alpha_blocks, mode = _v3_expected_schedule(label)
+    except ValueError as exc:
+        return [f"{label}:{exc}"]
+    expected: dict[str, object] = {
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": channel_alpha_blocks,
+    }
+    errors: list[str] = []
     for field in _V3_SCHEDULE_FIELDS:
-        if field not in chain:
-            return [f"{label}:{field}_missing"]
-    observed = {field: _canonical_block_list(chain.get(field)) for field in _V3_SCHEDULE_FIELDS}
-    for field, value in observed.items():
-        if value is None:
-            return [f"{label}:{field}_not_block_list"]
-    # INT4 arms never use channel-α; require empty list for provenance honesty.
-    checks = [
-        ("hp_blocks", observed["hp_blocks"], hp_blocks),
-        ("int4_blocks", observed["int4_blocks"], int4_blocks),
-        ("ternary_blocks", observed["ternary_blocks"], []),
-        ("channel_alpha_blocks", observed["channel_alpha_blocks"], []),
-        ("expert_mode", chain.get("expert_mode"), mode),
-    ]
-    return [
-        f"{label}:{field}={obs!r} expected={exp!r}"
-        for field, obs, exp in checks
-        if obs != exp
-    ]
+        errors.extend(_v3_schedule_field_errors(chain, label, field, expected[field]))
+    if "expert_mode" not in chain:
+        errors.append(f"{label}:expert_mode_missing")
+    elif chain.get("expert_mode") != mode:
+        errors.append(
+            f"{label}:expert_mode={chain.get('expert_mode')!r} expected={mode!r}"
+        )
+    return errors
 
 
 def _value_set(mapping: object) -> set | None:
@@ -1907,15 +2202,27 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
         return errors + [f"{label}:block_{block}:scale_source_keys_not_expert"]
     if pack_keys != scale_keys:
         return errors + [f"{label}:block_{block}:scale_source_key_mismatch"]
-    expected = _v3_applied_source(block, hp_blocks)
+    expected = _v3_applied_source(block, hp_blocks, label)
     errors.extend(_v3_scale_value_errors(label, block, pack_map, scale_map, expected))
     return errors
 
 
-def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
-    hp_blocks, _, _ = _v3_expected_schedule(label)
+def _v3_scale_source_errors(
+    chain: dict, label: str, expected_blocks: list[int] | None = None
+) -> list[str]:
+    """Validate pack rows; `expected_blocks` defaults to the #72 ladder.
+
+    The v4 path passes BASELINE_85's blocks. Both lists hold four blocks today,
+    so defaulting is currently equivalent — but an independent #85 block change
+    would otherwise produce spurious `missing_pack_provenance` and option 4.
+    """
+    try:
+        hp_blocks, _, _, _ = _v3_expected_schedule(label)
+    except ValueError as exc:
+        return [f"{label}:{exc}"]
+    blocks = list(BASELINE_72["blocks"]) if expected_blocks is None else expected_blocks
     packs = chain.get("pack_provenance")
-    if not isinstance(packs, list) or len(packs) != len(BASELINE_72["blocks"]):
+    if not isinstance(packs, list) or len(packs) != len(blocks):
         return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
     for index, row in enumerate(packs):
@@ -2299,6 +2606,439 @@ def decide_remedy_v3(comparison: dict) -> dict:
     return payload
 
 
+def _v4_stack_labels(summaries: dict) -> list[str]:
+    """Only the all-INT4 LS-α primary arm is a candidate for stack improvement."""
+    candidates: list[str] = []
+    for label, summary in summaries.items():
+        if label != V4_PRIMARY_ARM or summary.get("cited"):
+            continue
+        if _v3_middle_complete(summary):
+            candidates.append(label)
+    return candidates
+
+
+def _v4_improved_vs_int4(summary: dict, int4_baseline: dict) -> bool:
+    eps = V4_IMPROVEMENT_EPS
+    top1_gain = float(summary["router_top1"][-1]) - float(int4_baseline["router_top1"][-1])
+    cos_gain = float(summary["block_output_cosine"][-1]) - float(
+        int4_baseline["block_output_cosine"][-1]
+    )
+    base_exit = int4_baseline.get("chain_exit_residual_drift")
+    exit_drift = summary.get("chain_exit_residual_drift")
+    drift_gain = (
+        0.0
+        if base_exit is None or exit_drift is None
+        else float(base_exit) - float(exit_drift)
+    )
+    return top1_gain > eps or cos_gain > eps or drift_gain > eps
+
+
+_V4_SECONDARY_ARMS = frozenset({V4_SECONDARY_ARM, V4_INT4_BASELINE_ARM})
+
+
+def _v4_secondary_entry(
+    payload: dict, expected_implementation: dict
+) -> tuple[str | None, dict | None, list[str]]:
+    """Accept #85 secondaries: denser stack P1 and/or re-measured absmax INT4."""
+    errors: list[str] = []
+    chain = payload.get("chain")
+    if not isinstance(chain, dict):
+        return None, None, ["secondary payload missing chain object"]
+    if "decision" in payload:
+        return None, None, errors + ["secondary payload must not contain a decision field"]
+    label = chain.get("arm_label")
+    if not isinstance(label, str):
+        return None, None, errors + ["secondary arm_label must be a string"]
+    if label not in _V4_SECONDARY_ARMS:
+        return None, None, errors + [f"secondary arm_label={label!r} not in #85 set"]
+    errors.extend(
+        _v3_secondary_provenance_errors(payload, label, expected_implementation)
+    )
+    return label, payload, errors
+
+
+def _v4_secondary_map(
+    secondary_payloads: list[dict],
+    errors: list[str],
+    expected_implementation: dict,
+) -> dict[str, dict]:
+    mapped: dict[str, dict] = {}
+    for payload in secondary_payloads:
+        label, accepted, item_errors = _v4_secondary_entry(
+            payload, expected_implementation
+        )
+        errors.extend(item_errors)
+        if label is not None and accepted is not None:
+            if label in mapped:
+                errors.append(f"duplicate secondary arm {label!r}")
+            else:
+                mapped[label] = accepted
+    # Prefer having re-measured INT4 baseline; denser stack P1 is optional evidence.
+    # Missing baseline is surfaced as a note by _v4_int4_baseline_context, not a validation error.
+    return mapped
+
+
+def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
+    """Fail closed when chain settings differ from BASELINE_85."""
+    errors: list[str] = []
+    tokens = _safe_int(chain.get("tokens"))
+    seed = _safe_int(chain.get("token_seed"))
+    top_k = _safe_int(chain.get("top_k"))
+    raw_blocks = chain.get("blocks")
+    if not isinstance(raw_blocks, list):
+        errors.append(f"{label}: blocks is not a list")
+    else:
+        blocks = list(raw_blocks)
+        if blocks != list(BASELINE_85["blocks"]):
+            errors.append(
+                f"{label}: blocks={blocks} != locked {list(BASELINE_85['blocks'])}"
+            )
+    if tokens != int(BASELINE_85["tokens"]):
+        errors.append(
+            f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} "
+            "(#85 Grok-1 max context sequence)"
+        )
+    if seed != int(BASELINE_85["token_seed"]):
+        errors.append(f"{label}: token_seed={seed} != locked {BASELINE_85['token_seed']}")
+    if top_k != int(BASELINE_85["top_k"]):
+        errors.append(f"{label}: top_k={top_k} != locked {BASELINE_85['top_k']}")
+    return errors
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _v4_pack_sha256_row_error(row: object, label: str, index: int) -> str | None:
+    """Return an error string for a single pack_provenance row, or None.
+
+    Both digests are required on every row. Making absence a per-row error is
+    what stops the cross-arm identity checks from comparing a partial set: a row
+    that omits a digest is dropped from the block map, so without this the
+    comparison would silently skip that block and still decide 1-3.
+    """
+    if not isinstance(row, dict):
+        return f"{label}:pack_provenance[{index}]:missing_pack_sha256"
+    for field in ("pack_sha256", "npy_sha256"):
+        value = row.get(field)
+        if not isinstance(value, str):
+            return f"{label}:pack_provenance[{index}]:missing_{field}"
+        if not _SHA256_RE.fullmatch(value):
+            return f"{label}:pack_provenance[{index}]:invalid_{field}"
+    return None
+
+
+def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
+    """Require every pack_provenance row to declare the pack SHA-256 it was measured from."""
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list):
+        return [f"{label}:missing_pack_provenance"]
+    errors: list[str] = []
+    for index, row in enumerate(packs):
+        err = _v4_pack_sha256_row_error(row, label, index)
+        if err is not None:
+            errors.append(err)
+    errors.extend(_v4_pack_block_coverage_errors(packs, label))
+    return errors
+
+
+def _v4_pack_block_coverage_errors(packs: list, label: str) -> list[str]:
+    """Each locked #85 block needs exactly one pack_provenance row.
+
+    A row count alone is not coverage: four rows naming the same block satisfy
+    the length check, collapse to one key in `_v4_pack_sha_by_block`, and leave
+    every other block with no pack-identity comparison at all.
+    """
+    observed = [row.get("block") for row in packs if isinstance(row, dict)]
+    expected = list(BASELINE_85["blocks"])
+    errors: list[str] = []
+    for block in expected:
+        rows = observed.count(block)
+        if rows != 1:
+            errors.append(
+                f"{label}:pack_provenance_rows_for_block_{block:03d}={rows} expected=1"
+            )
+    # Name a stray block directly. It cannot pass unnoticed today — the row
+    # count is pinned to len(blocks), so an extra block displaces a required
+    # one and is reported as that block missing — but "block 003 missing" is a
+    # misleading way to describe a row for block 005.
+    for block in sorted({b for b in observed if b not in expected}, key=repr):
+        errors.append(f"{label}:pack_provenance_unexpected_block={block!r}")
+    return errors
+
+
+def _v4_pack_sha_by_block(packs: object) -> dict[int, str]:
+    """Extract a block -> pack_sha256 map from a pack_provenance list."""
+    sha_by_block: dict[int, str] = {}
+    if not isinstance(packs, list):
+        return sha_by_block
+    for row in packs:
+        if (
+            isinstance(row, dict)
+            and isinstance(row.get("block"), int)
+            and isinstance(row.get("pack_sha256"), str)
+        ):
+            sha_by_block[row["block"]] = row["pack_sha256"]
+    return sha_by_block
+
+
+def _v4_payload_identity_row_error(
+    row: object, label: str, primary_sha: dict[int, str]
+) -> str | None:
+    """Return a pack-identity mismatch for one row, or None."""
+    if not isinstance(row, dict):
+        return None
+    block = row.get("block")
+    sha = row.get("pack_sha256")
+    if not isinstance(block, int) or not isinstance(sha, str):
+        return None
+    if primary_sha.get(block) != sha:
+        return f"{label}:pack_sha256_mismatch:block_{block:03d}"
+    return None
+
+
+def _v4_payload_identity_errors(
+    label: str, payload: dict, primary_sha: dict[int, str]
+) -> list[str]:
+    """Compare one secondary payload's pack provenance against the primary."""
+    chain = payload.get("chain")
+    if not isinstance(chain, dict):
+        return []
+    packs = chain.get("pack_provenance")
+    if not isinstance(packs, list):
+        return [f"{label}:missing_pack_provenance_for_identity"]
+    errors: list[str] = []
+    for row in packs:
+        err = _v4_payload_identity_row_error(row, label, primary_sha)
+        if err is not None:
+            errors.append(err)
+    return errors
+
+
+def _v4_npy_sha_by_block(packs: object) -> dict[int, str]:
+    """Extract a block -> npy_sha256 map, keeping only well-formed digests.
+
+    Format is enforced here as well as per row so a malformed value can never
+    be compared verbatim — two arms carrying the same invalid string must not
+    read as sharing FP32 inputs.
+    """
+    sha_by_block: dict[int, str] = {}
+    if not isinstance(packs, list):
+        return sha_by_block
+    for row in packs:
+        if not isinstance(row, dict) or not isinstance(row.get("block"), int):
+            continue
+        sha = row.get("npy_sha256")
+        if isinstance(sha, str) and _SHA256_RE.fullmatch(sha):
+            sha_by_block[row["block"]] = sha
+    return sha_by_block
+
+
+def _v4_npy_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[str]:
+    """All #85 arms must be measured from the same FP32 inputs (per block).
+
+    The pack SHA-256 covers the GOZ1 container only. INT4 codes, the reference
+    trajectory and every non-expert weight come from ``NpyWeights``, so arms
+    sharing a pack can still be measured against different checkpoints and be
+    ranked as same-budget evidence.
+
+    A missing or malformed ``npy_sha256`` is not reported here: it is already a
+    per-row error from ``_v4_pack_sha256_row_error``, so raising it again would
+    be redundant and would misname the defect when the real problem is an
+    absent ``pack_provenance``.
+    """
+    primary_npy = _v4_npy_sha_by_block(primary.get("pack_provenance"))
+    if not primary_npy:
+        return []
+    errors: list[str] = []
+    for label, payload in secondary.items():
+        chain = payload.get("chain")
+        if not isinstance(chain, dict):
+            continue
+        for block, sha in sorted(_v4_npy_sha_by_block(chain.get("pack_provenance")).items()):
+            if primary_npy.get(block) != sha:
+                errors.append(f"{label}:npy_sha256_mismatch:block_{block:03d}")
+    return errors
+
+
+def _v4_pack_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[str]:
+    """All #85 arms must be measured from the same GOZ1 pack (per block)."""
+    primary_sha = _v4_pack_sha_by_block(primary.get("pack_provenance"))
+    if not primary_sha:
+        return []
+    errors: list[str] = []
+    for label, payload in secondary.items():
+        errors.extend(_v4_payload_identity_errors(label, payload, primary_sha))
+    return errors
+
+
+def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
+    """Comprehensive validation for v4 chains (protocol + structure + controls)."""
+    label = chain.get("arm_label")
+    if label != expected_label:
+        return [f"arm_label={label!r} expected={expected_label!r}"]
+    errors: list[str] = []
+    # Protocol field validation (tokens, seed, top_k, blocks)
+    errors.extend(_v4_protocol_field_errors(chain, expected_label))
+    # Per-block structure validation
+    per_block_errors = _v2_per_block_errors(chain, expected_label)
+    errors.extend(per_block_errors)
+    # Settings/pack probes subscript per_block rows — skip when structure is invalid.
+    if per_block_errors:
+        return errors
+    # Block ordering
+    _append_optional(errors, _v3_block_order_error(chain, expected_label))
+    # Finite metrics
+    errors.extend(_v3_finite_chain_errors(chain, expected_label))
+    # FP16 control validation
+    control_error = _v3_control_error(chain)
+    if control_error is not None:
+        errors.append(f"{label}:{control_error}")
+    # Schedule validation is independent of pack provenance; scale-source
+    # and pack-identity validation require the measured pack provenance.
+    errors.extend(_v3_schedule_errors(chain, expected_label))
+    _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
+    errors.extend(
+        _v3_scale_source_errors(chain, expected_label, list(BASELINE_85["blocks"]))
+    )
+    errors.extend(_v4_pack_sha256_errors(chain, expected_label))
+    return errors
+
+
+def assemble_remedy_v4_comparison(
+    primary_chain: dict,
+    secondary_payloads: list[dict],
+    *,
+    primary_provenance: dict | None = None,
+    load_errors: list[str] | None = None,
+) -> dict:
+    """Assemble #85 stacked INT4+LS-α evidence at Grok-1 max context (8192)."""
+    errors = list(load_errors or [])
+    implementation = (primary_provenance or {}).get("implementation")
+    if not isinstance(implementation, dict):
+        errors.append("primary evidence missing implementation provenance")
+        implementation = {}
+    secondary = _v4_secondary_map(secondary_payloads, errors, implementation)
+    # Use comprehensive chain validation instead of protocol-only
+    errors.extend(_v4_chain_errors(primary_chain, V4_PRIMARY_ARM))
+    for label, payload in secondary.items():
+        errors.extend(_v4_chain_errors(payload["chain"], label))
+    errors.extend(_v4_pack_identity_errors(primary_chain, secondary))
+    errors.extend(_v4_npy_identity_errors(primary_chain, secondary))
+    summaries = {V4_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
+    summaries.update(
+        {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
+    )
+    return {
+        "primary_arm": V4_PRIMARY_ARM,
+        "secondary_arms": secondary,
+        "summaries": summaries,
+        "validation_errors": errors,
+        "baselines_cited": {
+            "historical_80_int4_all": {
+                "note": "2048-token #80 P0 all-INT4 historical only — not same-budget",
+                "b3_top1": 0.850586,
+                "tokens": 2048,
+            },
+            "protocol": BASELINE_85,
+        },
+        "primary_provenance": {"implementation": implementation},
+    }
+
+
+def _v4_int4_baseline_context(
+    summaries: dict, stack_labels: list[str], best: dict
+) -> tuple[bool, str, dict | None]:
+    """Return (any_improved, base_note, early_option4_or_None)."""
+    int4_base = summaries.get(V4_INT4_BASELINE_ARM)
+    if int4_base is not None and _v3_middle_complete(int4_base):
+        any_improved = any(
+            _v4_improved_vs_int4(summaries[label], int4_base) for label in stack_labels
+        )
+        base_top1 = float(int4_base["router_top1"][-1])
+        return any_improved, f"remeasured_int4_b3_top1={base_top1:.6f}", None
+    base_note = "remeasured_int4_baseline=missing"
+    if best.get("viable"):
+        return False, base_note, None
+    early = _decision_payload(
+        4,
+        "Inconclusive — stacked arm not viable and no same-budget INT4 baseline "
+        "to rank improvement (pass --comparison-metrics with expert_int4 at 8192).",
+        [base_note, "missing_same_budget_int4_baseline"],
+        best.get("compounding", "unknown"),
+    )
+    return False, base_note, early
+
+
+def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
+    if best.get("viable"):
+        return (
+            1,
+            "Stacked INT4 + LS channel-α restores multi-block viability at Grok-1 max context.",
+        )
+    if any_improved:
+        return (
+            2,
+            "Stacked INT4 + LS channel-α helps vs re-measured INT4 baseline, but still "
+            "compounds / misses the ~0.95 viability band.",
+        )
+    return (
+        3,
+        "Stacked INT4 + LS channel-α fails to beat re-measured INT4 alone — gap is not "
+        "LS-α on INT4 codes.",
+    )
+
+
+def _v4_decision_rationale(
+    best_label: str, best: dict, *, base_note: str, any_improved: bool
+) -> list[str]:
+    return [
+        f"best_stack_arm={best_label}",
+        f"best_b3_top1={float(best['router_top1'][-1]):.6f}",
+        f"best_b3_cos={float(best['block_output_cosine'][-1]):.6f}",
+        f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
+        base_note,
+        f"any_stack_improved_vs_remeasured_int4={any_improved}",
+        f"tokens={BASELINE_85['tokens']}",
+        "codec=research_int4_channel_alpha_side INT4 codes × LS channel-α",
+        "#80_historical_b3_top1=0.850586@2048 P0 all-INT4 (cite only; not same-budget)",
+    ]
+
+
+def decide_remedy_v4(comparison: dict) -> dict:
+    """Pick exactly one #85 decision: stacked INT4+LS-α vs re-measured INT4 baseline."""
+    errors = list(comparison.get("validation_errors") or [])
+    if errors:
+        return _decision_payload(
+            4,
+            "Inconclusive — required multi-arm evidence is incomplete or incomparable.",
+            errors,
+            "unknown",
+        )
+    summaries = comparison["summaries"]
+    stack_labels = _v4_stack_labels(summaries)
+    if not stack_labels:
+        return _decision_payload(
+            4,
+            "Inconclusive — no complete INT4+LS-α stack arm summaries present.",
+            ["no_int4_channel_alpha_summaries"],
+            "unknown",
+        )
+    best_label = max(stack_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
+    best = summaries[best_label]
+    any_improved, base_note, early = _v4_int4_baseline_context(
+        summaries, stack_labels, best
+    )
+    if early is not None:
+        return early
+    decision, text = _v4_outcome(best, any_improved=any_improved)
+    rationale = _v4_decision_rationale(
+        best_label, best, base_note=base_note, any_improved=any_improved
+    )
+    payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
+    payload["best_remedy_arm"] = best_label
+    return payload
+
+
 def decide_remedy_v2(comparison: dict) -> dict:
     """Pick exactly one #75 decision across denser, stacked, and ceiling arms."""
     errors = list(comparison.get("validation_errors") or [])
@@ -2381,6 +3121,16 @@ def _remedy_baseline_section(*, mismatch: str | None) -> list[str]:
 
 def remedy_metrics_note(chain: dict) -> str:
     """Human metrics_note reflecting schedule vs pack mismatch precisely."""
+    tokens = _safe_int(chain.get("tokens"))
+    arm = str(chain.get("arm_label") or "")
+    # #85 arms are locked to BASELINE_85 (8192). Do not stamp those runs as
+    # incomparable to the historical #72 2048 ladder — that is expected.
+    if arm in _V4_ARM_LABELS and tokens == int(BASELINE_85["tokens"]):
+        return (
+            "#85 protocol (Grok-1 max context tokens=8192). "
+            "#72/#80 2048-token figures are historical cites only; "
+            "not same-budget and not a validation failure."
+        )
     reason = settings_mismatch_reason(chain)
     if reason is None:
         return (
