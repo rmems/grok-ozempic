@@ -544,7 +544,19 @@ def _is_v4_primary(args: argparse.Namespace) -> bool:
 
 
 def _is_v4_run(args: argparse.Namespace) -> bool:
-    return args.arm in _V4_ARMS
+    """True for #85 arms; also for the #85 same-budget absmax INT4 baseline."""
+    if args.arm in _V4_ARMS:
+        return True
+    # The re-measured absmax INT4 baseline for #85 is run as --arm int4 --evidence-only
+    # at the #85 token budget; label its provenance as #85, not #80.
+    if (
+        args.arm == "int4"
+        and bool(getattr(args, "evidence_only", False))
+        and getattr(args, "tokens", None) is not None
+        and int(args.tokens) == int(BASELINE_85["tokens"])
+    ):
+        return True
+    return False
 
 
 def _validate_locked_protocol(

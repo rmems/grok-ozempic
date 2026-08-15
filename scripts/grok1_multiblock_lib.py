@@ -2595,7 +2595,15 @@ def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
     tokens = _safe_int(chain.get("tokens"))
     seed = _safe_int(chain.get("token_seed"))
     top_k = _safe_int(chain.get("top_k"))
-    blocks = list(chain.get("blocks") or [])
+    raw_blocks = chain.get("blocks")
+    if not isinstance(raw_blocks, list):
+        errors.append(f"{label}: blocks is not a list")
+    else:
+        blocks = list(raw_blocks)
+        if blocks != list(BASELINE_85["blocks"]):
+            errors.append(
+                f"{label}: blocks={blocks} != locked {list(BASELINE_85['blocks'])}"
+            )
     if tokens != int(BASELINE_85["tokens"]):
         errors.append(
             f"{label}: tokens={tokens} != locked {BASELINE_85['tokens']} "
@@ -2605,8 +2613,6 @@ def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
         errors.append(f"{label}: token_seed={seed} != locked {BASELINE_85['token_seed']}")
     if top_k != int(BASELINE_85["top_k"]):
         errors.append(f"{label}: top_k={top_k} != locked {BASELINE_85['top_k']}")
-    if blocks != list(BASELINE_85["blocks"]):
-        errors.append(f"{label}: blocks={blocks} != locked {list(BASELINE_85['blocks'])}")
     return errors
 
 
