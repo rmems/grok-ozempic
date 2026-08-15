@@ -575,9 +575,8 @@ def _validate_locked_protocol(
         )
 
 
-def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None:
-    """Validate INT4-family arms including --hp-blocks and #85 baseline exception."""
-    # #80/#85 P1 (int4 family + explicit HP) is evidence-only.
+def _reject_int4_hp_without_evidence(args: argparse.Namespace, evidence_only: bool) -> None:
+    """P1 INT4+HP is evidence-only; primary never takes --hp-blocks."""
     if (
         args.arm in _INT4_FAMILY_ARMS
         and getattr(args, "hp_blocks", None)
@@ -587,26 +586,28 @@ def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None
             f"--arm {args.arm} with --hp-blocks is P1 secondary: pass --evidence-only "
             f"(primary is --arm {args.arm} with no --hp-blocks)"
         )
-    # Locked P1 secondary schedule — reject before the expensive forward pass.
-    # Exception: #85 re-measured absmax INT4 baseline is --arm int4 --evidence-only
-    # --tokens 8192 with **no** --hp-blocks (arm_label expert_int4).
-    if args.arm in _INT4_FAMILY_ARMS and evidence_only:
-        hp = getattr(args, "hp_blocks", None)
-        tokens = getattr(args, "tokens", None)
-        is_85_budget = (
-            tokens is not None and int(tokens) == int(BASELINE_85["tokens"])
+
+
+def _validate_int4_evidence_hp(args: argparse.Namespace) -> None:
+    """Evidence-only INT4 family: denser HP {1,2,3} or #85 absmax baseline (no HP)."""
+    if args.arm not in _INT4_FAMILY_ARMS:
+        return
+    hp = getattr(args, "hp_blocks", None)
+    tokens = getattr(args, "tokens", None)
+    is_85_budget = tokens is not None and int(tokens) == int(BASELINE_85["tokens"])
+    if args.arm == "int4" and is_85_budget and hp is None:
+        return
+    if hp != {1, 2, 3}:
+        raise ForwardError(
+            f"--arm {args.arm} --evidence-only denser-HP secondary: require "
+            f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
+            "or for #85 absmax INT4 baseline use --arm int4 --tokens 8192 "
+            "--evidence-only without --hp-blocks"
         )
-        if args.arm == "int4" and is_85_budget and hp is None:
-            pass  # same-budget absmax INT4 baseline
-        elif hp != {1, 2, 3}:
-            raise ForwardError(
-                f"--arm {args.arm} --evidence-only denser-HP secondary: require "
-                f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
-                "or for #85 absmax INT4 baseline use --arm int4 --tokens 8192 "
-                "--evidence-only without --hp-blocks"
-            )
-    # Locked #80 sample settings (bit-comparable to #72 / #76 cites),
-    # or #85 same-budget re-measure when --tokens 8192 --evidence-only.
+
+
+def _validate_int4_protocols(args: argparse.Namespace, evidence_only: bool) -> None:
+    """Lock #80 to 2048 / #85 to 8192 before any real-weight forward."""
     if args.arm == "int4":
         tokens = getattr(args, "tokens", None)
         if (
@@ -631,7 +632,6 @@ def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None
                 top_k=int(BASELINE_72["top_k"]),
                 blocks_want=list(BASELINE_72["blocks"]),
             )
-    # #85 full Grok-1 token budget (owner lock — not 2048).
     if args.arm == "int4_channel_alpha":
         _validate_locked_protocol(
             args,
@@ -641,6 +641,14 @@ def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None
             top_k=int(BASELINE_85["top_k"]),
             blocks_want=list(BASELINE_85["blocks"]),
         )
+
+
+def _validate_int4_family(args: argparse.Namespace, evidence_only: bool) -> None:
+    """Validate INT4-family arms including --hp-blocks and #85 baseline exception."""
+    _reject_int4_hp_without_evidence(args, evidence_only)
+    if evidence_only:
+        _validate_int4_evidence_hp(args)
+    _validate_int4_protocols(args, evidence_only)
 
 
 def _validate_v2_cli(args: argparse.Namespace) -> None:
@@ -1016,6 +1024,8 @@ def _v3_results_md(payload: dict) -> str:
 
 def _agent_for_args(args: argparse.Namespace) -> tuple[str, str]:
     arm = getattr(args, "arm", None)
+    if _is_v4_run(args):
+        return "GH #85 / Linear RM-608 / beads goz-3h3", REMEDY_V4_AGENT_LINE
     if _is_v3_run(args):
         return "GH #80 / Linear RM-468 / beads goz-d603r4", REMEDY_V3_AGENT_LINE
     if _is_v2_run(args):

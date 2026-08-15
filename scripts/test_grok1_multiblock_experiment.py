@@ -1331,6 +1331,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
         with self.assertRaisesRegex(ForwardError, r"8192"):
             _validate_v2_cli(args)
 
+    def test_v4_error_reports_cite_issue_85(self) -> None:
+        args = argparse.Namespace(arm="int4_channel_alpha")
+        issue, agent = multiblock._agent_for_args(args)
+        self.assertIn("#85", issue)
+        self.assertIn("RM-608", issue)
+        self.assertIn("#85", agent)
+
     def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
         seed = 2026 * 10_000 + 806
         args = argparse.Namespace(
