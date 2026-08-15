@@ -1442,21 +1442,18 @@ class RemedyV4DecisionTests(unittest.TestCase):
 
         def _chain(label: str, source: str, hp: list[int]) -> dict:
             blocks = [0, 1, 2, 3]
-            int4 = [b for b in blocks if b not in hp]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": 8192,
-                "token_seed": 2026 * 10_000 + 806,
-                "top_k": 2,
-                "expert_mode": (
-                    "int4_channel_alpha" if "channel_alpha" in label else "int4"
-                ),
-                "hp_blocks": list(hp),
-                "int4_blocks": int4,
-                "ternary_blocks": [],
-                "channel_alpha_blocks": int4 if "channel_alpha" in label else [],
-                "per_block": [
+            int4 = sorted(set(blocks).difference(hp))
+            mode = (
+                "int4" if label == V4_INT4_BASELINE_ARM else "int4_channel_alpha"
+            )
+            channel_alpha_blocks = int4 if mode == "int4_channel_alpha" else []
+            residual_drifts = [0.0, 0.05, 0.05, 0.05]
+            pack_sources = [source] * len(blocks)
+            for b in hp:
+                pack_sources[b] = "fp16_control"
+            per_block = []
+            for b in blocks:
+                per_block.append(
                     {
                         "block": b,
                         "expert_only": {
@@ -1466,7 +1463,7 @@ class RemedyV4DecisionTests(unittest.TestCase):
                             "expert_load_js_bits": 0.0,
                             "block_output_drift_relative_norm": 0.01,
                             "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                                "residual_in_drift_relative_norm": residual_drifts[b]
                             },
                         },
                         "fp16_control": {
@@ -1476,16 +1473,24 @@ class RemedyV4DecisionTests(unittest.TestCase):
                         },
                         "pilot_label": "x",
                     }
-                    for b in blocks
-                ],
+                )
+            return {
+                "arm_label": label,
+                "blocks": blocks,
+                "tokens": 8192,
+                "token_seed": 2026 * 10_000 + 806,
+                "top_k": 2,
+                "expert_mode": mode,
+                "hp_blocks": list(hp),
+                "int4_blocks": int4,
+                "ternary_blocks": [],
+                "channel_alpha_blocks": channel_alpha_blocks,
+                "per_block": per_block,
                 "end_of_chain": {
                     "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
                     "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
                 },
-                "pack_provenance": [
-                    _pack_row(b, source if b not in hp else "fp16_control")
-                    for b in blocks
-                ],
+                "pack_provenance": [_pack_row(b, pack_sources[b]) for b in blocks],
             }
 
         primary = _chain(

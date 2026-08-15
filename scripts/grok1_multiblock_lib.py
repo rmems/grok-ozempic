@@ -68,6 +68,7 @@ BASELINE_85 = {
 V4_PRIMARY_ARM = "expert_int4_channel_alpha"
 V4_SECONDARY_ARM = "expert_int4_channel_alpha_123"
 V4_INT4_BASELINE_ARM = "expert_int4"  # re-measured at 8192; not #80 historical
+_V4_ARM_LABELS = frozenset({V4_PRIMARY_ARM, V4_SECONDARY_ARM, V4_INT4_BASELINE_ARM})
 INT4_SCALE_ABSMAX = "absmax"
 INT4_SCALE_LS_CHANNEL_ALPHA = "ls_channel_alpha"
 
@@ -1534,7 +1535,7 @@ def _v2_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
     try:
         return schedules[label]
     except KeyError as exc:
-        # v4 labels must not KeyError if this helper is ever called on them.
+        # Fail closed with a clear message instead of a bare KeyError.
         raise ValueError(f"unknown v2 schedule label={label!r}") from exc
 
 
@@ -2760,9 +2761,9 @@ def remedy_metrics_note(chain: dict) -> str:
     """Human metrics_note reflecting schedule vs pack mismatch precisely."""
     tokens = _safe_int(chain.get("tokens"))
     arm = str(chain.get("arm_label") or "")
-    # #85 is locked to BASELINE_85 (8192). Do not stamp those runs as
+    # #85 arms are locked to BASELINE_85 (8192). Do not stamp those runs as
     # incomparable to the historical #72 2048 ladder — that is expected.
-    if tokens == int(BASELINE_85["tokens"]) or arm.startswith("expert_int4_channel_alpha"):
+    if arm in _V4_ARM_LABELS and tokens == int(BASELINE_85["tokens"]):
         return (
             "#85 protocol (Grok-1 max context tokens=8192). "
             "#72/#80 2048-token figures are historical cites only; "
