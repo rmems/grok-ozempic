@@ -1589,15 +1589,51 @@ class RemedyV4DecisionTests(unittest.TestCase):
             [_v4_secondary_payload(secondary, impl)],
             primary_provenance={"implementation": impl},
         )
+        errors = comparison["validation_errors"]
+        # Both halves: blocks 1-3 uncovered, and block 0 over-covered.
         for block in (1, 2, 3):
             self.assertTrue(
-                any(
-                    f"pack_provenance_rows_for_block_{block:03d}=0" in e
-                    for e in comparison["validation_errors"]
-                ),
-                f"Expected missing-coverage error for block {block} in "
-                f"{comparison['validation_errors']}",
+                any(f"pack_provenance_rows_for_block_{block:03d}=0" in e for e in errors),
+                f"Expected missing-coverage error for block {block} in {errors}",
             )
+        self.assertTrue(
+            any("pack_provenance_rows_for_block_000=4" in e for e in errors),
+            f"Expected duplicate-row error for block 0 in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_pack_provenance_block_outside_baseline_named(self) -> None:
+        """A stray block is reported as such, not only as a missing block."""
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        secondary["pack_provenance"] = [
+            _v4_pack_row(
+                blk, _v3_applied_source(blk, hp_blocks, V4_INT4_BASELINE_ARM), _V4_PACK_SHA256
+            )
+            for blk in (0, 1, 2, 5)
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("pack_provenance_unexpected_block=5" in e for e in errors),
+            f"Expected stray-block error in {errors}",
+        )
+        self.assertTrue(
+            any("pack_provenance_rows_for_block_003=0" in e for e in errors),
+            f"Expected missing block 3 in {errors}",
+        )
         self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
 
     def test_non_list_blocks_fails_closed(self) -> None:

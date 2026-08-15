@@ -2653,13 +2653,20 @@ def _v4_pack_block_coverage_errors(packs: list, label: str) -> list[str]:
     every other block with no pack-identity comparison at all.
     """
     observed = [row.get("block") for row in packs if isinstance(row, dict)]
+    expected = list(BASELINE_85["blocks"])
     errors: list[str] = []
-    for block in BASELINE_85["blocks"]:
+    for block in expected:
         rows = observed.count(block)
         if rows != 1:
             errors.append(
                 f"{label}:pack_provenance_rows_for_block_{block:03d}={rows} expected=1"
             )
+    # Name a stray block directly. It cannot pass unnoticed today — the row
+    # count is pinned to len(blocks), so an extra block displaces a required
+    # one and is reported as that block missing — but "block 003 missing" is a
+    # misleading way to describe a row for block 005.
+    for block in sorted({b for b in observed if b not in expected}, key=repr):
+        errors.append(f"{label}:pack_provenance_unexpected_block={block!r}")
     return errors
 
 
