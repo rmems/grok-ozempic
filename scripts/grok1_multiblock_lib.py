@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -2609,6 +2610,21 @@ def _v4_protocol_field_errors(chain: dict, label: str) -> list[str]:
     return errors
 
 
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _v4_pack_sha256_row_error(row: object, label: str, index: int) -> str | None:
+    """Return an error string for a single pack_provenance row, or None."""
+    if not isinstance(row, dict):
+        return f"{label}:pack_provenance[{index}]:missing_pack_sha256"
+    sha = row.get("pack_sha256")
+    if not isinstance(sha, str):
+        return f"{label}:pack_provenance[{index}]:missing_pack_sha256"
+    if not _SHA256_RE.fullmatch(sha):
+        return f"{label}:pack_provenance[{index}]:invalid_pack_sha256"
+    return None
+
+
 def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
     """Require every pack_provenance row to declare the pack SHA-256 it was measured from."""
     packs = chain.get("pack_provenance")
@@ -2616,12 +2632,9 @@ def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
         return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
     for index, row in enumerate(packs):
-        if not isinstance(row, dict) or not isinstance(row.get("pack_sha256"), str):
-            errors.append(f"{label}:pack_provenance[{index}]:missing_pack_sha256")
-            continue
-        sha = row["pack_sha256"]
-        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
-            errors.append(f"{label}:pack_provenance[{index}]:invalid_pack_sha256")
+        err = _v4_pack_sha256_row_error(row, label, index)
+        if err is not None:
+            errors.append(err)
     return errors
 
 
@@ -2640,6 +2653,21 @@ def _v4_pack_sha_by_block(packs: object) -> dict[int, str]:
     return sha_by_block
 
 
+def _v4_payload_identity_row_error(
+    row: object, label: str, primary_sha: dict[int, str]
+) -> str | None:
+    """Return a pack-identity mismatch for one row, or None."""
+    if not isinstance(row, dict):
+        return None
+    block = row.get("block")
+    sha = row.get("pack_sha256")
+    if not isinstance(block, int) or not isinstance(sha, str):
+        return None
+    if primary_sha.get(block) != sha:
+        return f"{label}:pack_sha256_mismatch:block_{block:03d}"
+    return None
+
+
 def _v4_payload_identity_errors(
     label: str, payload: dict, primary_sha: dict[int, str]
 ) -> list[str]:
@@ -2652,14 +2680,9 @@ def _v4_payload_identity_errors(
         return [f"{label}:missing_pack_provenance_for_identity"]
     errors: list[str] = []
     for row in packs:
-        if not isinstance(row, dict):
-            continue
-        block = row.get("block")
-        sha = row.get("pack_sha256")
-        if not isinstance(block, int) or not isinstance(sha, str):
-            continue
-        if primary_sha.get(block) != sha:
-            errors.append(f"{label}:pack_sha256_mismatch:block_{block:03d}")
+        err = _v4_payload_identity_row_error(row, label, primary_sha)
+        if err is not None:
+            errors.append(err)
     return errors
 
 

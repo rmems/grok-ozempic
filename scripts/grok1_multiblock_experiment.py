@@ -957,7 +957,8 @@ def run(args: argparse.Namespace) -> int:
     if evidence_only:
         print("EVIDENCE ONLY: no decision emitted")
         return EXIT_OK
-    assert decision is not None
+    if decision is None:
+        raise ForwardError("decision is unexpectedly None after chain evaluation")
     print(f"DECISION option {decision['decision']}: {decision['decision_text']}")
     if args.write_report_md or not args.skip_fp16_control:
         if _is_v4_primary(args) or _is_v3_primary(args):
