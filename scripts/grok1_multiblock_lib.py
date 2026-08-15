@@ -1877,24 +1877,32 @@ def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     except ValueError as exc:
         return [f"{label}:{exc}"]
     # Dry metrics may omit schedule fields entirely; validate only when declared.
-    if not all(field in chain for field in _V3_SCHEDULE_FIELDS):
+    schedule_fields = list(_V3_SCHEDULE_FIELDS) + ["expert_mode"]
+    missing = [field for field in schedule_fields if field not in chain]
+    if len(missing) == len(schedule_fields):
         return []
-    observed = {field: _canonical_block_list(chain.get(field)) for field in _V3_SCHEDULE_FIELDS}
+    errors: list[str] = [f"{label}:{field}_missing" for field in missing]
+    observed = {
+        field: _canonical_block_list(chain.get(field))
+        for field in _V3_SCHEDULE_FIELDS
+        if field in chain
+    }
     for field, value in observed.items():
         if value is None:
-            return [f"{label}:{field}_not_block_list"]
+            errors.append(f"{label}:{field}_not_block_list")
     checks = [
-        ("hp_blocks", observed["hp_blocks"], hp_blocks),
-        ("int4_blocks", observed["int4_blocks"], int4_blocks),
-        ("ternary_blocks", observed["ternary_blocks"], []),
-        ("channel_alpha_blocks", observed["channel_alpha_blocks"], channel_alpha_blocks),
+        ("hp_blocks", observed.get("hp_blocks"), hp_blocks),
+        ("int4_blocks", observed.get("int4_blocks"), int4_blocks),
+        ("ternary_blocks", observed.get("ternary_blocks"), []),
+        ("channel_alpha_blocks", observed.get("channel_alpha_blocks"), channel_alpha_blocks),
         ("expert_mode", chain.get("expert_mode"), mode),
     ]
-    return [
+    errors.extend(
         f"{label}:{field}={obs!r} expected={exp!r}"
         for field, obs, exp in checks
-        if obs != exp
-    ]
+        if obs is not None and obs != exp
+    )
+    return errors
 
 
 def _value_set(mapping: object) -> set | None:
