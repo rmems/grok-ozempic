@@ -608,8 +608,10 @@ def _validate_int4_evidence_hp(args: argparse.Namespace) -> None:
     if args.arm not in _INT4_FAMILY_ARMS:
         return
     hp = getattr(args, "hp_blocks", None)
-    tokens = getattr(args, "tokens", None)
-    is_85_budget = tokens is not None and int(tokens) == int(BASELINE_85["tokens"])
+    # Must use the same rule as `_is_v4_run`. With bare `int()` here, a coerced
+    # "8192"/8192.0 was accepted as the #85 baseline while `_is_v4_run` classed
+    # it #80 — the run was taken as #85 evidence and stamped #80 provenance.
+    is_85_budget = _safe_int(getattr(args, "tokens", None)) == int(BASELINE_85["tokens"])
     if args.arm == "int4" and is_85_budget:
         if hp is None:
             return

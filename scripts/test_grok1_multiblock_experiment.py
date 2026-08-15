@@ -1461,7 +1461,7 @@ class RemedyV4DecisionTests(unittest.TestCase):
             arm="int4", tokens=8192, evidence_only=True, hp_blocks=None
         )
         self.assertTrue(multiblock._is_v4_run(baseline))
-        issue, agent = multiblock._agent_for_args(baseline)
+        issue, _agent = multiblock._agent_for_args(baseline)
         self.assertIn("#85", issue)
         self.assertIn("RM-608", issue)
         # A genuine #80 run at the 2048 ladder must still cite #80.
@@ -1470,6 +1470,31 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
         self.assertFalse(multiblock._is_v4_run(historical))
         self.assertIn("#80", multiblock._agent_for_args(historical)[0])
+
+    def test_budget_check_and_v4_classification_agree(self) -> None:
+        """`_validate_int4_evidence_hp` and `_is_v4_run` must use one token rule.
+
+        They disagreed once: bare `int()` in the former accepted a coerced
+        "8192" as the #85 baseline while the latter classed the run #80, so it
+        was taken as #85 evidence and stamped #80 provenance.
+        """
+        for tokens in (8192, "8192", 8192.0, "abc", None, True):
+            with self.subTest(tokens=tokens):
+                args = argparse.Namespace(
+                    arm="int4", tokens=tokens, evidence_only=True, hp_blocks=None
+                )
+                is_v4 = multiblock._is_v4_run(args)
+                try:
+                    multiblock._validate_int4_evidence_hp(args)
+                    accepted_as_85 = True
+                except ForwardError:
+                    accepted_as_85 = False
+                self.assertEqual(
+                    accepted_as_85,
+                    is_v4,
+                    f"tokens={tokens!r}: budget check says {accepted_as_85}, "
+                    f"_is_v4_run says {is_v4}",
+                )
 
     def test_v4_run_classification_survives_malformed_tokens(self) -> None:
         """`_is_v4_run` feeds provenance: malformed tokens classify, never raise."""
