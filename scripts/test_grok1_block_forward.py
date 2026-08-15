@@ -343,21 +343,35 @@ class AttentionTests(unittest.TestCase):
                 np.testing.assert_allclose(got, expect, rtol=1e-4, atol=1e-4)
 
     def test_chunk_size_is_clamped_to_the_documented_ceiling(self):
-        """A caller cannot opt out of the bound the chunking exists to enforce."""
+        """A caller cannot opt out of the bound the chunking exists to enforce.
+
+        The sequence must exceed ATTENTION_CHUNK_TOKENS: below the ceiling the
+        `min(chunk_size, tokens)` term alone bounds the chunk, so the assertion
+        would hold even with the clamp removed.
+        """
         from grok1_block_forward import ATTENTION_CHUNK_TOKENS
+
+        tokens = ATTENTION_CHUNK_TOKENS + 76  # over the ceiling, not a multiple
+        rng = np.random.default_rng(11)
+        hn = rng.standard_normal((tokens, self.width)).astype(np.float32)
 
         seen: list[int] = []
         real_softmax = grok1_block_forward._softmax_fp32
 
-        def spy(logits):
+        def spy(logits) -> np.ndarray:
             seen.append(logits.shape[-2])  # query positions in this chunk
             return real_softmax(logits)
 
         with mock.patch.object(grok1_block_forward, "_softmax_fp32", spy):
-            self._call(chunk_size=8192)
+            out = attention(
+                hn, self.wq, self.wk, self.wv, self.wo,
+                heads=self.heads, chunk_size=8192,
+            )
+        self.assertEqual(out.shape, (tokens, self.width))
         self.assertTrue(seen, "attention did not run a chunk")
         self.assertLessEqual(max(seen), ATTENTION_CHUNK_TOKENS)
-        self.assertLessEqual(max(seen), self.tokens)
+        # And it really did split: one chunk would mean the clamp did nothing.
+        self.assertGreater(len(seen), 1)
 
     def test_zero_tokens_returns_empty_without_raising(self):
         """tokens == 0 drove chunk_size to 0 and range() rejects a zero step."""

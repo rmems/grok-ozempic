@@ -62,14 +62,21 @@ from grok1_multiblock_lib import (  # noqa: E402
 # Shared v4 fixture builders
 # ---------------------------------------------------------------------------
 _V4_PACK_SHA256 = "a" * 64
+_V4_NPY_SHA256 = "c" * 64
 _V4_IMPL = {"commit": "abc", "dirty": False}
 
 
-def _v4_pack_row(block: int, source: str, sha256: str = _V4_PACK_SHA256) -> dict:
+def _v4_pack_row(
+    block: int,
+    source: str,
+    sha256: str = _V4_PACK_SHA256,
+    npy_sha256: str = _V4_NPY_SHA256,
+) -> dict:
     """One pack_provenance row for #85 test fixtures."""
     return {
         "block": block,
         "pack_sha256": sha256,
+        "npy_sha256": npy_sha256,
         "container_versions": [3],
         "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
         "scale_sources": structural_expert_scale_map(block, source),
@@ -1658,6 +1665,49 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertTrue(
             any("pack_provenance_rows_for_block_003=0" in e for e in errors),
             f"Expected missing block 3 in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_divergent_npy_inputs_rejected(self) -> None:
+        """Same pack, different FP32 inputs, is not same-budget evidence.
+
+        The pack SHA-256 covers the GOZ1 container only; INT4 codes, the
+        reference trajectory and all non-expert weights come from NpyWeights.
+        """
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        # Identical pack SHA per block, different npy content.
+        secondary["pack_provenance"] = [
+            _v4_pack_row(
+                blk,
+                _v3_applied_source(blk, hp_blocks, V4_INT4_BASELINE_ARM),
+                _V4_PACK_SHA256,
+                npy_sha256="d" * 64,
+            )
+            for blk in BASELINE_85["blocks"]
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("npy_sha256_mismatch" in e for e in errors),
+            f"Expected npy identity mismatch in {errors}",
+        )
+        # The pack check alone would have passed this evidence.
+        self.assertFalse(
+            any("pack_sha256_mismatch" in e for e in errors),
+            f"packs match; only the npy inputs differ: {errors}",
         )
         self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
 

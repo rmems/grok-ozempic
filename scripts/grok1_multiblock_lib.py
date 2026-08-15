@@ -909,6 +909,27 @@ def _host_safe_name(path: Path) -> str:
     return Path(path).name
 
 
+def npy_dir_fingerprint(npy_dir: Path) -> str:
+    """Content identity of the FP32 inputs a block was measured from.
+
+    The pack SHA-256 covers the GOZ1 container only. INT4 codes, the reference
+    trajectory and every non-expert weight come from ``NpyWeights``, so two arms
+    can share a pack and still be measured against different checkpoints — the
+    directory basename recorded alongside cannot tell them apart.
+
+    Digest is over each ``*.npy`` file's name, size and bytes, sorted by name.
+    Costs one streaming read of the directory per block.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(Path(npy_dir).glob("*.npy"), key=lambda p: p.name):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(str(path.stat().st_size).encode("utf-8"))
+        with path.open("rb") as handle:
+            for block in iter(lambda h=handle: h.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 def pack_provenance_row(
     block: int,
     pack_path: Path,
@@ -927,6 +948,7 @@ def pack_provenance_row(
         "pack_sha256": pack.pack_sha256(),
         "pack_bytes": pack_path.stat().st_size,
         "npy_dir": _host_safe_name(npy_dir),
+        "npy_sha256": npy_dir_fingerprint(npy_dir),
         "container_versions": sorted(versions),
         "scale_sources": dict(applied_scale_sources or pack.scale_sources),
         "pack_scale_sources": dict(pack.scale_sources),
@@ -2785,6 +2807,47 @@ def _v4_payload_identity_errors(
     return errors
 
 
+def _v4_npy_sha_by_block(packs: object) -> dict[int, str]:
+    """Extract a block -> npy_sha256 map from a pack_provenance list."""
+    sha_by_block: dict[int, str] = {}
+    if not isinstance(packs, list):
+        return sha_by_block
+    for row in packs:
+        if (
+            isinstance(row, dict)
+            and isinstance(row.get("block"), int)
+            and isinstance(row.get("npy_sha256"), str)
+        ):
+            sha_by_block[row["block"]] = row["npy_sha256"]
+    return sha_by_block
+
+
+def _v4_npy_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[str]:
+    """All #85 arms must be measured from the same FP32 inputs (per block).
+
+    The pack SHA-256 covers the GOZ1 container only. INT4 codes, the reference
+    trajectory and every non-expert weight come from ``NpyWeights``, so arms
+    sharing a pack can still be measured against different checkpoints and be
+    ranked as same-budget evidence.
+    """
+    primary_npy = _v4_npy_sha_by_block(primary.get("pack_provenance"))
+    if not primary_npy:
+        return []
+    errors: list[str] = []
+    for label, payload in secondary.items():
+        chain = payload.get("chain")
+        if not isinstance(chain, dict):
+            continue
+        observed = _v4_npy_sha_by_block(chain.get("pack_provenance"))
+        if not observed:
+            errors.append(f"{label}:missing_npy_sha256_for_identity")
+            continue
+        for block, sha in sorted(observed.items()):
+            if primary_npy.get(block) != sha:
+                errors.append(f"{label}:npy_sha256_mismatch:block_{block:03d}")
+    return errors
+
+
 def _v4_pack_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[str]:
     """All #85 arms must be measured from the same GOZ1 pack (per block)."""
     primary_sha = _v4_pack_sha_by_block(primary.get("pack_provenance"))
@@ -2848,6 +2911,7 @@ def assemble_remedy_v4_comparison(
     for label, payload in secondary.items():
         errors.extend(_v4_chain_errors(payload["chain"], label))
     errors.extend(_v4_pack_identity_errors(primary_chain, secondary))
+    errors.extend(_v4_npy_identity_errors(primary_chain, secondary))
     summaries = {V4_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
     summaries.update(
         {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
