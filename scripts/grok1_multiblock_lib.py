@@ -2,6 +2,7 @@
 """Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -334,6 +335,34 @@ def _int4_reduce_axes(ndim: int) -> tuple[int, ...]:
     return tuple(range(1, ndim - 1))
 
 
+def _reference_fingerprint(ref: np.ndarray) -> dict[str, object]:
+    """Content identity of the FP32 reference a side table was built from.
+
+    Shape and dtype alone do not identify an export -- two different runs of the
+    same tensor agree on both -- so hash the bytes as well.
+    """
+    contiguous = np.ascontiguousarray(ref, dtype=np.float32)
+    digest = hashlib.sha256(contiguous.tobytes()).hexdigest()
+    return {
+        "sha256": digest,
+        "dtype": str(contiguous.dtype),
+        "shape": [int(d) for d in contiguous.shape],
+    }
+
+
+def _fingerprint_matches(path: Path, fingerprint: dict[str, object]) -> bool:
+    """True only when ``path`` records exactly this reference identity."""
+    if not path.is_file():
+        return False
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(stored, dict):
+        return False
+    return all(stored.get(key) == value for key, value in fingerprint.items())
+
+
 def int4_absmax_quantize(weights: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per-output-channel absmax INT4 codes (int8) + scale (f32).
 
@@ -561,6 +590,15 @@ class Int4SideExperts:
             self._side_dir / f"{stem}__scale_f32.npy",
         )
 
+    def _fingerprint_path(self, name: str) -> Path:
+        """Identity of the reference the persisted codes were built from.
+
+        Lives beside the codes in the absmax directory, since both scale modes
+        share one code file and must agree on which reference produced it.
+        """
+        stem = name.replace(".", "__")
+        return self._q_dir / f"{stem}__q_int8.fingerprint.json"
+
     def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Scale layout for preserved-expert INT4 scales.
 
@@ -611,21 +649,41 @@ class Int4SideExperts:
         scale_f = self._validate_side_scale(name, scale, ref_shape)
         return q_i, scale_f
 
+    def _codes_for(
+        self, name: str, ref: np.ndarray, ref_shape: tuple[int, ...]
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        """Reuse persisted INT4 codes only when they came from this reference.
+
+        The codes live in the absmax directory so absmax and LS-α never
+        duplicate them. dtype/range/shape do not establish provenance — codes
+        written from an earlier or different FP32 export pass all three, and the
+        LS-α scale would then be fit to stale codes while the side table still
+        claims ``research_int4_channel_alpha_side``. So gate reuse on a
+        fingerprint of the reference bytes.
+
+        Returns ``(codes, absmax_scale_or_None)``; the scale is a by-product of
+        quantizing, present only when the codes were just rebuilt.
+        """
+        q_path, s_path = self._paths(name)
+        fp_path = self._fingerprint_path(name)
+        fingerprint = _reference_fingerprint(ref)
+        if q_path.is_file() and _fingerprint_matches(fp_path, fingerprint):
+            return self._validate_side_codes(name, np.load(q_path), ref_shape), None
+        q, scale_abs = int4_absmax_quantize(ref)
+        np.save(q_path, q)
+        fp_path.write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
+        # A scale persisted against the old codes is stale too. Drop it so the
+        # caller refits rather than loading a mismatched table.
+        s_path.unlink(missing_ok=True)
+        return q, scale_abs
+
     def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         role = next(r for r, n in self.roles.items() if n == name)
         ref = np.asarray(self._ref.vector(role), dtype=np.float32)
         ref_shape = tuple(int(d) for d in ref.shape)
-        q_path, s_path = self._paths(name)
+        _, s_path = self._paths(name)
 
-        # Load the bit-identical INT4 codes. They live in the absmax table
-        # directory so absmax and LS-α modes never duplicate them.
-        if q_path.is_file():
-            q = np.load(q_path)
-            q = self._validate_side_codes(name, q, ref_shape)
-            scale_abs = None
-        else:
-            q, scale_abs = int4_absmax_quantize(ref)
-            np.save(q_path, q)
+        q, scale_abs = self._codes_for(name, ref, ref_shape)
 
         # Load or compute the scale for this specific scale_mode.
         if s_path.is_file():
@@ -2127,13 +2185,22 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
     return errors
 
 
-def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
+def _v3_scale_source_errors(
+    chain: dict, label: str, expected_blocks: list[int] | None = None
+) -> list[str]:
+    """Validate pack rows; `expected_blocks` defaults to the #72 ladder.
+
+    The v4 path passes BASELINE_85's blocks. Both lists hold four blocks today,
+    so defaulting is currently equivalent — but an independent #85 block change
+    would otherwise produce spurious `missing_pack_provenance` and option 4.
+    """
     try:
         hp_blocks, _, _, _ = _v3_expected_schedule(label)
     except ValueError as exc:
         return [f"{label}:{exc}"]
+    blocks = list(BASELINE_72["blocks"]) if expected_blocks is None else expected_blocks
     packs = chain.get("pack_provenance")
-    if not isinstance(packs, list) or len(packs) != len(BASELINE_72["blocks"]):
+    if not isinstance(packs, list) or len(packs) != len(blocks):
         return [f"{label}:missing_pack_provenance"]
     errors: list[str] = []
     for index, row in enumerate(packs):
@@ -2755,7 +2822,9 @@ def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
     # and pack-identity validation require the measured pack provenance.
     errors.extend(_v3_schedule_errors(chain, expected_label))
     _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
-    errors.extend(_v3_scale_source_errors(chain, expected_label))
+    errors.extend(
+        _v3_scale_source_errors(chain, expected_label, list(BASELINE_85["blocks"]))
+    )
     errors.extend(_v4_pack_sha256_errors(chain, expected_label))
     return errors
 

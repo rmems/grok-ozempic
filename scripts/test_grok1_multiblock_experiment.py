@@ -1833,6 +1833,48 @@ class Int4SideExpertsTests(unittest.TestCase):
             self.assertEqual(side.label, "research_int4_channel_alpha_side")
             self.assertEqual(side._side_dir, Path(td) / "ls-alpha" / "block_000")
             self.assertEqual(side._q_dir, Path(td) / "block_000")
+            # The sidecar is the only on-disk record of which scale a persisted
+            # table carries; a report reads it back to attribute the codec.
+            sidecar = json.loads((side._side_dir / "sidecar.json").read_text())
+            self.assertEqual(sidecar["scale_mode"], INT4_SCALE_LS_CHANNEL_ALPHA)
+            self.assertIn("channel_alpha", str(sidecar["codec"]))
+
+    def test_stale_codes_are_rebuilt_not_reused(self) -> None:
+        """Codes from a different FP32 export must not be fit with a new scale.
+
+        dtype/range/shape all pass for stale codes, so only a reference
+        fingerprint catches it.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            first = self._fake_weights(np.random.default_rng(1))
+            side_a = Int4SideExperts(
+                self._make_reference(first),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            q_path, _ = side_a._paths("gate")
+            stale = np.load(q_path).copy()
+
+            # Same shape/dtype, different content: a re-export of the tensor.
+            second = self._fake_weights(np.random.default_rng(2))
+            side_b = Int4SideExperts(
+                self._make_reference(second),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            rebuilt = np.load(q_path)
+            self.assertFalse(
+                np.array_equal(stale, rebuilt),
+                "codes were reused across two different references",
+            )
+            # And the reconstruction tracks the new reference, not the old one.
+            got = side_b.vector("expert_gelu")
+            self.assertEqual(got.shape, second["gate"].shape)
+            new_err = float(np.abs(got - second["gate"]).mean())
+            old_err = float(np.abs(got - first["gate"]).mean())
+            self.assertLess(new_err, old_err)
 
     def test_ls_channel_alpha_shares_q_codes_with_absmax(self) -> None:
         with tempfile.TemporaryDirectory() as td:
