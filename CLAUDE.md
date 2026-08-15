@@ -16,6 +16,13 @@ two disagree, GitHub/Linear wins and the export is refreshed.
 
 - `.beads/interactions.jsonl` is **not** tracked: a short log with little context
   value, so committing it is per-commit churn for no recovery benefit.
+- Its diff is **suppressed in review**, not its content: `.gitattributes` marks
+  `.beads/issues.jsonl` as `-diff linguist-generated=true`, so git and GitHub
+  report "Binary files differ" and collapse it in PRs. One issue per ~2.8 KB
+  line means a single status change otherwise renders as a ~26 KB diff. The file
+  is still tracked and still committed by the hooks -- read it with
+  `git show <rev>:.beads/issues.jsonl`, or `git diff --text` to force a textual
+  diff when you actually want one.
 - Let the beads hooks re-export; don't hand-edit the JSONL. On a rebase/merge
   conflict in it, **re-export instead of merging by hand** (`bd export`, or just
   commit and let the hook do it). Hand-edit only if the export is corrupt and
