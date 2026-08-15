@@ -595,15 +595,21 @@ def _validate_int4_evidence_hp(args: argparse.Namespace) -> None:
     hp = getattr(args, "hp_blocks", None)
     tokens = getattr(args, "tokens", None)
     is_85_budget = tokens is not None and int(tokens) == int(BASELINE_85["tokens"])
-    if args.arm == "int4" and is_85_budget and hp is None:
-        return
-    if hp != {1, 2, 3}:
+    if args.arm == "int4" and is_85_budget:
+        if hp is None:
+            return
         raise ForwardError(
-            f"--arm {args.arm} --evidence-only denser-HP secondary: require "
-            f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
-            "or for #85 absmax INT4 baseline use --arm int4 --tokens 8192 "
-            "--evidence-only without --hp-blocks"
+            "--arm int4 --evidence-only at 8192 tokens is the #85 absmax "
+            "INT4 baseline and must not specify --hp-blocks"
         )
+    if hp == {1, 2, 3}:
+        return
+    raise ForwardError(
+        f"--arm {args.arm} --evidence-only denser-HP secondary: require "
+        f"--hp-blocks 1,2,3 (got {sorted(hp) if hp else None}); "
+        "or for #85 absmax INT4 baseline use --arm int4 --tokens 8192 "
+        "--evidence-only without --hp-blocks"
+    )
 
 
 def _validate_int4_protocols(args: argparse.Namespace, evidence_only: bool) -> None:
