@@ -1471,6 +1471,18 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertFalse(multiblock._is_v4_run(historical))
         self.assertIn("#80", multiblock._agent_for_args(historical)[0])
 
+    def test_v4_run_classification_survives_malformed_tokens(self) -> None:
+        """`_is_v4_run` feeds provenance: malformed tokens classify, never raise."""
+        # "8192"/8192.0 are rejected too — a coerced value must not pass for a
+        # locked baseline setting (see `_safe_int`).
+        for tokens in ("abc", None, "8192", 8192.0, True, []):
+            with self.subTest(tokens=tokens):
+                args = argparse.Namespace(
+                    arm="int4", tokens=tokens, evidence_only=True, hp_blocks=None
+                )
+                self.assertFalse(multiblock._is_v4_run(args))
+                self.assertIn("#80", multiblock._agent_for_args(args)[0])
+
     def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
         seed = 2026 * 10_000 + 806
         args = argparse.Namespace(

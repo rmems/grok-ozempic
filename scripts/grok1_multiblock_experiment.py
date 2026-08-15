@@ -62,7 +62,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     write_remedy_v2_results_md,
     write_results_md,
 )
-from grok1_multiblock_lib import _fp16_gate  # noqa: E402
+from grok1_multiblock_lib import _fp16_gate, _safe_int  # noqa: E402
 from route_preservation_io import MetricsError  # noqa: E402
 
 __all__ = [
@@ -549,11 +549,14 @@ def _is_v4_run(args: argparse.Namespace) -> bool:
         return True
     # The re-measured absmax INT4 baseline for #85 is run as --arm int4 --evidence-only
     # at the #85 token budget; label its provenance as #85, not #80.
+    # `_safe_int` rather than `int()`: this helper feeds provenance and the
+    # unresolved-artifact path, so a malformed `tokens` must classify the run,
+    # not raise. It also rejects "8192"/8192.0, matching the repo rule that a
+    # coerced value must never pass for a locked baseline setting.
     if (
         args.arm == "int4"
         and bool(getattr(args, "evidence_only", False))
-        and getattr(args, "tokens", None) is not None
-        and int(args.tokens) == int(BASELINE_85["tokens"])
+        and _safe_int(getattr(args, "tokens", None)) == int(BASELINE_85["tokens"])
     ):
         return True
     return False
