@@ -1,0 +1,16 @@
+# The beads export is a generated cache of GitHub + Linear (see CLAUDE.md).
+# It stores one JSON object per issue per line, averaging ~2.8 KB per line, so
+# a single status change rewrites a whole line and GitHub renders it inline as
+# a multi-KB diff. Suppress it in review rather than untracking the file: the
+# export is what lets an agent recover project context with no network access
+# and no API tokens.
+#
+#   -diff                  git/GitHub report "Binary files differ" instead of
+#                          dumping the JSON into every diff
+#   linguist-generated     GitHub collapses it by default in PRs and drops it
+#                          from repository language stats
+#
+# This is presentation only. The file is still tracked, still committed by the
+# beads hooks, and `git show`/`bd export` are unaffected. On a merge conflict
+# the rule is unchanged: re-export, never hand-merge.
+.beads/issues.jsonl -diff linguist-generated=true
