@@ -41,7 +41,6 @@ from grok1_multiblock_lib import (  # noqa: E402
     V3_SECONDARY_ARM,
     V4_INT4_BASELINE_ARM,
     V4_PRIMARY_ARM,
-    V4_SECONDARY_ARM,
     Int4SideExperts,
     INT4_SCALE_ABSMAX,
     INT4_SCALE_LS_CHANNEL_ALPHA,
@@ -77,6 +76,44 @@ def _v4_pack_row(block: int, source: str, sha256: str = _V4_PACK_SHA256) -> dict
     }
 
 
+def _v4_per_block_row(block: int, top1_last: float) -> dict:
+    """One per_block row for #85 test fixtures; only the last block carries top1_last."""
+    return {
+        "block": block,
+        "expert_only": {
+            "block_output_cosine": 0.995,
+            "router_top1_agreement": 1.0 if block < 3 else top1_last,
+            "router_top2_set_agreement": 0.95,
+            "expert_load_js_bits": 0.0,
+            "block_output_drift_relative_norm": 0.01,
+            "residual_stream_in": {
+                "residual_in_drift_relative_norm": 0.0 if block == 0 else 0.05
+            },
+        },
+        "fp16_control": {
+            "block_output_cosine": 1.0,
+            "router_top1_agreement": 1.0,
+            "router_top2_set_agreement": 1.0,
+        },
+        "pilot_label": "x",
+    }
+
+
+def _v4_protocol_fields(
+    blocks: list[int] | None,
+    tokens: int | None,
+    token_seed: int | None,
+    top_k: int | None,
+) -> tuple[list[int], int, int, int]:
+    """Resolve the four locked #85 protocol fields, defaulting to BASELINE_85."""
+    return (
+        list(blocks) if blocks is not None else list(BASELINE_85["blocks"]),
+        int(tokens) if tokens is not None else int(BASELINE_85["tokens"]),
+        int(token_seed) if token_seed is not None else int(BASELINE_85["token_seed"]),
+        int(top_k) if top_k is not None else int(BASELINE_85["top_k"]),
+    )
+
+
 def _v4_chain(
     label: str,
     *,
@@ -88,34 +125,11 @@ def _v4_chain(
     pack_sha256: str = _V4_PACK_SHA256,
 ) -> dict:
     """Build a valid #85 v4 chain with all schedule and pack-provenance fields."""
-    blocks = list(blocks) if blocks is not None else list(BASELINE_85["blocks"])
-    tokens = int(tokens) if tokens is not None else int(BASELINE_85["tokens"])
-    token_seed = int(token_seed) if token_seed is not None else int(BASELINE_85["token_seed"])
-    top_k = int(top_k) if top_k is not None else int(BASELINE_85["top_k"])
+    blocks, tokens, token_seed, top_k = _v4_protocol_fields(
+        blocks, tokens, token_seed, top_k
+    )
     hp_blocks, int4_blocks, channel_blocks, expert_mode = _v3_expected_schedule(label)
-    per_block = []
-    for b in blocks:
-        per_block.append(
-            {
-                "block": b,
-                "expert_only": {
-                    "block_output_cosine": 0.995,
-                    "router_top1_agreement": 1.0 if b < 3 else top1_last,
-                    "router_top2_set_agreement": 0.95,
-                    "expert_load_js_bits": 0.0,
-                    "block_output_drift_relative_norm": 0.01,
-                    "residual_stream_in": {
-                        "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                    },
-                },
-                "fp16_control": {
-                    "block_output_cosine": 1.0,
-                    "router_top1_agreement": 1.0,
-                    "router_top2_set_agreement": 1.0,
-                },
-                "pilot_label": "x",
-            }
-        )
+    per_block = [_v4_per_block_row(b, top1_last) for b in blocks]
     pack_rows = [
         _v4_pack_row(b, _v3_applied_source(b, hp_blocks, label), pack_sha256)
         for b in blocks
@@ -1525,7 +1539,7 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
 
     def test_mismatched_tokens_rejected(self) -> None:
-        from grok1_multiblock_lib import BASELINE_85, assemble_remedy_v4_comparison
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
 
         impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
