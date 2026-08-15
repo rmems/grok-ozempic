@@ -1711,6 +1711,52 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
         self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
 
+    def test_partial_npy_sha256_is_not_partial_validation(self) -> None:
+        """A row without a digest must fail, not drop out of the comparison.
+
+        Omitting `npy_sha256` on one block while the rest match the primary
+        previously left that block uncompared and still decided option 1.
+        """
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        for row in secondary["pack_provenance"]:
+            if row["block"] == 3:
+                row.pop("npy_sha256")
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("missing_npy_sha256" in e for e in errors),
+            f"Expected a per-row missing-digest error in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
+    def test_malformed_npy_sha256_rejected(self) -> None:
+        """Matching but invalid digests must not read as shared FP32 inputs."""
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
+
+        impl = dict(_V4_IMPL)
+        primary = _v4_chain(V4_PRIMARY_ARM)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        for row in primary["pack_provenance"] + secondary["pack_provenance"]:
+            row["npy_sha256"] = "not-a-sha256"
+        comparison = assemble_remedy_v4_comparison(
+            primary,
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        errors = comparison["validation_errors"]
+        self.assertTrue(
+            any("invalid_npy_sha256" in e for e in errors),
+            f"Expected an invalid-digest error in {errors}",
+        )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
     def test_non_list_blocks_fails_closed(self) -> None:
         """Malformed `blocks` in loaded evidence must be an error, not a TypeError."""
         from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4

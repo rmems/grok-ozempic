@@ -2709,14 +2709,21 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _v4_pack_sha256_row_error(row: object, label: str, index: int) -> str | None:
-    """Return an error string for a single pack_provenance row, or None."""
+    """Return an error string for a single pack_provenance row, or None.
+
+    Both digests are required on every row. Making absence a per-row error is
+    what stops the cross-arm identity checks from comparing a partial set: a row
+    that omits a digest is dropped from the block map, so without this the
+    comparison would silently skip that block and still decide 1-3.
+    """
     if not isinstance(row, dict):
         return f"{label}:pack_provenance[{index}]:missing_pack_sha256"
-    sha = row.get("pack_sha256")
-    if not isinstance(sha, str):
-        return f"{label}:pack_provenance[{index}]:missing_pack_sha256"
-    if not _SHA256_RE.fullmatch(sha):
-        return f"{label}:pack_provenance[{index}]:invalid_pack_sha256"
+    for field in ("pack_sha256", "npy_sha256"):
+        value = row.get(field)
+        if not isinstance(value, str):
+            return f"{label}:pack_provenance[{index}]:missing_{field}"
+        if not _SHA256_RE.fullmatch(value):
+            return f"{label}:pack_provenance[{index}]:invalid_{field}"
     return None
 
 
@@ -2808,17 +2815,21 @@ def _v4_payload_identity_errors(
 
 
 def _v4_npy_sha_by_block(packs: object) -> dict[int, str]:
-    """Extract a block -> npy_sha256 map from a pack_provenance list."""
+    """Extract a block -> npy_sha256 map, keeping only well-formed digests.
+
+    Format is enforced here as well as per row so a malformed value can never
+    be compared verbatim — two arms carrying the same invalid string must not
+    read as sharing FP32 inputs.
+    """
     sha_by_block: dict[int, str] = {}
     if not isinstance(packs, list):
         return sha_by_block
     for row in packs:
-        if (
-            isinstance(row, dict)
-            and isinstance(row.get("block"), int)
-            and isinstance(row.get("npy_sha256"), str)
-        ):
-            sha_by_block[row["block"]] = row["npy_sha256"]
+        if not isinstance(row, dict) or not isinstance(row.get("block"), int):
+            continue
+        sha = row.get("npy_sha256")
+        if isinstance(sha, str) and _SHA256_RE.fullmatch(sha):
+            sha_by_block[row["block"]] = sha
     return sha_by_block
 
 
@@ -2829,6 +2840,11 @@ def _v4_npy_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[s
     trajectory and every non-expert weight come from ``NpyWeights``, so arms
     sharing a pack can still be measured against different checkpoints and be
     ranked as same-budget evidence.
+
+    A missing or malformed ``npy_sha256`` is not reported here: it is already a
+    per-row error from ``_v4_pack_sha256_row_error``, so raising it again would
+    be redundant and would misname the defect when the real problem is an
+    absent ``pack_provenance``.
     """
     primary_npy = _v4_npy_sha_by_block(primary.get("pack_provenance"))
     if not primary_npy:
@@ -2838,11 +2854,7 @@ def _v4_npy_identity_errors(primary: dict, secondary: dict[str, dict]) -> list[s
         chain = payload.get("chain")
         if not isinstance(chain, dict):
             continue
-        observed = _v4_npy_sha_by_block(chain.get("pack_provenance"))
-        if not observed:
-            errors.append(f"{label}:missing_npy_sha256_for_identity")
-            continue
-        for block, sha in sorted(observed.items()):
+        for block, sha in sorted(_v4_npy_sha_by_block(chain.get("pack_provenance")).items()):
             if primary_npy.get(block) != sha:
                 errors.append(f"{label}:npy_sha256_mismatch:block_{block:03d}")
     return errors
