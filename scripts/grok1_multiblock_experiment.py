@@ -676,10 +676,6 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
             "(--arm periodic_hp --hp-blocks 1,2,3), #80 primary (--arm int4), "
             "or #85 primary (--arm int4_channel_alpha)"
         )
-    if _is_v3_primary(args) and evidence_only:
-        raise ForwardError("#80 primary cannot be --evidence-only")
-    if _is_v4_primary(args) and evidence_only:
-        raise ForwardError("#85 primary cannot be --evidence-only")
     # Primary and locked P1 secondary both need FP16 control (HP blocks use it).
     if args.arm in _INT4_FAMILY_ARMS and bool(
         getattr(args, "skip_fp16_control", False)

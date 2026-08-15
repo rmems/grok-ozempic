@@ -33,13 +33,22 @@ from grok1_multiblock_experiment import (  # noqa: E402
 )
 from grok1_multiblock_lib import (  # noqa: E402
     BASELINE_72,
+    BASELINE_85,
     V2_CEILING_ARM,
     V2_PRIMARY_ARM,
     V2_STACKED_ARM,
     V3_PRIMARY_ARM,
     V3_SECONDARY_ARM,
+    V4_INT4_BASELINE_ARM,
+    V4_PRIMARY_ARM,
+    V4_SECONDARY_ARM,
+    Int4SideExperts,
+    INT4_SCALE_ABSMAX,
+    INT4_SCALE_LS_CHANNEL_ALPHA,
     _applied_expert_scale_sources,
     _expert_primary,
+    _v3_applied_source,
+    _v3_expected_schedule,
     assemble_remedy_v2_comparison,
     assemble_remedy_v3_comparison,
     channel_alpha_dequant,
@@ -48,6 +57,100 @@ from grok1_multiblock_lib import (  # noqa: E402
     settings_mismatch_reason,
     structural_expert_scale_map,
 )
+
+
+# ---------------------------------------------------------------------------
+# Shared v4 fixture builders
+# ---------------------------------------------------------------------------
+_V4_PACK_SHA256 = "a" * 64
+_V4_IMPL = {"commit": "abc", "dirty": False}
+
+
+def _v4_pack_row(block: int, source: str, sha256: str = _V4_PACK_SHA256) -> dict:
+    """One pack_provenance row for #85 test fixtures."""
+    return {
+        "block": block,
+        "pack_sha256": sha256,
+        "container_versions": [3],
+        "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
+        "scale_sources": structural_expert_scale_map(block, source),
+    }
+
+
+def _v4_chain(
+    label: str,
+    *,
+    blocks: list[int] | None = None,
+    tokens: int | None = None,
+    token_seed: int | None = None,
+    top_k: int | None = None,
+    top1_last: float = 0.97,
+    pack_sha256: str = _V4_PACK_SHA256,
+) -> dict:
+    """Build a valid #85 v4 chain with all schedule and pack-provenance fields."""
+    blocks = list(blocks) if blocks is not None else list(BASELINE_85["blocks"])
+    tokens = int(tokens) if tokens is not None else int(BASELINE_85["tokens"])
+    token_seed = int(token_seed) if token_seed is not None else int(BASELINE_85["token_seed"])
+    top_k = int(top_k) if top_k is not None else int(BASELINE_85["top_k"])
+    hp_blocks, int4_blocks, channel_blocks, expert_mode = _v3_expected_schedule(label)
+    per_block = []
+    for b in blocks:
+        per_block.append(
+            {
+                "block": b,
+                "expert_only": {
+                    "block_output_cosine": 0.995,
+                    "router_top1_agreement": 1.0 if b < 3 else top1_last,
+                    "router_top2_set_agreement": 0.95,
+                    "expert_load_js_bits": 0.0,
+                    "block_output_drift_relative_norm": 0.01,
+                    "residual_stream_in": {
+                        "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
+                    },
+                },
+                "fp16_control": {
+                    "block_output_cosine": 1.0,
+                    "router_top1_agreement": 1.0,
+                    "router_top2_set_agreement": 1.0,
+                },
+                "pilot_label": "x",
+            }
+        )
+    pack_rows = [
+        _v4_pack_row(b, _v3_applied_source(b, hp_blocks, label), pack_sha256)
+        for b in blocks
+    ]
+    return {
+        "arm_label": label,
+        "blocks": blocks,
+        "tokens": tokens,
+        "token_seed": token_seed,
+        "top_k": top_k,
+        "expert_mode": expert_mode,
+        "hp_blocks": hp_blocks,
+        "int4_blocks": int4_blocks,
+        "ternary_blocks": [],
+        "channel_alpha_blocks": channel_blocks,
+        "per_block": per_block,
+        "end_of_chain": {
+            "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
+            "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
+        },
+        "pack_provenance": pack_rows,
+    }
+
+
+def _v4_secondary_payload(
+    chain: dict, implementation: dict | None = None
+) -> dict:
+    impl = dict(implementation) if implementation is not None else dict(_V4_IMPL)
+    return {
+        "provenance": {
+            "evidence_role": "secondary; no independent decision",
+            "implementation": impl,
+        },
+        "chain": chain,
+    }
 
 
 class ParseBlocksTests(unittest.TestCase):
@@ -1354,63 +1457,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
         _validate_v2_cli(args)
 
     def test_option_1_when_stack_is_viable(self) -> None:
-        from grok1_multiblock_lib import (
-            V4_INT4_BASELINE_ARM,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-            decide_remedy_v4,
-        )
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
 
-        def _chain(label: str, top1_last: float) -> dict:
-            blocks = [0, 1, 2, 3]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": 8192,
-                # YYYYMMDD decision-run seed; arithmetic form avoids Bandit B105.
-                "token_seed": 2026 * 10_000 + 806,
-                "top_k": 2,
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 1.0 if b < 3 else top1_last,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, 0.97),
-            [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": _chain(V4_INT4_BASELINE_ARM, 0.90),
-                }
-            ],
-            primary_provenance={"implementation": dict(impl)},
+            _v4_chain(V4_PRIMARY_ARM, top1_last=0.97),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, top1_last=0.90), impl)],
+            primary_provenance={"implementation": impl},
         )
         self.assertEqual(comparison["validation_errors"], [])
         decision = decide_remedy_v4(comparison)
@@ -1426,74 +1479,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
             decide_remedy_v4,
             remedy_metrics_note,
             settings_mismatch_reason,
-            structural_expert_scale_map,
             _v3_scale_source_errors,
             _v3_schedule_errors,
             _v4_chain_errors,
         )
 
-        def _pack_row(block: int, source: str) -> dict:
-            return {
-                "block": block,
-                "container_versions": [3],
-                "pack_scale_sources": structural_expert_scale_map(block, "pack_v2"),
-                "scale_sources": structural_expert_scale_map(block, source),
-            }
-
-        def _chain(label: str, source: str, hp: list[int]) -> dict:
-            blocks = [0, 1, 2, 3]
-            int4 = sorted(set(blocks).difference(hp))
-            channel_alpha_blocks = [] if label == V4_INT4_BASELINE_ARM else list(int4)
-            residual_drifts = [0.0, 0.05, 0.05, 0.05]
-            pack_sources = [source] * len(blocks)
-            for b in hp:
-                pack_sources[b] = "fp16_control"
-            per_block = []
-            for b in blocks:
-                per_block.append(
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 0.97,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": residual_drifts[b]
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                )
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": 8192,
-                "token_seed": 2026 * 10_000 + 806,
-                "top_k": 2,
-                "expert_mode": "int4" if label == V4_INT4_BASELINE_ARM else "int4_channel_alpha",
-                "hp_blocks": list(hp),
-                "int4_blocks": int4,
-                "ternary_blocks": [],
-                "channel_alpha_blocks": channel_alpha_blocks,
-                "per_block": per_block,
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-                "pack_provenance": [_pack_row(b, pack_sources[b]) for b in blocks],
-            }
-
-        primary = _chain(
-            V4_PRIMARY_ARM, "research_int4_channel_alpha_side", []
-        )
-        baseline = _chain(V4_INT4_BASELINE_ARM, "research_int4_side", [])
+        primary = _v4_chain(V4_PRIMARY_ARM)
+        baseline = _v4_chain(V4_INT4_BASELINE_ARM)
         self.assertEqual(_v3_schedule_errors(primary, V4_PRIMARY_ARM), [])
         self.assertEqual(_v3_scale_source_errors(primary, V4_PRIMARY_ARM), [])
         self.assertEqual(_v4_chain_errors(primary, V4_PRIMARY_ARM), [])
@@ -1504,19 +1496,11 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertIn("#85", note)
         self.assertNotIn("not comparable", note.lower())
 
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
             primary,
-            [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": baseline,
-                }
-            ],
-            primary_provenance={"implementation": dict(impl)},
+            [_v4_secondary_payload(baseline, impl)],
+            primary_provenance={"implementation": impl},
         )
         self.assertEqual(comparison["validation_errors"], [])
         self.assertFalse(
@@ -1526,61 +1510,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertEqual(decision["decision"], 1)
 
     def test_mismatched_blocks_rejected(self) -> None:
-        from grok1_multiblock_lib import (
-            BASELINE_85,
-            V4_INT4_BASELINE_ARM,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-        )
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
 
-        def _chain(label: str, blocks: list[int]) -> dict:
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": int(BASELINE_85["tokens"]),
-                "token_seed": int(BASELINE_85["token_seed"]),
-                "top_k": int(BASELINE_85["top_k"]),
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 0.97,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, [0, 1, 2, 3]),
-            [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": _chain(V4_INT4_BASELINE_ARM, [0, 1, 2]),
-                }
-            ],
-            primary_provenance={"implementation": dict(impl)},
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, blocks=[0, 1, 2]), impl)],
+            primary_provenance={"implementation": impl},
         )
         self.assertTrue(len(comparison["validation_errors"]) > 0)
         self.assertTrue(
@@ -1589,62 +1525,17 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
 
     def test_mismatched_tokens_rejected(self) -> None:
-        from grok1_multiblock_lib import (
-            BASELINE_85,
-            V4_INT4_BASELINE_ARM,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-        )
+        from grok1_multiblock_lib import BASELINE_85, assemble_remedy_v4_comparison
 
-        def _chain(label: str, tokens: int) -> dict:
-            blocks = [0, 1, 2, 3]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": tokens,
-                "token_seed": int(BASELINE_85["token_seed"]),
-                "top_k": int(BASELINE_85["top_k"]),
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 0.97,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, int(BASELINE_85["tokens"])),
+            _v4_chain(V4_PRIMARY_ARM),
             [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": _chain(V4_INT4_BASELINE_ARM, 2048),
-                }
+                _v4_secondary_payload(
+                    _v4_chain(V4_INT4_BASELINE_ARM, tokens=2048), impl
+                )
             ],
-            primary_provenance={"implementation": dict(impl)},
+            primary_provenance={"implementation": impl},
         )
         self.assertTrue(len(comparison["validation_errors"]) > 0)
         self.assertTrue(
@@ -1653,62 +1544,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
 
     def test_mismatched_seed_rejected(self) -> None:
-        from grok1_multiblock_lib import (
-            BASELINE_85,
-            V4_INT4_BASELINE_ARM,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-        )
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
 
-        def _chain(label: str, seed: int) -> dict:
-            blocks = [0, 1, 2, 3]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": int(BASELINE_85["tokens"]),
-                "token_seed": seed,
-                "top_k": int(BASELINE_85["top_k"]),
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 0.97,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, int(BASELINE_85["token_seed"])),
-            [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": _chain(V4_INT4_BASELINE_ARM, 99999),
-                }
-            ],
-            primary_provenance={"implementation": dict(impl)},
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, token_seed=99999), impl)],
+            primary_provenance={"implementation": impl},
         )
         self.assertTrue(len(comparison["validation_errors"]) > 0)
         self.assertTrue(
@@ -1717,62 +1559,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
 
     def test_mismatched_top_k_rejected(self) -> None:
-        from grok1_multiblock_lib import (
-            BASELINE_85,
-            V4_INT4_BASELINE_ARM,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-        )
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison
 
-        def _chain(label: str, top_k: int) -> dict:
-            blocks = [0, 1, 2, 3]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": int(BASELINE_85["tokens"]),
-                "token_seed": int(BASELINE_85["token_seed"]),
-                "top_k": top_k,
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 0.97,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, int(BASELINE_85["top_k"])),
-            [
-                {
-                    "provenance": {
-                        "evidence_role": "secondary; no independent decision",
-                        "implementation": dict(impl),
-                    },
-                    "chain": _chain(V4_INT4_BASELINE_ARM, 4),
-                }
-            ],
-            primary_provenance={"implementation": dict(impl)},
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, top_k=4), impl)],
+            primary_provenance={"implementation": impl},
         )
         self.assertTrue(len(comparison["validation_errors"]) > 0)
         self.assertTrue(
@@ -1781,55 +1574,14 @@ class RemedyV4DecisionTests(unittest.TestCase):
         )
 
     def test_missing_int4_baseline_payload(self) -> None:
-        from grok1_multiblock_lib import (
-            BASELINE_85,
-            V4_PRIMARY_ARM,
-            assemble_remedy_v4_comparison,
-            decide_remedy_v4,
-        )
+        from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
 
-        def _chain(label: str, top1_last: float) -> dict:
-            blocks = [0, 1, 2, 3]
-            return {
-                "arm_label": label,
-                "blocks": blocks,
-                "tokens": int(BASELINE_85["tokens"]),
-                "token_seed": int(BASELINE_85["token_seed"]),
-                "top_k": int(BASELINE_85["top_k"]),
-                "per_block": [
-                    {
-                        "block": b,
-                        "expert_only": {
-                            "block_output_cosine": 0.995,
-                            "router_top1_agreement": 1.0 if b < 3 else top1_last,
-                            "router_top2_set_agreement": 0.95,
-                            "expert_load_js_bits": 0.0,
-                            "block_output_drift_relative_norm": 0.01,
-                            "residual_stream_in": {
-                                "residual_in_drift_relative_norm": 0.0 if b == 0 else 0.05
-                            },
-                        },
-                        "fp16_control": {
-                            "block_output_cosine": 1.0,
-                            "router_top1_agreement": 1.0,
-                            "router_top2_set_agreement": 1.0,
-                        },
-                        "pilot_label": "x",
-                    }
-                    for b in blocks
-                ],
-                "end_of_chain": {
-                    "expert_only_chain_exit": {"residual_drift_relative_norm": 0.02},
-                    "fp16_chain_exit": {"residual_drift_relative_norm": 0.0},
-                },
-            }
-
-        impl = {"commit": "abc", "dirty": False}
+        impl = dict(_V4_IMPL)
         # No secondary payloads (missing INT4 baseline)
         comparison = assemble_remedy_v4_comparison(
-            _chain(V4_PRIMARY_ARM, 0.90),
+            _v4_chain(V4_PRIMARY_ARM, top1_last=0.90),
             [],
-            primary_provenance={"implementation": dict(impl)},
+            primary_provenance={"implementation": impl},
         )
         self.assertEqual(comparison["validation_errors"], [])
         decision = decide_remedy_v4(comparison)
@@ -1866,6 +1618,108 @@ class RemedyV2ReportTests(unittest.TestCase):
         self.assertIn(f"#### FP16 control — `{V2_STACKED_ARM}`", body)
         self.assertIn(f"#### FP16 control — `{V2_CEILING_ARM}`", body)
         self.assertFalse(body.endswith("\n\n"))
+
+
+class Int4SideExpertsTests(unittest.TestCase):
+    """INT4 side-table persistence for absmax and LS channel-α scales."""
+
+    _FAKE_ROLES = {
+        "expert_gelu": "gate",
+        "expert_value": "up",
+        "expert_down": "down",
+    }
+
+    @staticmethod
+    def _fake_weights(rng: np.random.Generator | None = None) -> dict[str, np.ndarray]:
+        rng = rng or np.random.default_rng(0)
+        return {
+            name: rng.standard_normal((2, 8, 4)).astype(np.float32)
+            for name in Int4SideExpertsTests._FAKE_ROLES.values()
+        }
+
+    def _make_reference(self, arrays: dict[str, np.ndarray] | None = None):
+        arrays = arrays or self._fake_weights()
+        ref = mock.Mock(spec=["roles", "vector"])
+        ref.roles = dict(self._FAKE_ROLES)
+        ref.vector = lambda role: arrays[ref.roles[role]]
+        return ref
+
+    def test_absmax_sidecar_writes_local_q_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref,
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_ABSMAX,
+            )
+            sidecar = json.loads((side._side_dir / "sidecar.json").read_text())
+            gate = sidecar["tensors"]["gate"]
+            self.assertEqual(gate["q_file"], "gate__q_int8.npy")
+            self.assertEqual(gate["scale_file"], "gate__scale_f32.npy")
+            self.assertEqual(Path(td) / "block_000" / "gate__q_int8.npy", side._q_dir / "gate__q_int8.npy")
+            self.assertTrue((side._q_dir / "gate__q_int8.npy").is_file())
+
+    def test_ls_channel_alpha_label_and_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref,
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            self.assertEqual(side.label, "research_int4_channel_alpha_side")
+            self.assertEqual(side._side_dir, Path(td) / "ls-alpha" / "block_000")
+            self.assertEqual(side._q_dir, Path(td) / "block_000")
+
+    def test_ls_channel_alpha_shares_q_codes_with_absmax(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            absmax = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_ABSMAX
+            )
+            ls = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            q_path, scale_path = ls._paths("gate")
+            self.assertTrue(q_path.is_file())
+            self.assertTrue(scale_path.is_file())
+            self.assertEqual(q_path, absmax._paths("gate")[0])
+            self.assertEqual(q_path.parent, Path(td) / "block_000")
+            self.assertEqual(scale_path.parent, Path(td) / "ls-alpha" / "block_000")
+            sidecar = json.loads((ls._side_dir / "sidecar.json").read_text())
+            self.assertIn("../", sidecar["tensors"]["gate"]["q_file"])
+            self.assertNotIn(
+                "../",
+                sidecar["tensors"]["gate"]["scale_file"],
+            )
+            self.assertFalse((ls._side_dir / "gate__q_int8.npy").exists())
+
+    def test_ls_channel_alpha_reload(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            first = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            first_vec = first.vector("expert_gelu")
+            second = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            np.testing.assert_array_almost_equal(first.vector("expert_gelu"), second.vector("expert_gelu"), decimal=5)
+            self.assertEqual(first_vec.shape, (2, 8, 4))
+
+    def test_rank3_expert_dequant(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ref = self._make_reference()
+            side = Int4SideExperts(
+                ref, side_root=Path(td), block=0, scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA
+            )
+            full = side.vector("expert_value")
+            expert0 = side.expert("expert_value", 0)
+            self.assertEqual(full.shape, (2, 8, 4))
+            self.assertEqual(expert0.shape, (8, 4))
+            self.assertTrue(np.isfinite(expert0).all())
 
 
 if __name__ == "__main__":

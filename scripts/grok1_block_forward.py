@@ -331,11 +331,16 @@ def attention(
     mask: np.ndarray | None = None,
     offset: int = 0,
     heads: HeadConfig = GROK1_HEADS,
+    chunk_size: int | None = None,
 ) -> np.ndarray:
     """Grouped-query self-attention over ``(T, MODEL_SIZE)`` normed activations.
 
     All Grok-1 ``Linear`` params are stored ``[in_size, out_size]``, so every
     projection is a plain ``x @ w`` with no transpose.
+
+    Query positions are processed in chunks so the ``(kv_h, groups, T, T)`` float32
+    logits/weights tensor is never materialized at the full sequence length. This
+    keeps the peak memory footprint bounded at ``T=8192`` and below.
     """
     tokens = h_normed.shape[0]
     n_q_heads, n_kv_heads, head_dim = heads.n_q_heads, heads.n_kv_heads, heads.head_dim
@@ -349,17 +354,31 @@ def attention(
     # Upstream does reshape(b, t, kv_h, h // kv_h, d), i.e. contiguous grouping.
     qg = q.reshape(tokens, n_kv_heads, heads.groups, head_dim)
 
-    logits = np.einsum("thHd,Thd->hHtT", qg, k, dtype=np.float32)
-    logits *= np.float32(ATTN_OUTPUT_MULTIPLIER)
-    # tanh soft-cap: bounds logits to +/-30 before masking.
-    cap = np.float32(MAX_ATTN_VAL)
-    logits = cap * np.tanh(logits / cap)
     if mask is None:
         mask = causal_mask(tokens)
-    logits = np.where(mask[None, None, :, :], logits, np.float32(-1e30))
 
-    weights = _softmax_fp32(logits)
-    ctx = np.einsum("hHtT,Thd->thHd", weights, v, dtype=np.float32)
+    # Bound the per-chunk logits/weights allocation. A 1024-token chunk with the
+    # real Grok-1 head geometry allocates ~1.6 GiB of logits, well below the
+    # unchunked ~12.9 GiB peak at T=8192.
+    if chunk_size is None or chunk_size <= 0:
+        chunk_size = 1024
+    chunk_size = min(chunk_size, tokens)
+
+    ctx = np.empty((tokens, n_kv_heads, heads.groups, head_dim), dtype=np.float32)
+    cap = np.float32(MAX_ATTN_VAL)
+    for start in range(0, tokens, chunk_size):
+        end = start + chunk_size
+        qg_chunk = qg[start:end]
+        logits = np.einsum("chHd,Thd->hHcT", qg_chunk, k, dtype=np.float32)
+        logits *= np.float32(ATTN_OUTPUT_MULTIPLIER)
+        # tanh soft-cap: bounds logits to +/-30 before masking.
+        logits = cap * np.tanh(logits / cap)
+        logits = np.where(
+            mask[None, None, start:end, :], logits, np.float32(-1e30)
+        )
+        weights = _softmax_fp32(logits)
+        ctx[start:end] = np.einsum("hHcT,Thd->chHd", weights, v, dtype=np.float32)
+
     return ctx.reshape(tokens, n_q_heads * head_dim) @ w_out
 
 
