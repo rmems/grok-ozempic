@@ -2641,6 +2641,25 @@ def _v4_pack_sha256_errors(chain: dict, label: str) -> list[str]:
         err = _v4_pack_sha256_row_error(row, label, index)
         if err is not None:
             errors.append(err)
+    errors.extend(_v4_pack_block_coverage_errors(packs, label))
+    return errors
+
+
+def _v4_pack_block_coverage_errors(packs: list, label: str) -> list[str]:
+    """Each locked #85 block needs exactly one pack_provenance row.
+
+    A row count alone is not coverage: four rows naming the same block satisfy
+    the length check, collapse to one key in `_v4_pack_sha_by_block`, and leave
+    every other block with no pack-identity comparison at all.
+    """
+    observed = [row.get("block") for row in packs if isinstance(row, dict)]
+    errors: list[str] = []
+    for block in BASELINE_85["blocks"]:
+        rows = observed.count(block)
+        if rows != 1:
+            errors.append(
+                f"{label}:pack_provenance_rows_for_block_{block:03d}={rows} expected=1"
+            )
     return errors
 
 

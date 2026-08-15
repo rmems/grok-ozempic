@@ -1554,6 +1554,40 @@ class RemedyV4DecisionTests(unittest.TestCase):
             f"Expected blocks error in {comparison['validation_errors']}"
         )
 
+    def test_duplicate_pack_provenance_block_rejected(self) -> None:
+        """Four rows naming one block is not coverage for four blocks."""
+        from grok1_multiblock_lib import (
+            assemble_remedy_v4_comparison,
+            decide_remedy_v4,
+            _v3_applied_source,
+            _v3_expected_schedule,
+        )
+
+        impl = dict(_V4_IMPL)
+        secondary = _v4_chain(V4_INT4_BASELINE_ARM)
+        hp_blocks, _, _, _ = _v3_expected_schedule(V4_INT4_BASELINE_ARM)
+        source = _v3_applied_source(0, hp_blocks, V4_INT4_BASELINE_ARM)
+        # Internally consistent rows, correct count, all naming block 0: blocks
+        # 1-3 would otherwise never be pack-identity checked.
+        secondary["pack_provenance"] = [
+            _v4_pack_row(0, source, _V4_PACK_SHA256) for _ in range(4)
+        ]
+        comparison = assemble_remedy_v4_comparison(
+            _v4_chain(V4_PRIMARY_ARM),
+            [_v4_secondary_payload(secondary, impl)],
+            primary_provenance={"implementation": impl},
+        )
+        for block in (1, 2, 3):
+            self.assertTrue(
+                any(
+                    f"pack_provenance_rows_for_block_{block:03d}=0" in e
+                    for e in comparison["validation_errors"]
+                ),
+                f"Expected missing-coverage error for block {block} in "
+                f"{comparison['validation_errors']}",
+            )
+        self.assertEqual(decide_remedy_v4(comparison)["decision"], 4)
+
     def test_non_list_blocks_fails_closed(self) -> None:
         """Malformed `blocks` in loaded evidence must be an error, not a TypeError."""
         from grok1_multiblock_lib import assemble_remedy_v4_comparison, decide_remedy_v4
