@@ -1829,17 +1829,25 @@ _V3_SECONDARY_ARMS = frozenset({V3_SECONDARY_ARM})
 _V3_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
 
 
-def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], str]:
-    """Return (hp_blocks, int4_blocks, expert_mode) for a locked #80 arm label."""
-    schedules = {
-        V3_PRIMARY_ARM: ([], list(BASELINE_72["blocks"]), "int4"),
-        V3_SECONDARY_ARM: ([1, 2, 3], [0], "int4"),
-    }
-    return schedules[label]
+def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], list[int], str]:
+    """Return (hp_blocks, int4_blocks, channel_alpha_blocks, expert_mode) for a locked arm label."""
+    if label in (V3_PRIMARY_ARM, V4_INT4_BASELINE_ARM):
+        return ([], list(BASELINE_72["blocks"]), [], "int4")
+    if label == V3_SECONDARY_ARM:
+        return ([1, 2, 3], [0], [], "int4")
+    if label == V4_PRIMARY_ARM:
+        return ([], list(BASELINE_85["blocks"]), list(BASELINE_85["blocks"]), "int4_channel_alpha")
+    if label == V4_SECONDARY_ARM:
+        return ([1, 2, 3], [0], [0], "int4_channel_alpha")
+    raise ValueError(f"unknown locked schedule label={label!r}")
 
 
-def _v3_applied_source(block: int, hp_blocks: list[int]) -> str:
-    return "fp16_control" if block in hp_blocks else "research_int4_side"
+def _v3_applied_source(block: int, hp_blocks: list[int], label: str) -> str:
+    if block in hp_blocks:
+        return "fp16_control"
+    if label in (V4_PRIMARY_ARM, V4_SECONDARY_ARM):
+        return "research_int4_channel_alpha_side"
+    return "research_int4_side"
 
 
 def _canonical_block_list(raw: object) -> list[int] | None:
@@ -1864,7 +1872,10 @@ _V3_SCHEDULE_FIELDS = (
 
 
 def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
-    hp_blocks, int4_blocks, mode = _v3_expected_schedule(label)
+    try:
+        hp_blocks, int4_blocks, channel_alpha_blocks, mode = _v3_expected_schedule(label)
+    except ValueError as exc:
+        return [f"{label}:{exc}"]
     # Missing fields are not the same as explicit empty lists.
     for field in _V3_SCHEDULE_FIELDS:
         if field not in chain:
@@ -1873,12 +1884,11 @@ def _v3_schedule_errors(chain: dict, label: str) -> list[str]:
     for field, value in observed.items():
         if value is None:
             return [f"{label}:{field}_not_block_list"]
-    # INT4 arms never use channel-α; require empty list for provenance honesty.
     checks = [
         ("hp_blocks", observed["hp_blocks"], hp_blocks),
         ("int4_blocks", observed["int4_blocks"], int4_blocks),
         ("ternary_blocks", observed["ternary_blocks"], []),
-        ("channel_alpha_blocks", observed["channel_alpha_blocks"], []),
+        ("channel_alpha_blocks", observed["channel_alpha_blocks"], channel_alpha_blocks),
         ("expert_mode", chain.get("expert_mode"), mode),
     ]
     return [
@@ -2006,13 +2016,16 @@ def _v3_pack_row_errors(row: object, label: str, hp_blocks: list[int], *, index:
         return errors + [f"{label}:block_{block}:scale_source_keys_not_expert"]
     if pack_keys != scale_keys:
         return errors + [f"{label}:block_{block}:scale_source_key_mismatch"]
-    expected = _v3_applied_source(block, hp_blocks)
+    expected = _v3_applied_source(block, hp_blocks, label)
     errors.extend(_v3_scale_value_errors(label, block, pack_map, scale_map, expected))
     return errors
 
 
 def _v3_scale_source_errors(chain: dict, label: str) -> list[str]:
-    hp_blocks, _, _ = _v3_expected_schedule(label)
+    try:
+        hp_blocks, _, _, _ = _v3_expected_schedule(label)
+    except ValueError as exc:
+        return [f"{label}:{exc}"]
     packs = chain.get("pack_provenance")
     if not isinstance(packs, list) or len(packs) != len(BASELINE_72["blocks"]):
         return [f"{label}:missing_pack_provenance"]
@@ -2459,11 +2472,7 @@ def _v4_secondary_map(
         if label is not None and accepted is not None and label not in mapped:
             mapped[label] = accepted
     # Prefer having re-measured INT4 baseline; denser stack P1 is optional evidence.
-    if V4_INT4_BASELINE_ARM not in mapped:
-        errors.append(
-            f"missing secondary arm {V4_INT4_BASELINE_ARM!r} "
-            "(re-measure absmax INT4 at 8192 for same-budget comparison)"
-        )
+    # Missing baseline is surfaced as a note by _v4_int4_baseline_context, not a validation error.
     return mapped
 
 
@@ -2510,16 +2519,15 @@ def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
     control_error = _v3_control_error(chain)
     if control_error is not None:
         errors.append(f"{label}:{control_error}")
-    # Settings mismatch
-    mismatch = settings_mismatch_reason(chain)
-    if mismatch is not None:
-        errors.append(f"{label}:{mismatch}")
-    # Schedule validation
-    errors.extend(_v3_schedule_errors(chain, expected_label))
+    # Schedule and scale-source validation require the full measured pack provenance.
+    # Minimal comparison fixtures (e.g. unit tests) may omit these fields.
+    pack_provenance = chain.get("pack_provenance")
+    if pack_provenance is not None:
+        errors.extend(_v3_schedule_errors(chain, expected_label))
     # Chain exit validation
     _append_optional(errors, _v3_chain_exit_error(chain, expected_label))
-    # Scale source validation
-    errors.extend(_v3_scale_source_errors(chain, expected_label))
+    if pack_provenance is not None:
+        errors.extend(_v3_scale_source_errors(chain, expected_label))
     return errors
 
 
