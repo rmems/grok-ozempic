@@ -25,6 +25,7 @@ import shlex
 import signal
 import traceback
 from collections.abc import Sequence
+from contextlib import contextmanager
 
 # Fixed interpreter/script argv; the call below always disables the shell.
 import subprocess  # nosec B404
@@ -33,7 +34,12 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - this supervisor requires POSIX.
+    _fcntl = None
 
 
 EXIT_OK = 0
@@ -80,6 +86,10 @@ class ArtifactError(RuntimeError):
         self.failure_class = failure_class
         self.errors = list(errors)
         self.payload = payload
+
+
+class OutputLockError(RuntimeError):
+    """The supervisor could not safely enter its output transaction."""
 
 
 class SupervisorSignal(KeyboardInterrupt):
@@ -169,6 +179,59 @@ _LABEL_BY_ALIAS = {
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _output_lock_path(out: Path) -> Path:
+    """Return the persistent sibling lock that owns one canonical output tree."""
+    return out.parent / f".{out.name}.supervisor.lock"
+
+
+@contextmanager
+def _supervisor_output_lock(out: Path) -> Iterator[Path]:
+    """Serialize the complete transaction for one canonical output directory.
+
+    The lock file is deliberately persistent: unlinking it after release can let
+    a new opener lock a different inode while an existing waiter acquires the
+    old one.  Keeping it beside (not inside) ``out`` also prevents it from
+    becoming part of the scientific artifact tree.
+    """
+    if _fcntl is None:
+        raise OutputLockError("supervised #85 runs require POSIX advisory flock")
+
+    # Avoid touching the canonical tree before the lock is held.  The regular
+    # Path.expanduser/mkdir setup remains inside the protected transaction.
+    try:
+        expanded_out = Path(os.path.expanduser(os.fspath(out))).resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise OutputLockError(
+            f"could not resolve supervisor output {out}: {exc}"
+        ) from exc
+    lock_path = _output_lock_path(expanded_out)
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(
+            lock_path,
+            os.O_CREAT
+            | os.O_RDWR
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+    except OSError as exc:
+        raise OutputLockError(
+            f"could not open supervisor output lock {lock_path}: {exc}"
+        ) from exc
+
+    try:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+        except OSError as exc:
+            raise OutputLockError(
+                f"could not acquire supervisor output lock {lock_path}: {exc}"
+            ) from exc
+        yield expanded_out
+    finally:
+        os.close(fd)
 
 
 def _atomic_write_text(path: Path, body: str) -> None:
@@ -2258,20 +2321,28 @@ def _record_post_validation_exception(
 
 
 def run(args: argparse.Namespace) -> int:
-    state = _RunState()
     try:
-        _bootstrap_run_state(args, state)
-        return _run_supervised(args, state)
-    except KeyboardInterrupt as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
-        if state.canonical_validated:
-            return _record_post_validation_exception(args, state, exc)
-        return _publish_supervisor_exception(args, state, exc)
-    except Exception as exc:
-        traceback.print_exc()
-        if state.canonical_validated:
-            return _record_post_validation_exception(args, state, exc)
-        return _publish_supervisor_exception(args, state, exc)
+        with _supervisor_output_lock(args.out) as locked_out:
+            args.out = locked_out
+            state = _RunState()
+            try:
+                _bootstrap_run_state(args, state)
+                return _run_supervised(args, state)
+            except KeyboardInterrupt as exc:
+                print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+                if state.canonical_validated:
+                    return _record_post_validation_exception(args, state, exc)
+                return _publish_supervisor_exception(args, state, exc)
+            except Exception as exc:
+                traceback.print_exc()
+                if state.canonical_validated:
+                    return _record_post_validation_exception(args, state, exc)
+                return _publish_supervisor_exception(args, state, exc)
+    except (KeyboardInterrupt, OutputLockError) as exc:
+        # No output lock means another supervisor may own the canonical tree.
+        # Fail without publishing there or invalidating that run's artifacts.
+        print(f"ERROR before supervisor output transaction: {exc}", file=sys.stderr)
+        return EXIT_SUPERVISOR_FAILCLOSED
 
 
 def _raise_supervisor_signal(signal_number: int, _frame: object) -> None:

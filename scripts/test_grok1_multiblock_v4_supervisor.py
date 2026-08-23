@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import signal
 
 # Test-only CompletedProcess/TimeoutExpired fixtures; no process is launched here.
@@ -449,6 +450,90 @@ class SupervisorTests(unittest.TestCase):
 
     def _failure(self, args) -> dict:
         return json.loads((args.out / "metrics.json").read_text(encoding="utf-8"))
+
+    def _assert_output_lock_held(self, out: Path) -> None:
+        lock_path = supervisor._output_lock_path(out)
+        fd = os.open(lock_path, os.O_RDWR)
+        try:
+            with self.assertRaises(BlockingIOError):
+                supervisor._fcntl.flock(
+                    fd,
+                    supervisor._fcntl.LOCK_EX | supervisor._fcntl.LOCK_NB,
+                )
+        finally:
+            os.close(fd)
+
+    def test_output_lock_is_persistent_and_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "report"
+            with supervisor._supervisor_output_lock(out) as locked_out:
+                self.assertEqual(locked_out, out)
+                self._assert_output_lock_held(out)
+
+            lock_path = supervisor._output_lock_path(out)
+            self.assertTrue(lock_path.is_file())
+            fd = os.open(lock_path, os.O_RDWR)
+            try:
+                supervisor._fcntl.flock(
+                    fd,
+                    supervisor._fcntl.LOCK_EX | supervisor._fcntl.LOCK_NB,
+                )
+            finally:
+                os.close(fd)
+
+    def test_run_holds_output_lock_through_failure_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def fail_run(_args, _state):
+                self._assert_output_lock_held(args.out)
+                raise RuntimeError("synthetic transaction failure")
+
+            def publish_failure(_args, _state, _exc):
+                self._assert_output_lock_held(args.out)
+                return supervisor.EXIT_SUPERVISOR_FAILCLOSED
+
+            with (
+                mock.patch.object(supervisor, "_run_supervised", side_effect=fail_run),
+                mock.patch.object(
+                    supervisor,
+                    "_publish_supervisor_exception",
+                    side_effect=publish_failure,
+                ) as publish,
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            publish.assert_called_once()
+            lock_path = supervisor._output_lock_path(args.out)
+            fd = os.open(lock_path, os.O_RDWR)
+            try:
+                supervisor._fcntl.flock(
+                    fd,
+                    supervisor._fcntl.LOCK_EX | supervisor._fcntl.LOCK_NB,
+                )
+            finally:
+                os.close(fd)
+
+    def test_interrupted_lock_wait_does_not_mutate_active_output(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            metrics = args.out / "metrics.json"
+            report = args.out / "results.md"
+            metrics.write_text("active metrics\n", encoding="utf-8")
+            report.write_text("active report\n", encoding="utf-8")
+
+            with mock.patch.object(
+                supervisor._fcntl,
+                "flock",
+                side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
+            self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
 
     def test_arm_schedules_match_literal_evidence_fixtures(self) -> None:
         for arm in supervisor.ARMS:
