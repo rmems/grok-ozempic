@@ -347,7 +347,9 @@ mod tests {
         assert_eq!(bytes.len(), 4);
         // Reconstruct.
         let reconstructed: Vec<f16> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| f16::from_bits(u16::from_le_bytes([c[0], c[1]])))
             .collect();
         assert_eq!(reconstructed[0], originals[0]);

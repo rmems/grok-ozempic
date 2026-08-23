@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Helpers for GH #68 multi-block residual fidelity (kept Lizard-clean)."""
+"""Helpers for GH #68/#73/#85 multi-block residual fidelity.
+
+GH #85 / RM-608 adds the supervised three-arm v4 protocol and bounded INT4
+side-table construction.  Keep the helpers small enough for the repository's
+complexity gates while preserving the earlier research surfaces.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +12,7 @@ import json
 import math
 import os
 import re
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -72,9 +78,12 @@ V4_PRIMARY_ARM = "expert_int4_channel_alpha"
 V4_SECONDARY_ARM = "expert_int4_channel_alpha_123"
 V4_INT4_BASELINE_ARM = "expert_int4"  # re-measured at 8192; not #80 historical
 _V4_ARM_LABELS = frozenset({V4_PRIMARY_ARM, V4_SECONDARY_ARM, V4_INT4_BASELINE_ARM})
+V4_REQUIRED_ARMS = (V4_INT4_BASELINE_ARM, V4_SECONDARY_ARM, V4_PRIMARY_ARM)
+V4_CANDIDATE_ARMS = (V4_PRIMARY_ARM, V4_SECONDARY_ARM)
 V4_IMPROVEMENT_EPS = 1e-3  # above 1/8192 token-level granularity
 INT4_SCALE_ABSMAX = "absmax"
 INT4_SCALE_LS_CHANNEL_ALPHA = "ls_channel_alpha"
+INT4_CHUNK_BYTES = 64 * 1024 * 1024
 
 # Cited from reports/grok-1-expert-precision-remedy-v2/ (PR #76 option 2).
 BASELINE_76_DENSER = {
@@ -335,18 +344,100 @@ def _int4_reduce_axes(ndim: int) -> tuple[int, ...]:
     return tuple(range(1, ndim - 1))
 
 
+def _iter_c_order_chunks(
+    array: np.ndarray,
+    *,
+    dtype: np.dtype | type = np.float32,
+    chunk_bytes: int | None = None,
+) -> Iterable[np.ndarray]:
+    """Yield bounded buffers in the same C-order bytes as a contiguous cast.
+
+    The real Grok exports are C-contiguous float32 memmaps, so their fast path is
+    a sequence of views.  ``nditer`` provides the same ordering without a
+    whole-tensor copy for unusual test/export layouts or dtypes.
+    """
+    source = np.asarray(array)
+    target = np.dtype(dtype)
+    budget = INT4_CHUNK_BYTES if chunk_bytes is None else int(chunk_bytes)
+    chunk_elems = max(1, budget // target.itemsize)
+    if source.dtype == target and source.flags.c_contiguous:
+        flat = source.reshape(-1)
+        for start in range(0, int(flat.size), chunk_elems):
+            yield flat[start : start + chunk_elems]
+        return
+    iterator = np.nditer(
+        source,
+        flags=["external_loop", "buffered", "zerosize_ok"],
+        op_flags=[["readonly"]],
+        op_dtypes=[target],
+        casting="unsafe",
+        order="C",
+        buffersize=chunk_elems,
+    )
+    for chunk in iterator:
+        yield np.asarray(chunk, dtype=target)
+
+
+def _iter_c_order_row_chunks(array: np.ndarray, n_out: int) -> Iterable[np.ndarray]:
+    """Yield float32 C-order chunks containing whole output-channel rows."""
+    if n_out < 1:
+        raise ForwardError("int4 side-table: trailing output dimension must be positive")
+    max_elems = max(n_out, (INT4_CHUNK_BYTES // np.dtype(np.float32).itemsize))
+    chunk_elems = max(n_out, (max_elems // n_out) * n_out)
+    carry = np.empty(0, dtype=np.float32)
+    for raw in _iter_c_order_chunks(
+        array, dtype=np.float32, chunk_bytes=chunk_elems * np.dtype(np.float32).itemsize
+    ):
+        flat = np.asarray(raw, dtype=np.float32).reshape(-1)
+        if carry.size:
+            flat = np.concatenate((carry, flat))
+            carry = np.empty(0, dtype=np.float32)
+        usable = (int(flat.size) // n_out) * n_out
+        if usable:
+            yield flat[:usable].reshape(-1, n_out)
+        if usable != int(flat.size):
+            carry = flat[usable:].copy()
+    if carry.size:
+        raise ForwardError("int4 side-table: C-order stream ended inside an output row")
+
+
+def _iter_intra_expert_chunks(
+    array: np.ndarray,
+) -> Iterable[tuple[int | None, np.ndarray]]:
+    """Yield roughly 64 MiB float32 chunks without crossing an expert boundary."""
+    source = np.asarray(array)
+    if source.size == 0:
+        raise ForwardError("int4 dequant: empty weight tensor")
+    if source.ndim == 0:
+        raise ForwardError("int4 side-table: scalar weight tensor is unsupported")
+    if source.ndim == 1:
+        for chunk in _iter_c_order_chunks(source, dtype=np.float32):
+            yield None, chunk
+        return
+    n_out = int(source.shape[-1])
+    if source.ndim == 2:
+        for chunk in _iter_c_order_row_chunks(source, n_out):
+            yield None, chunk
+        return
+    for expert in range(int(source.shape[0])):
+        for chunk in _iter_c_order_row_chunks(source[expert], n_out):
+            yield expert, chunk
+
+
 def _reference_fingerprint(ref: np.ndarray) -> dict[str, object]:
     """Content identity of the FP32 reference a side table was built from.
 
     Shape and dtype alone do not identify an export -- two different runs of the
     same tensor agree on both -- so hash the bytes as well.
     """
-    contiguous = np.ascontiguousarray(ref, dtype=np.float32)
-    digest = hashlib.sha256(contiguous.tobytes()).hexdigest()
+    source = np.asarray(ref)
+    digest = hashlib.sha256()
+    for chunk in _iter_c_order_chunks(source, dtype=np.float32):
+        digest.update(np.asarray(chunk, dtype=np.float32).tobytes(order="C"))
     return {
-        "sha256": digest,
-        "dtype": str(contiguous.dtype),
-        "shape": [int(d) for d in contiguous.shape],
+        "sha256": digest.hexdigest(),
+        "dtype": str(np.dtype(np.float32)),
+        "shape": [int(d) for d in source.shape],
     }
 
 
@@ -433,43 +524,52 @@ def int4_ls_channel_alpha_scale(weights: np.ndarray, q: np.ndarray) -> np.ndarra
     Same axes as absmax INT4 (preserves expert lead dim). Stacks #74 channel-α
     reconstruction with #80 INT4 codes — not pack_v2.
 
-    Operates in float32 and chunks over the leading expert axis for rank ≥3 so
-    the ``w * codes`` product is never a second full-size copy of the weight
-    tensor.
+    Source/codes are streamed in roughly 64 MiB intra-expert chunks and the
+    sufficient statistics accumulate in float64.  No full-size product is
+    materialized.
     """
-    w_f = np.asarray(weights, dtype=np.float32)
-    q_i = np.asarray(q, dtype=np.int8)
-    if w_f.shape != q_i.shape:
+    source = np.asarray(weights)
+    codes = np.asarray(q)
+    if source.shape != codes.shape:
         raise ForwardError(
-            f"int4 LS-α shape mismatch: weights {w_f.shape} vs codes {q_i.shape}"
+            f"int4 LS-α shape mismatch: weights {source.shape} vs codes {codes.shape}"
         )
-    if w_f.size == 0:
+    if codes.dtype != np.int8:
+        raise ForwardError(f"int4 LS-α codes dtype {codes.dtype} != int8")
+    if source.size == 0:
         raise ForwardError("int4 LS-α: empty weight tensor")
-    _require_finite_array(w_f, "LS-α source weights")
-    if w_f.ndim == 1:
-        den = float((q_i * q_i).sum())
-        alpha = (float((w_f * q_i).sum()) / den) if den > 0 else 0.0
-        return np.asarray([alpha], dtype=np.float32)
-    if w_f.ndim == 2:
-        axes = (0,)
-        num = (w_f * q_i).sum(axis=axes, dtype=np.float64)
-        den = (q_i * q_i).sum(axis=axes, dtype=np.float64)
-        alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-        scale = alpha.astype(np.float32)
-        _require_finite_array(scale, "LS-α scales")
-        return scale
-    # Rank ≥ 3: chunk over the leading (expert) axis to limit peak memory.
-    n_experts = w_f.shape[0]
-    n_out = w_f.shape[-1]
-    num = np.zeros((n_experts, n_out), dtype=np.float64)
-    den = np.zeros((n_experts, n_out), dtype=np.float64)
-    for e in range(n_experts):
-        w_e = w_f[e]
-        q_e = q_i[e]
-        # Reduce all contracting axes (all but the trailing output axis).
-        reduce_axes = tuple(range(0, w_e.ndim - 1))
-        num[e] = (w_e * q_e).sum(axis=reduce_axes, dtype=np.float64)
-        den[e] = (q_e * q_e).sum(axis=reduce_axes, dtype=np.float64)
+    if source.ndim == 1:
+        num = np.zeros(1, dtype=np.float64)
+        den = np.zeros(1, dtype=np.float64)
+    elif source.ndim == 2:
+        num = np.zeros(int(source.shape[-1]), dtype=np.float64)
+        den = np.zeros_like(num)
+    else:
+        num = np.zeros((int(source.shape[0]), int(source.shape[-1])), dtype=np.float64)
+        den = np.zeros_like(num)
+    code_chunks = _iter_intra_expert_chunks(codes)
+    for (expert, w_chunk), (q_expert, q_chunk) in zip(
+        _iter_intra_expert_chunks(source), code_chunks, strict=True
+    ):
+        if expert != q_expert or w_chunk.shape != q_chunk.shape:
+            raise ForwardError("int4 LS-α chunk layout differs between weights and codes")
+        _require_finite_array(w_chunk, "LS-α source weights")
+        product = np.multiply(w_chunk, q_chunk, dtype=np.float64)
+        if source.ndim == 1:
+            num[0] += product.sum(dtype=np.float64)
+        elif expert is None:
+            num += product.sum(axis=0, dtype=np.float64)
+        else:
+            num[expert] += product.sum(axis=0, dtype=np.float64)
+        del product
+        square = np.multiply(q_chunk, q_chunk, dtype=np.float64)
+        if source.ndim == 1:
+            den[0] += square.sum(dtype=np.float64)
+        elif expert is None:
+            den += square.sum(axis=0, dtype=np.float64)
+        else:
+            den[expert] += square.sum(axis=0, dtype=np.float64)
+        del square
     alpha = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
     scale = alpha.astype(np.float32)
     _require_finite_array(scale, "LS-α scales")
@@ -486,6 +586,135 @@ def int4_quantize_with_scale_mode(
     if scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
         return q, int4_ls_channel_alpha_scale(weights, q)
     raise ForwardError(f"unknown int4 scale_mode {scale_mode!r}")
+
+
+def _int4_side_scale_shape(ref_shape: tuple[int, ...]) -> tuple[int, ...]:
+    """Persisted scale layout after reducing every contracting dimension."""
+    if len(ref_shape) >= 3:
+        return (ref_shape[0], ref_shape[-1])
+    if len(ref_shape) == 2:
+        return (ref_shape[-1],)
+    return (1,) if ref_shape else ()
+
+
+def _chunked_absmax_scale(weights: np.ndarray) -> np.ndarray:
+    """First quantizer pass: bounded per-output-channel absmax reduction."""
+    source = np.asarray(weights)
+    shape = _int4_side_scale_shape(tuple(int(d) for d in source.shape))
+    amax = np.zeros(shape, dtype=np.float32)
+    for expert, chunk in _iter_intra_expert_chunks(source):
+        chunk_f = np.asarray(chunk, dtype=np.float32)
+        _require_finite_array(chunk_f, "source weights (NaN/Inf)")
+        if source.ndim == 1:
+            amax[0] = max(float(amax[0]), float(np.max(np.abs(chunk_f))))
+        elif expert is None:
+            np.maximum(amax, np.max(np.abs(chunk_f), axis=0), out=amax)
+        else:
+            np.maximum(amax[expert], np.max(np.abs(chunk_f), axis=0), out=amax[expert])
+    _require_finite_array(amax, "absmax")
+    scale = np.maximum(amax / float(INT4_QMAX), 1e-12).astype(np.float32)
+    _require_finite_array(scale, "scales")
+    return scale
+
+
+def _quantized_chunk(chunk: np.ndarray, scale: np.ndarray | np.float32) -> np.ndarray:
+    """Return one bounded chunk of bit-compatible absmax INT4 codes."""
+    rounded = np.rint(np.asarray(chunk, dtype=np.float32) / scale)
+    return np.clip(rounded, -INT4_QMAX, INT4_QMAX).astype(np.int8)
+
+
+def _write_chunked_q(path: Path, weights: np.ndarray, scale: np.ndarray) -> None:
+    """Second quantizer pass: write codes directly into an NPY memmap."""
+    source = np.asarray(weights)
+    q_map = np.lib.format.open_memmap(
+        path, mode="w+", dtype=np.int8, shape=tuple(int(d) for d in source.shape)
+    )
+    offsets: dict[int | None, int] = {}
+    try:
+        for expert, chunk in _iter_intra_expert_chunks(source):
+            offset = offsets.get(expert, 0)
+            rows = 1 if source.ndim == 1 else int(chunk.shape[0])
+            if source.ndim == 1:
+                q_map[offset : offset + int(chunk.size)] = _quantized_chunk(
+                    chunk, np.float32(scale[0])
+                )
+                offsets[expert] = offset + int(chunk.size)
+            elif expert is None:
+                target = q_map.reshape(-1, int(source.shape[-1]))
+                target[offset : offset + rows] = _quantized_chunk(chunk, scale)
+                offsets[expert] = offset + rows
+            else:
+                target = q_map[expert].reshape(-1, int(source.shape[-1]))
+                target[offset : offset + rows] = _quantized_chunk(chunk, scale[expert])
+                offsets[expert] = offset + rows
+        q_map.flush()
+    finally:
+        mmap_obj = getattr(q_map, "_mmap", None)
+        if mmap_obj is not None:
+            mmap_obj.flush()
+        del q_map
+
+
+def _temp_sibling(path: Path) -> Path:
+    """Create a same-directory temporary sibling that is never a cache entry."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    os.close(fd)
+    return Path(raw)
+
+
+def _fsync_file(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _fsync_directory(path: Path) -> None:
+    """Best-effort durability for a same-directory atomic publication."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _publish_temp(temp_path: Path, final_path: Path) -> None:
+    _fsync_file(temp_path)
+    os.replace(temp_path, final_path)
+    _fsync_directory(final_path.parent)
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    temp_path = _temp_sibling(path)
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        _fsync_directory(path.parent)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _atomic_save_npy(path: Path, array: np.ndarray) -> None:
+    temp_path = _temp_sibling(path)
+    try:
+        with temp_path.open("wb") as handle:
+            np.save(handle, np.asarray(array), allow_pickle=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        _fsync_directory(path.parent)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 class Int4SideExperts:
@@ -519,6 +748,7 @@ class Int4SideExperts:
             self.label = "research_int4_side"
             codec = "int4_absmax_per_output_channel"
         self._ref = reference
+        self._codec = codec
         self.roles = self._expert_role_map(reference)
         missing = sorted(EXPERT_ROLES - set(self.roles))
         if missing:
@@ -535,9 +765,13 @@ class Int4SideExperts:
         The bit-identical INT4 codes are shared with the absmax table so they are
         not written twice.
         """
+        self._root = root
         absmax_dir = root / f"block_{self._block:03d}"
+        ls_dir = root / "ls-alpha" / f"block_{self._block:03d}"
+        self._absmax_dir = absmax_dir
+        self._ls_dir = ls_dir
         if self._scale_mode == INT4_SCALE_LS_CHANNEL_ALPHA:
-            self._side_dir = root / "ls-alpha" / f"block_{self._block:03d}"
+            self._side_dir = ls_dir
             self._q_dir = absmax_dir
         else:
             self._side_dir = absmax_dir
@@ -549,7 +783,7 @@ class Int4SideExperts:
     def _expert_role_map(reference: NpyWeights) -> dict[str, str]:
         """Filter the reference roles down to the expert tensors we quantize."""
         roles: dict[str, str] = {}
-        for role in EXPERT_ROLES:
+        for role in sorted(EXPERT_ROLES):
             if role in reference.roles:
                 roles[role] = reference.roles[role]
         return roles
@@ -579,9 +813,13 @@ class Int4SideExperts:
         return sidecar
 
     def _write_sidecar(self, sidecar: dict[str, object]) -> None:
-        (self._side_dir / "sidecar.json").write_text(
-            json.dumps(sidecar, indent=2) + "\n", encoding="utf-8"
-        )
+        path = self._side_dir / "sidecar.json"
+        _atomic_write_json(path, sidecar)
+        self._publish_hook("sidecar_published", path)
+
+    def _publish_hook(self, step: str, path: Path) -> None:
+        """Test seam for simulating interruption at publication boundaries."""
+        del step, path
 
     def _paths(self, name: str) -> tuple[Path, Path]:
         stem = name.replace(".", "__")
@@ -599,6 +837,50 @@ class Int4SideExperts:
         stem = name.replace(".", "__")
         return self._q_dir / f"{stem}__q_int8.fingerprint.json"
 
+    def _scale_paths(self, name: str) -> tuple[Path, Path]:
+        """Return the absmax and LS/channel-alpha scale paths for shared codes."""
+        stem = name.replace(".", "__")
+        return (
+            self._absmax_dir / f"{stem}__scale_f32.npy",
+            self._ls_dir / f"{stem}__scale_f32.npy",
+        )
+
+    def _sidecar_paths(self) -> tuple[Path, Path]:
+        return self._absmax_dir / "sidecar.json", self._ls_dir / "sidecar.json"
+
+    @staticmethod
+    def _remove_path(path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise ForwardError(f"could not invalidate INT4 cache path {path}: {exc}") from exc
+
+    def _cleanup_temps(self, name: str) -> None:
+        """Remove abandoned same-directory siblings; they are never cache entries."""
+        finals = [
+            *self._paths(name),
+            self._fingerprint_path(name),
+            *self._scale_paths(name),
+            *self._sidecar_paths(),
+        ]
+        for final in finals:
+            for temp_path in final.parent.glob(f".{final.name}.*.tmp"):
+                self._remove_path(temp_path)
+
+    def _invalidate_shared_q_chain(self, name: str) -> None:
+        """Invalidate both certifying modes before replacing the shared q file."""
+        q_path, _ = self._paths(name)
+        for sidecar_path in self._sidecar_paths():
+            self._remove_path(sidecar_path)
+        self._remove_path(self._fingerprint_path(name))
+        self._publish_hook("sidecars_invalidated", q_path)
+        for scale_path in self._scale_paths(name):
+            self._remove_path(scale_path)
+        self._publish_hook("scale_modes_invalidated", q_path)
+
+    def _invalidate_active_sidecar(self) -> None:
+        self._remove_path(self._side_dir / "sidecar.json")
+
     def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Scale layout for preserved-expert INT4 scales.
 
@@ -607,27 +889,25 @@ class Int4SideExperts:
         the scale collapses all contracting axes between the leading expert axis
         and the trailing output channel, giving ``(E, N)`` for 3-D and 4-D alike.
         """
-        if len(ref_shape) >= 3:
-            return (ref_shape[0], ref_shape[-1])
-        if len(ref_shape) == 2:
-            return (ref_shape[-1],)
-        return (1,) if ref_shape else ()
+        return _int4_side_scale_shape(ref_shape)
 
     def _validate_side_codes(
         self, name: str, q: np.ndarray, ref_shape: tuple[int, ...]
     ) -> np.ndarray:
         if q.dtype != np.int8:
             raise ForwardError(f"int4 side-table {name}: codes dtype {q.dtype} != int8")
-        q_i = np.asarray(q, dtype=np.int8)
-        if not np.all((q_i >= -INT4_QMAX) & (q_i <= INT4_QMAX)):
+        if tuple(int(d) for d in q.shape) != ref_shape:
             raise ForwardError(
-                f"int4 side-table {name}: codes outside [-{INT4_QMAX}, {INT4_QMAX}]"
+                f"int4 side-table {name}: codes shape {q.shape} != reference {ref_shape}"
             )
-        if tuple(int(d) for d in q_i.shape) != ref_shape:
-            raise ForwardError(
-                f"int4 side-table {name}: codes shape {q_i.shape} != reference {ref_shape}"
-            )
-        return q_i
+        for chunk in _iter_c_order_chunks(q, dtype=np.int8):
+            if chunk.size and (
+                int(np.min(chunk)) < -INT4_QMAX or int(np.max(chunk)) > INT4_QMAX
+            ):
+                raise ForwardError(
+                    f"int4 side-table {name}: codes outside [-{INT4_QMAX}, {INT4_QMAX}]"
+                )
+        return q
 
     def _validate_side_scale(
         self, name: str, scale: np.ndarray, ref_shape: tuple[int, ...]
@@ -649,6 +929,69 @@ class Int4SideExperts:
         scale_f = self._validate_side_scale(name, scale, ref_shape)
         return q_i, scale_f
 
+    def _sidecar_certifies(self, name: str, ref_shape: tuple[int, ...]) -> bool:
+        """Whether the active mode's final sidecar certifies this q/scale pair."""
+        path = self._side_dir / "sidecar.json"
+        try:
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(sidecar, dict):
+            return False
+        tensors = sidecar.get("tensors")
+        entry = tensors.get(name) if isinstance(tensors, dict) else None
+        if not isinstance(entry, dict):
+            return False
+        q_path, scale_path = self._paths(name)
+        return (
+            sidecar.get("block") == self._block
+            and sidecar.get("codec") == self._codec
+            and sidecar.get("scale_mode") == self._scale_mode
+            and sidecar.get("qmax") == INT4_QMAX
+            and entry.get("q_file") == os.path.relpath(str(q_path), str(self._side_dir))
+            and entry.get("scale_file")
+            == os.path.relpath(str(scale_path), str(self._side_dir))
+            and entry.get("shape") == list(ref_shape)
+            and entry.get("scale_shape")
+            == list(self._expected_side_scale_shape(ref_shape))
+        )
+
+    def _load_codes(self, name: str, q_path: Path, ref_shape: tuple[int, ...]):
+        """Load and incrementally validate q, returning a read-only memmap."""
+        try:
+            q = np.load(q_path, mmap_mode="r", allow_pickle=False)
+            return self._validate_side_codes(name, q, ref_shape)
+        except (OSError, ValueError, ForwardError):
+            return None
+
+    def _build_shared_codes(
+        self,
+        name: str,
+        ref: np.ndarray,
+        ref_shape: tuple[int, ...],
+        fingerprint: dict[str, object],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Run the exact crash-safe shared-q replacement transaction."""
+        q_path, _ = self._paths(name)
+        fp_path = self._fingerprint_path(name)
+        self._invalidate_shared_q_chain(name)
+        scale_abs = _chunked_absmax_scale(ref)
+        temp_q = _temp_sibling(q_path)
+        try:
+            _write_chunked_q(temp_q, ref, scale_abs)
+            _fsync_file(temp_q)
+            self._publish_hook("q_temp_durable", temp_q)
+            _publish_temp(temp_q, q_path)
+            self._publish_hook("q_published", q_path)
+            _atomic_write_json(fp_path, fingerprint)
+            self._publish_hook("fingerprint_published", fp_path)
+        finally:
+            temp_q.unlink(missing_ok=True)
+        q = self._load_codes(name, q_path, ref_shape)
+        if q is None:
+            raise ForwardError(f"int4 side-table {name}: published q failed validation")
+        return q, scale_abs
+
     def _codes_for(
         self, name: str, ref: np.ndarray, ref_shape: tuple[int, ...]
     ) -> tuple[np.ndarray, np.ndarray | None]:
@@ -666,39 +1009,48 @@ class Int4SideExperts:
         """
         q_path, s_path = self._paths(name)
         fp_path = self._fingerprint_path(name)
+        self._cleanup_temps(name)
         fingerprint = _reference_fingerprint(ref)
         if q_path.is_file() and _fingerprint_matches(fp_path, fingerprint):
-            return self._validate_side_codes(name, np.load(q_path), ref_shape), None
-        q, scale_abs = int4_absmax_quantize(ref)
-        np.save(q_path, q)
-        fp_path.write_text(json.dumps(fingerprint, indent=2) + "\n", encoding="utf-8")
-        # A scale persisted against the old codes is stale too. Drop it so the
-        # caller refits rather than loading a mismatched table.
-        s_path.unlink(missing_ok=True)
-        return q, scale_abs
+            q = self._load_codes(name, q_path, ref_shape)
+            if q is not None:
+                return q, None
+        del s_path
+        return self._build_shared_codes(name, ref, ref_shape, fingerprint)
+
+    def _load_certified_scale(
+        self, name: str, scale_path: Path, ref_shape: tuple[int, ...]
+    ) -> np.ndarray | None:
+        if not self._sidecar_certifies(name, ref_shape) or not scale_path.is_file():
+            return None
+        try:
+            scale = np.load(scale_path, mmap_mode="r", allow_pickle=False)
+            return self._validate_side_scale(name, scale, ref_shape)
+        except (OSError, ValueError, ForwardError):
+            return None
+
+    def _compute_scale(
+        self, ref: np.ndarray, q: np.ndarray, scale_abs: np.ndarray | None
+    ) -> np.ndarray:
+        if self._scale_mode == INT4_SCALE_ABSMAX:
+            return scale_abs if scale_abs is not None else _chunked_absmax_scale(ref)
+        return int4_ls_channel_alpha_scale(ref, q)
 
     def _load_or_build(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         role = next(r for r, n in self.roles.items() if n == name)
-        ref = np.asarray(self._ref.vector(role), dtype=np.float32)
+        ref = np.asarray(self._ref.vector(role))
         ref_shape = tuple(int(d) for d in ref.shape)
         _, s_path = self._paths(name)
 
         q, scale_abs = self._codes_for(name, ref, ref_shape)
-
-        # Load or compute the scale for this specific scale_mode.
-        if s_path.is_file():
-            scale = np.load(s_path)
-            scale = self._validate_side_scale(name, scale, ref_shape)
-        else:
-            if self._scale_mode == INT4_SCALE_ABSMAX:
-                if scale_abs is None:
-                    _, scale_abs = int4_absmax_quantize(ref)
-                scale = scale_abs
-            else:
-                scale = int4_ls_channel_alpha_scale(ref, q)
-            np.save(s_path, scale)
-
-        return q, scale
+        scale = self._load_certified_scale(name, s_path, ref_shape)
+        if scale is not None:
+            return self._validate_side_pair(name, q, scale, ref_shape)
+        self._invalidate_active_sidecar()
+        scale = self._compute_scale(ref, q, scale_abs)
+        _atomic_save_npy(s_path, scale)
+        self._publish_hook("scale_published", s_path)
+        return self._validate_side_pair(name, q, scale, ref_shape)
 
     def vector(self, role: str) -> np.ndarray:
         q, scale = self._cache[role]
@@ -2607,14 +2959,14 @@ def decide_remedy_v3(comparison: dict) -> dict:
 
 
 def _v4_stack_labels(summaries: dict) -> list[str]:
-    """Only the all-INT4 LS-α primary arm is a candidate for stack improvement."""
-    candidates: list[str] = []
-    for label, summary in summaries.items():
-        if label != V4_PRIMARY_ARM or summary.get("cited"):
-            continue
-        if _v3_middle_complete(summary):
-            candidates.append(label)
-    return candidates
+    """Return the two remedy candidates in the lower-complexity-first order."""
+    return [
+        label
+        for label in V4_CANDIDATE_ARMS
+        if label in summaries
+        and not summaries[label].get("cited")
+        and _v3_middle_complete(summaries[label])
+    ]
 
 
 def _v4_improved_vs_int4(summary: dict, int4_baseline: dict) -> bool:
@@ -2641,6 +2993,8 @@ def _v4_secondary_entry(
 ) -> tuple[str | None, dict | None, list[str]]:
     """Accept #85 secondaries: denser stack P1 and/or re-measured absmax INT4."""
     errors: list[str] = []
+    if not isinstance(payload, dict):
+        return None, None, ["secondary evidence must be a JSON object"]
     chain = payload.get("chain")
     if not isinstance(chain, dict):
         return None, None, ["secondary payload missing chain object"]
@@ -2661,20 +3015,27 @@ def _v4_secondary_map(
     secondary_payloads: list[dict],
     errors: list[str],
     expected_implementation: dict,
+    arm_errors: dict[str, list[str]] | None = None,
 ) -> dict[str, dict]:
     mapped: dict[str, dict] = {}
     for payload in secondary_payloads:
         label, accepted, item_errors = _v4_secondary_entry(
             payload, expected_implementation
         )
-        errors.extend(item_errors)
+        known_arm = label in (V4_SECONDARY_ARM, V4_INT4_BASELINE_ARM)
+        if known_arm and arm_errors is not None:
+            arm_errors[label].extend(item_errors)
+        else:
+            errors.extend(item_errors)
         if label is not None and accepted is not None:
             if label in mapped:
-                errors.append(f"duplicate secondary arm {label!r}")
+                duplicate = f"duplicate secondary arm {label!r}"
+                if arm_errors is not None:
+                    arm_errors[label].append(duplicate)
+                else:
+                    errors.append(duplicate)
             else:
                 mapped[label] = accepted
-    # Prefer having re-measured INT4 baseline; denser stack P1 is optional evidence.
-    # Missing baseline is surfaced as a note by _v4_int4_baseline_context, not a validation error.
     return mapped
 
 
@@ -2904,35 +3265,178 @@ def _v4_chain_errors(chain: dict, expected_label: str) -> list[str]:
     return errors
 
 
+def _dedupe_strings(values: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys(str(value) for value in values))
+
+
+def _v4_assign_identity_errors(
+    errors: list[str], arm_errors: dict[str, list[str]], global_errors: list[str]
+) -> None:
+    """Attribute cross-arm failures to the named secondary when possible."""
+    for error in errors:
+        matched = False
+        for label in (V4_INT4_BASELINE_ARM, V4_SECONDARY_ARM):
+            if error.startswith(f"{label}:"):
+                arm_errors[label].append(error)
+                matched = True
+                break
+        if not matched:
+            global_errors.append(error)
+
+
+def _v4_evidence_completeness(
+    present: set[str],
+    arm_errors: dict[str, list[str]],
+    global_errors: list[str],
+) -> dict[str, object]:
+    """Return the explicit pre-ranking state for all three mandatory arms."""
+    missing = [label for label in V4_REQUIRED_ARMS if label not in present]
+    invalid = [
+        label
+        for label in V4_REQUIRED_ARMS
+        if label in present and bool(arm_errors.get(label))
+    ]
+    completed = [
+        label
+        for label in V4_REQUIRED_ARMS
+        if label in present and label not in invalid
+    ]
+    normalized = {
+        label: _dedupe_strings(arm_errors.get(label, [])) for label in V4_REQUIRED_ARMS
+    }
+    global_unique = _dedupe_strings(global_errors)
+    complete = not missing and not invalid and not global_unique
+    return {
+        "protocol_complete": complete,
+        "required_arms": list(V4_REQUIRED_ARMS),
+        "candidate_arms": list(V4_CANDIDATE_ARMS),
+        "completed": completed,
+        "missing": missing,
+        "invalid": invalid,
+        "completed_arms": completed,
+        "missing_arms": missing,
+        "invalid_arms": invalid,
+        "errors_by_arm": normalized,
+        "global_errors": global_unique,
+        "arm_status": {
+            label: {
+                "present": label in present,
+                "complete": label in completed,
+                "errors": normalized[label],
+            }
+            for label in V4_REQUIRED_ARMS
+        },
+    }
+
+
+def _v4_validation_errors(completeness: dict[str, object]) -> list[str]:
+    errors = list(completeness.get("global_errors") or [])
+    by_arm = completeness.get("errors_by_arm")
+    if isinstance(by_arm, dict):
+        for label in V4_REQUIRED_ARMS:
+            errors.extend(by_arm.get(label) or [])
+    errors.extend(
+        f"missing_required_arm:{label}" for label in completeness.get("missing_arms") or []
+    )
+    return _dedupe_strings(errors)
+
+
+def _v4_baseline_delta(candidate: dict, baseline: dict) -> dict[str, float]:
+    return {
+        "b3_top1_gain": float(candidate["router_top1"][-1])
+        - float(baseline["router_top1"][-1]),
+        "b3_cos_gain": float(candidate["block_output_cosine"][-1])
+        - float(baseline["block_output_cosine"][-1]),
+        "chain_exit_drift_reduction": float(baseline["chain_exit_residual_drift"])
+        - float(candidate["chain_exit_residual_drift"]),
+    }
+
+
+def _v4_ranking_contract(summaries: dict) -> dict[str, object]:
+    """Rank P0/P1 only, preferring lower-complexity P0 on an exact tie."""
+    candidates = _v4_stack_labels(summaries)
+    baseline = summaries[V4_INT4_BASELINE_ARM]
+    ordered = sorted(
+        candidates,
+        key=lambda label: (
+            _v2_candidate_rank(summaries[label]),
+            label == V4_PRIMARY_ARM,
+        ),
+        reverse=True,
+    )
+    winner = ordered[0]
+    exact_tie = (
+        len(ordered) == 2
+        and _v2_candidate_rank(summaries[ordered[0]])
+        == _v2_candidate_rank(summaries[ordered[1]])
+    )
+    tie_break = (
+        f"exact metric-rank tie; preferred P0 {V4_PRIMARY_ARM} as the "
+        "lower-complexity remedy"
+        if exact_tie
+        else "not needed; winner has the highest viability/top-1/cosine/exit-drift rank"
+    )
+    return {
+        "ordered_candidates": ordered,
+        "baseline_comparator": V4_INT4_BASELINE_ARM,
+        "baseline_deltas": {
+            label: _v4_baseline_delta(summaries[label], baseline) for label in ordered
+        },
+        "winner": winner,
+        "tie_break_reason": tie_break,
+    }
+
+
 def assemble_remedy_v4_comparison(
-    primary_chain: dict,
+    primary_chain: dict | None,
     secondary_payloads: list[dict],
     *,
     primary_provenance: dict | None = None,
     load_errors: list[str] | None = None,
 ) -> dict:
     """Assemble #85 stacked INT4+LS-α evidence at Grok-1 max context (8192)."""
-    errors = list(load_errors or [])
+    global_errors = list(load_errors or [])
+    arm_errors = {label: [] for label in V4_REQUIRED_ARMS}
     implementation = (primary_provenance or {}).get("implementation")
     if not isinstance(implementation, dict):
-        errors.append("primary evidence missing implementation provenance")
+        error = "primary evidence missing implementation provenance"
+        arm_errors[V4_PRIMARY_ARM].append(error)
         implementation = {}
-    secondary = _v4_secondary_map(secondary_payloads, errors, implementation)
-    # Use comprehensive chain validation instead of protocol-only
-    errors.extend(_v4_chain_errors(primary_chain, V4_PRIMARY_ARM))
+    secondary = _v4_secondary_map(
+        secondary_payloads, global_errors, implementation, arm_errors
+    )
+    primary_present = isinstance(primary_chain, dict) and bool(primary_chain)
+    primary = primary_chain if primary_present else {}
+    present = set(secondary)
+    if primary_present:
+        present.add(V4_PRIMARY_ARM)
+        arm_errors[V4_PRIMARY_ARM].extend(_v4_chain_errors(primary, V4_PRIMARY_ARM))
     for label, payload in secondary.items():
-        errors.extend(_v4_chain_errors(payload["chain"], label))
-    errors.extend(_v4_pack_identity_errors(primary_chain, secondary))
-    errors.extend(_v4_npy_identity_errors(primary_chain, secondary))
-    summaries = {V4_PRIMARY_ARM: _v2_chain_summary(primary_chain)}
+        arm_errors[label].extend(_v4_chain_errors(payload["chain"], label))
+    if primary_present:
+        _v4_assign_identity_errors(
+            _v4_pack_identity_errors(primary, secondary), arm_errors, global_errors
+        )
+        _v4_assign_identity_errors(
+            _v4_npy_identity_errors(primary, secondary), arm_errors, global_errors
+        )
+    completeness = _v4_evidence_completeness(present, arm_errors, global_errors)
+    summaries = (
+        {V4_PRIMARY_ARM: _v2_chain_summary(primary)} if primary_present else {}
+    )
     summaries.update(
         {label: _v2_chain_summary(payload["chain"]) for label, payload in secondary.items()}
     )
-    return {
+    comparison = {
         "primary_arm": V4_PRIMARY_ARM,
         "secondary_arms": secondary,
         "summaries": summaries,
-        "validation_errors": errors,
+        "validation": completeness,
+        "protocol_complete": bool(completeness["protocol_complete"]),
+        "completed_arms": list(completeness["completed_arms"]),
+        "missing_arms": list(completeness["missing_arms"]),
+        "invalid_arms": list(completeness["invalid_arms"]),
+        "validation_errors": _v4_validation_errors(completeness),
         "baselines_cited": {
             "historical_80_int4_all": {
                 "note": "2048-token #80 P0 all-INT4 historical only — not same-budget",
@@ -2943,6 +3447,11 @@ def assemble_remedy_v4_comparison(
         },
         "primary_provenance": {"implementation": implementation},
     }
+    if comparison["protocol_complete"]:
+        ranking = _v4_ranking_contract(summaries)
+        comparison["ranking"] = ranking
+        comparison["best_remedy_arm"] = ranking["winner"]
+    return comparison
 
 
 def _v4_int4_baseline_context(
@@ -2973,18 +3482,18 @@ def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
     if best.get("viable"):
         return (
             1,
-            "Stacked INT4 + LS channel-α restores multi-block viability at Grok-1 max context.",
+            "Stacked / denser INT4 remedy restores multi-block viability at Grok-1 max context.",
         )
     if any_improved:
         return (
             2,
-            "Stacked INT4 + LS channel-α helps vs re-measured INT4 baseline, but still "
+            "Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still "
             "compounds / misses the ~0.95 viability band.",
         )
     return (
         3,
-        "Stacked INT4 + LS channel-α fails to beat re-measured INT4 alone — gap is not "
-        "LS-α on INT4 codes.",
+        "Stacked / denser INT4 remedies fail to beat re-measured INT4 alone — the gap is "
+        "not closed by LS-α or the HP123 schedule.",
     )
 
 
@@ -3005,25 +3514,48 @@ def _v4_decision_rationale(
 
 
 def decide_remedy_v4(comparison: dict) -> dict:
-    """Pick exactly one #85 decision: stacked INT4+LS-α vs re-measured INT4 baseline."""
+    """Pick one #85 decision only after baseline, P1, and P0 all validate."""
     errors = list(comparison.get("validation_errors") or [])
-    if errors:
-        return _decision_payload(
+    if not bool(comparison.get("protocol_complete")) or errors:
+        completeness = comparison.get("validation") or {}
+        rationale = errors or ["protocol_complete=false"]
+        rationale.extend(
+            f"missing_required_arm:{label}"
+            for label in completeness.get("missing_arms", comparison.get("missing_arms", []))
+        )
+        rationale.extend(
+            f"invalid_required_arm:{label}"
+            for label in completeness.get("invalid_arms", comparison.get("invalid_arms", []))
+        )
+        payload = _decision_payload(
             4,
             "Inconclusive — required multi-arm evidence is incomplete or incomparable.",
-            errors,
+            _dedupe_strings(rationale),
             "unknown",
         )
+        payload["protocol_complete"] = False
+        payload["completed_arms"] = list(comparison.get("completed_arms") or [])
+        payload["missing_arms"] = list(comparison.get("missing_arms") or [])
+        payload["invalid_arms"] = list(comparison.get("invalid_arms") or [])
+        return payload
     summaries = comparison["summaries"]
-    stack_labels = _v4_stack_labels(summaries)
-    if not stack_labels:
+    ranking = comparison.get("ranking")
+    if not isinstance(ranking, dict):
         return _decision_payload(
             4,
-            "Inconclusive — no complete INT4+LS-α stack arm summaries present.",
-            ["no_int4_channel_alpha_summaries"],
+            "Inconclusive — complete evidence has no canonical P0/P1 ranking.",
+            ["missing_v4_ranking_contract"],
             "unknown",
         )
-    best_label = max(stack_labels, key=lambda label: _v2_candidate_rank(summaries[label]))
+    stack_labels = list(ranking.get("ordered_candidates") or [])
+    best_label = ranking.get("winner")
+    if best_label not in V4_CANDIDATE_ARMS or set(stack_labels) != set(V4_CANDIDATE_ARMS):
+        return _decision_payload(
+            4,
+            "Inconclusive — canonical ranking does not contain exactly P0 and P1.",
+            ["invalid_v4_ranking_contract"],
+            "unknown",
+        )
     best = summaries[best_label]
     any_improved, base_note, early = _v4_int4_baseline_context(
         summaries, stack_labels, best
@@ -3036,6 +3568,10 @@ def decide_remedy_v4(comparison: dict) -> dict:
     )
     payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
     payload["best_remedy_arm"] = best_label
+    payload["protocol_complete"] = True
+    payload["ordered_candidates"] = stack_labels
+    payload["baseline_deltas"] = dict(ranking.get("baseline_deltas") or {})
+    payload["tie_break_reason"] = ranking.get("tie_break_reason")
     return payload
 
 

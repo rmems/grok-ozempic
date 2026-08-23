@@ -41,6 +41,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     V3_SECONDARY_ARM,
     V4_INT4_BASELINE_ARM,
     V4_PRIMARY_ARM,
+    V4_SECONDARY_ARM,
     Int4SideExperts,
     INT4_SCALE_ABSMAX,
     INT4_SCALE_LS_CHANNEL_ALPHA,
@@ -1536,7 +1537,14 @@ class RemedyV4DecisionTests(unittest.TestCase):
         impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
             _v4_chain(V4_PRIMARY_ARM, top1_last=0.97),
-            [_v4_secondary_payload(_v4_chain(V4_INT4_BASELINE_ARM, top1_last=0.90), impl)],
+            [
+                _v4_secondary_payload(
+                    _v4_chain(V4_INT4_BASELINE_ARM, top1_last=0.90), impl
+                ),
+                _v4_secondary_payload(
+                    _v4_chain(V4_SECONDARY_ARM, top1_last=0.96), impl
+                ),
+            ],
             primary_provenance={"implementation": impl},
         )
         self.assertEqual(comparison["validation_errors"], [])
@@ -1573,7 +1581,10 @@ class RemedyV4DecisionTests(unittest.TestCase):
         impl = dict(_V4_IMPL)
         comparison = assemble_remedy_v4_comparison(
             primary,
-            [_v4_secondary_payload(baseline, impl)],
+            [
+                _v4_secondary_payload(baseline, impl),
+                _v4_secondary_payload(_v4_chain(V4_SECONDARY_ARM), impl),
+            ],
             primary_provenance={"implementation": impl},
         )
         self.assertEqual(comparison["validation_errors"], [])
@@ -1840,9 +1851,13 @@ class RemedyV4DecisionTests(unittest.TestCase):
             [],
             primary_provenance={"implementation": impl},
         )
-        self.assertEqual(comparison["validation_errors"], [])
+        self.assertFalse(comparison["protocol_complete"])
+        self.assertEqual(
+            comparison["missing_arms"],
+            [V4_INT4_BASELINE_ARM, V4_SECONDARY_ARM],
+        )
+        self.assertNotIn("ranking", comparison)
         decision = decide_remedy_v4(comparison)
-        # Should get decision 4 (inconclusive) when baseline is missing and not viable
         self.assertEqual(decision["decision"], 4)
 
 

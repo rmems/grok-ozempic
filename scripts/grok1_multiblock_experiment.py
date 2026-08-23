@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Multi-block residual fidelity: #68 ternary baseline + #73 remedy arms."""
+"""Multi-block residual fidelity for #68/#73 and #85 / RM-608."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,6 +127,48 @@ def _block_paths(paths: ChainPaths, b: int) -> tuple[Path, Path]:
     if not pack_path.is_file():
         raise ForwardError(f"missing pack for block {b}: {pack_path}")
     return npy_dir, pack_path
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Atomically replace ``path`` with one complete JSON document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _write_progress(
+    path: Path | None,
+    base: dict | None,
+    *,
+    current_block: int,
+    completed_blocks: list[int],
+) -> None:
+    if path is None:
+        return
+    payload = {
+        **(base or {}),
+        "status": "running",
+        "current_block": int(current_block),
+        "completed_blocks": [int(block) for block in completed_blocks],
+    }
+    _atomic_write_json(path, payload)
 
 
 def _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k):
@@ -403,6 +447,8 @@ def run_chain(
     hp_period=2,
     hp_blocks: set[int] | None = None,
     int4_side_root: Path | None = None,
+    progress_path: Path | None = None,
+    progress_base: dict | None = None,
 ) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
@@ -422,10 +468,30 @@ def run_chain(
     h0 = embedding_rows(paths.embedding_shard, ids)
     streams = (h0, h0.copy(), h0.copy() if not skip_fp16 else None)
     per_block, pack_provenance = [], []
+    completed_blocks: list[int] = []
     for b in blocks:
+        _write_progress(
+            progress_path,
+            {
+                **(progress_base or {}),
+                "pack_provenance": list(pack_provenance),
+            },
+            current_block=b,
+            completed_blocks=completed_blocks,
+        )
         row, streams, prov = _run_block(b, paths, streams, cfg)
         per_block.append(row)
         pack_provenance.append(prov)
+        completed_blocks.append(b)
+        _write_progress(
+            progress_path,
+            {
+                **(progress_base or {}),
+                "pack_provenance": list(pack_provenance),
+            },
+            current_block=b,
+            completed_blocks=completed_blocks,
+        )
     h_ref, h_pilot, h_fp16 = streams
     meta = _arm_meta(
         blocks,
@@ -463,6 +529,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=2026 * 10_000 + 806)
     p.add_argument("--top-k", type=int, default=NUM_SELECTED_EXPERTS)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument(
+        "--progress-json",
+        type=Path,
+        default=None,
+        help="Optional atomic progress snapshot overwritten before and after each block",
+    )
     p.add_argument("--skip-fp16-control", action="store_true")
     p.add_argument("--write-report-md", action="store_true")
     p.add_argument(
@@ -835,6 +907,49 @@ def _provenance(
     }
 
 
+def _progress_record_base(
+    args: argparse.Namespace,
+    blocks: list[int],
+    paths: ChainPaths,
+    provenance: dict,
+) -> dict:
+    """Build the stable portion of each child progress snapshot."""
+    return {
+        "arm": args.arm,
+        "protocol": {
+            "tokens": int(args.tokens),
+            "seed": int(args.seed),
+            "blocks": [int(block) for block in blocks],
+            "top_k": int(args.top_k),
+        },
+        "implementation": provenance.get("implementation"),
+        "input_identity": {
+            "npy_root": str(paths.npy_root),
+            "npy_pattern": paths.npy_pattern,
+            "pack_root": str(paths.pack_root),
+            "pack_pattern": paths.pack_pattern,
+            "embedding_shard": str(paths.embedding_shard),
+            "int4_side_root": (
+                str(getattr(args, "int4_side_root", None))
+                if getattr(args, "int4_side_root", None) is not None
+                else None
+            ),
+        },
+        "provenance_identity": {
+            key: provenance.get(key)
+            for key in (
+                "issue",
+                "agent",
+                "model",
+                "design",
+                "architecture_source",
+                "activation_policy",
+                "scale_policy",
+            )
+        },
+    }
+
+
 def run(args: argparse.Namespace) -> int:
     if args.tokens < 1:
         raise ForwardError(f"tokens must be >= 1, got {args.tokens}")
@@ -860,6 +975,21 @@ def run(args: argparse.Namespace) -> int:
             else (args.out / "int4-side")
         )
         int4_side_root.mkdir(parents=True, exist_ok=True)
+    is_v2 = _is_v2_run(args)
+    is_v3 = _is_v3_run(args)
+    is_v4 = _is_v4_run(args)
+    prov = _provenance(
+        paths,
+        args.skip_fp16_control,
+        args.arm,
+        v2=is_v2 and not is_v3 and not is_v4,
+        v3=is_v3 and not is_v4,
+        v4=is_v4,
+    )
+    raw_progress_path = getattr(args, "progress_json", None)
+    progress_path = (
+        raw_progress_path.expanduser() if raw_progress_path is not None else None
+    )
     chain = run_chain(
         blocks,
         paths,
@@ -871,17 +1001,8 @@ def run(args: argparse.Namespace) -> int:
         hp_period=args.hp_period,
         hp_blocks=args.hp_blocks,
         int4_side_root=int4_side_root,
-    )
-    is_v2 = _is_v2_run(args)
-    is_v3 = _is_v3_run(args)
-    is_v4 = _is_v4_run(args)
-    prov = _provenance(
-        paths,
-        args.skip_fp16_control,
-        args.arm,
-        v2=is_v2 and not is_v3 and not is_v4,
-        v3=is_v3 and not is_v4,
-        v4=is_v4,
+        progress_path=progress_path,
+        progress_base=_progress_record_base(args, blocks, paths, prov),
     )
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
