@@ -3515,13 +3515,17 @@ def _v4_outcome(best: dict, *, selected_improved: bool) -> tuple[int, str]:
     if selected_improved:
         return (
             2,
-            "Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still "
-            "compounds / misses the ~0.95 viability band.",
+            (
+                "Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, "
+                "but still compounds / misses the ~0.95 viability band."
+            ),
         )
     return (
         3,
-        "Selected stacked / denser INT4 remedy fails to beat re-measured INT4 alone — "
-        "the canonical winner does not close the gap.",
+        (
+            "Selected stacked / denser INT4 remedy fails to beat re-measured INT4 alone — "
+            "the canonical winner does not close the gap."
+        ),
     )
 
 

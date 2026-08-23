@@ -447,6 +447,17 @@ class ReportTests(unittest.TestCase):
         self.assertIn(V4_PRIMARY_ARM, body)
         self.assertNotIn("stale same-option analysis", body)
 
+    def test_atomic_json_replace_fsyncs_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "progress.json"
+            with mock.patch.object(multiblock, "_fsync_directory") as sync_directory:
+                multiblock._atomic_write_json(path, {"status": "running"})
+            sync_directory.assert_called_once_with(path.parent)
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                {"status": "running"},
+            )
+
     def test_atomic_report_replace_failure_preserves_old_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "results.md"

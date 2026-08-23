@@ -19,6 +19,32 @@ import grok1_multiblock_v4_supervisor as supervisor  # noqa: E402
 _PACK_SHA = "a" * 64
 _NPY_SHA = "b" * 64
 _IMPLEMENTATION = {"commit": "c" * 40, "dirty": False}
+_ARM_FIXTURES = {
+    "baseline": {
+        "schedule": ("int4", [], [0, 1, 2, 3], []),
+        "sources": {block: "research_int4_side" for block in (0, 1, 2, 3)},
+    },
+    "p1": {
+        "schedule": ("int4_channel_alpha", [1, 2, 3], [0], [0]),
+        "sources": {
+            0: "research_int4_channel_alpha_side",
+            1: "fp16_control",
+            2: "fp16_control",
+            3: "fp16_control",
+        },
+    },
+    "p0": {
+        "schedule": (
+            "int4_channel_alpha",
+            [],
+            [0, 1, 2, 3],
+            [0, 1, 2, 3],
+        ),
+        "sources": {
+            block: "research_int4_channel_alpha_side" for block in (0, 1, 2, 3)
+        },
+    },
+}
 
 
 def _value(command: list[str], option: str) -> str:
@@ -43,19 +69,9 @@ def _payload(
     tokens: int = supervisor.TOKENS,
     decision: int = 2,
 ) -> dict:
-    mode, hp_blocks, int4_blocks, channel_blocks = supervisor._schedule_for_arm(arm)
-    sources = {
-        block: (
-            "fp16_control"
-            if arm.stage == "p1" and block in (1, 2, 3)
-            else (
-                "research_int4_side"
-                if arm.stage == "baseline"
-                else "research_int4_channel_alpha_side"
-            )
-        )
-        for block in supervisor.BLOCKS
-    }
+    fixture = _ARM_FIXTURES[arm.stage]
+    mode, hp_blocks, int4_blocks, channel_blocks = fixture["schedule"]
+    sources = fixture["sources"]
     cli_arm = "int4" if arm.stage == "baseline" else "int4_channel_alpha"
     provenance = {
         "issue": supervisor.ISSUE,
@@ -180,6 +196,8 @@ def _write_success(
         {
             "status": "running",
             "arm": _value(command, "--arm"),
+            "arm_label": spec.expected_label,
+            "hp_blocks": _ARM_FIXTURES[spec.stage]["schedule"][1],
             "protocol": {
                 "tokens": supervisor.TOKENS,
                 "seed": supervisor.SEED,
@@ -232,6 +250,14 @@ class SupervisorTests(unittest.TestCase):
 
     def _failure(self, args) -> dict:
         return json.loads((args.out / "metrics.json").read_text(encoding="utf-8"))
+
+    def test_arm_schedules_match_literal_evidence_fixtures(self) -> None:
+        for arm in supervisor.ARMS:
+            with self.subTest(stage=arm.stage):
+                self.assertEqual(
+                    supervisor._schedule_for_arm(arm),
+                    _ARM_FIXTURES[arm.stage]["schedule"],
+                )
 
     def test_locked_launch_order_arguments_and_successful_non_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -328,6 +354,67 @@ class SupervisorTests(unittest.TestCase):
                 "complete",
             )
 
+    def test_post_validation_bookkeeping_error_preserves_canonical_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            canonical: dict[str, str] = {}
+
+            def child(command, **_kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                report = _write_success(command)
+                if spec.stage == "p0":
+                    canonical["metrics"] = (args.out / "metrics.json").read_text(
+                        encoding="utf-8"
+                    )
+                    canonical["report"] = report or ""
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            real_atomic_write_json = supervisor._atomic_write_json
+
+            def fail_final_progress(path: Path, payload: object) -> None:
+                if (
+                    path.name == "supervisor-progress.json"
+                    and isinstance(payload, dict)
+                    and payload.get("status") == "complete"
+                ):
+                    raise RuntimeError("final bookkeeping failed")
+                real_atomic_write_json(path, payload)
+
+            with mock.patch.object(
+                supervisor,
+                "_atomic_write_json",
+                side_effect=fail_final_progress,
+            ):
+                result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(
+                (args.out / "metrics.json").read_text(encoding="utf-8"),
+                canonical["metrics"],
+            )
+            self.assertEqual(
+                (args.out / "results.md").read_text(encoding="utf-8"),
+                canonical["report"],
+            )
+            metrics = self._failure(args)
+            self.assertEqual(metrics["decision"]["decision"], 2)
+            self.assertNotIn("failure_class", metrics)
+            diagnostic = json.loads(
+                (args.out / "supervisor-bookkeeping-error.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(diagnostic["status"], "bookkeeping_failed")
+            self.assertTrue(diagnostic["canonical_protocol_validated"])
+            self.assertEqual(
+                diagnostic["canonical_artifacts_preserved"],
+                ["metrics.json", "results.md"],
+            )
+
     def test_sigkill_minus_9_and_wrapper_137_fail_closed(self) -> None:
         for returncode in (-signal.SIGKILL, 137):
             with (
@@ -385,6 +472,76 @@ class SupervisorTests(unittest.TestCase):
             log = (args.out / "run-01-baseline.log").read_text(encoding="utf-8")
             self.assertIn("timeout: true", log)
             self.assertIn("partial", log)
+
+    def test_launch_error_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def launch_error(_command, **_kwargs):
+                raise OSError("exec format error")
+
+            result, run = self._run(args, launch_error)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "launch_error")
+            self.assertEqual(payload["decision"]["decision"], 4)
+            self.assertIsNone(payload["returncode"])
+            self.assertIn(
+                "exec format error",
+                (args.out / "run-01-baseline.log").read_text(encoding="utf-8"),
+            )
+
+    def test_keyboard_interrupt_publishes_option_4(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def interrupted(_command, **_kwargs):
+                raise KeyboardInterrupt
+
+            result, run = self._run(args, interrupted)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "interrupted")
+            self.assertEqual(payload["decision"]["decision"], 4)
+            self.assertEqual(payload["returncode"], -signal.SIGINT)
+            self.assertEqual(payload["signal"], "SIGINT")
+
+    def test_unexpected_supervisor_error_publishes_option_4(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def unexpected(_command, **_kwargs):
+                raise RuntimeError("synthetic supervisor fault")
+
+            result, run = self._run(args, unexpected)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "supervisor_error")
+            self.assertEqual(payload["decision"]["decision"], 4)
+            self.assertIsNone(payload["returncode"])
+            self.assertIn(
+                "RuntimeError: synthetic supervisor fault",
+                payload["failure"]["errors"],
+            )
+
+    def test_sigterm_interrupt_publishes_option_4(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def terminated(_command, **_kwargs):
+                supervisor._raise_supervisor_signal(signal.SIGTERM, None)
+
+            result, run = self._run(args, terminated)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "interrupted")
+            self.assertEqual(payload["decision"]["decision"], 4)
+            self.assertEqual(payload["returncode"], -signal.SIGTERM)
+            self.assertEqual(payload["signal"], "SIGTERM")
 
     def test_ordinary_nonzero_at_p0_preserves_prior_arm_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as td:

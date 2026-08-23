@@ -105,7 +105,14 @@ class ProgressParserTests(unittest.TestCase):
 
 class ProgressRunChainTests(unittest.TestCase):
     @staticmethod
-    def _run_chain(progress_path: Path | None):
+    def _run_chain(
+        progress_path: Path | None,
+        *,
+        blocks: list[int] | None = None,
+        expert_mode: str = "ternary",
+        hp_blocks: set[int] | None = None,
+    ):
+        blocks = [0, 1] if blocks is None else blocks
         activations = np.ones((2, 4), dtype=np.float32)
         paths = multiblock.ChainPaths(
             npy_root=Path("/unused/npy"),
@@ -128,12 +135,14 @@ class ProgressRunChainTests(unittest.TestCase):
             mock.patch.object(multiblock, "_atomic_write_json", wraps=real_writer) as writer,
         ):
             chain = multiblock.run_chain(
-                [0, 1],
+                blocks,
                 paths,
                 tokens=2,
                 seed=2026 * 10_000 + 806,
                 top_k=2,
                 skip_fp16=False,
+                expert_mode=expert_mode,
+                hp_blocks=hp_blocks,
                 progress_path=progress_path,
                 progress_base=_progress_base(),
             )
@@ -166,6 +175,24 @@ class ProgressRunChainTests(unittest.TestCase):
             [0, 1],
         )
         self.assertEqual([row["block"] for row in chain["per_block"]], [0, 1])
+
+    def test_progress_distinguishes_p0_and_p1_schedules(self) -> None:
+        cases = (
+            (set(), "expert_int4_channel_alpha", []),
+            ({1, 2, 3}, "expert_int4_channel_alpha_123", [1, 2, 3]),
+        )
+        for hp_blocks, arm_label, expected_hp in cases:
+            with self.subTest(arm_label=arm_label), tempfile.TemporaryDirectory() as td:
+                progress_path = Path(td) / "progress.json"
+                self._run_chain(
+                    progress_path,
+                    blocks=[0, 1, 2, 3],
+                    expert_mode="int4_channel_alpha",
+                    hp_blocks=hp_blocks,
+                )
+                final = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(final["arm_label"], arm_label)
+            self.assertEqual(final["hp_blocks"], expected_hp)
 
     def test_unset_progress_path_is_a_noop(self) -> None:
         _chain, writer = self._run_chain(None)

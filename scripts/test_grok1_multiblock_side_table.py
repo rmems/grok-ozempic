@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -58,9 +59,9 @@ class ChunkedQuantizationTests(unittest.TestCase):
             scale = _chunked_absmax_scale(weights)
             path = Path(td) / "q.npy"
             _write_chunked_q(path, weights, scale)
-            got_q = np.load(path, mmap_mode="r", allow_pickle=False)
-        np.testing.assert_array_equal(got_q, expected_q)
-        np.testing.assert_array_equal(scale, expected_scale)
+            got_q = np.load(path, allow_pickle=False)
+            np.testing.assert_array_equal(got_q, expected_q)
+            np.testing.assert_array_equal(scale, expected_scale)
 
     def test_incremental_fingerprint_matches_legacy_raw_bytes(self) -> None:
         source = np.asfortranarray(
@@ -88,12 +89,16 @@ class ChunkedQuantizationTests(unittest.TestCase):
         np.testing.assert_allclose(got, expected, rtol=1e-6, atol=1e-7)
 
     def test_side_table_does_not_call_full_rank3_quantizer_or_contiguous_copy(self) -> None:
+        numpy_proxy = types.SimpleNamespace(**vars(np))
+        numpy_proxy.ascontiguousarray = mock.Mock(
+            side_effect=AssertionError("full copy called")
+        )
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
             lib, "INT4_CHUNK_BYTES", 64
         ), mock.patch.object(
             lib, "int4_absmax_quantize", side_effect=AssertionError("full quantizer called")
         ), mock.patch.object(
-            lib.np, "ascontiguousarray", side_effect=AssertionError("full copy called")
+            lib, "np", numpy_proxy
         ):
             side = Int4SideExperts(
                 _reference(_arrays()),
@@ -102,6 +107,7 @@ class ChunkedQuantizationTests(unittest.TestCase):
                 scale_mode=INT4_SCALE_ABSMAX,
             )
             self.assertEqual(side.vector("expert_gelu").shape, (3, 11, 7))
+        numpy_proxy.ascontiguousarray.assert_not_called()
 
 
 class AtomicSideTableTests(unittest.TestCase):
@@ -156,8 +162,13 @@ class AtomicSideTableTests(unittest.TestCase):
                 fingerprint = _reference_fingerprint(source)
                 events: list[str] = []
 
-                def record(_self, step: str, _path: Path) -> None:
-                    events.append(step)
+                def record(
+                    _self,
+                    step: str,
+                    _path: Path,
+                    _events: list[str] = events,
+                ) -> None:
+                    _events.append(step)
 
                 failure_patch = (
                     mock.patch.object(lib.os, "open", side_effect=OSError("open failed"))

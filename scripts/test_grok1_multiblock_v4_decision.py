@@ -135,7 +135,7 @@ class V4CompletenessTests(unittest.TestCase):
 
 
 class V4RankingTests(unittest.TestCase):
-    def _decision(self, **kwargs) -> tuple[dict, dict]:
+    def _decision(self, **kwargs: float | dict | None) -> tuple[dict, dict]:
         comparison = _comparison(**kwargs)
         self.assertTrue(comparison["protocol_complete"])
         self.assertEqual(comparison["missing_arms"], [])

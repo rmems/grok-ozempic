@@ -22,6 +22,8 @@ import re
 import resource
 import shlex
 import signal
+import traceback
+from collections.abc import Sequence
 
 # Fixed interpreter/script argv; the call below always disables the shell.
 import subprocess  # nosec B404
@@ -30,7 +32,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 
 EXIT_OK = 0
@@ -71,6 +73,28 @@ class ArtifactError(RuntimeError):
         self.failure_class = failure_class
         self.errors = list(errors)
         self.payload = payload
+
+
+class SupervisorSignal(KeyboardInterrupt):
+    """A terminating operator signal converted into a fail-closed interrupt."""
+
+    def __init__(self, signal_number: int):
+        super().__init__(signal.Signals(signal_number).name)
+        self.signal_number = signal_number
+
+
+@dataclass
+class _RunState:
+    """Minimum live context needed to publish Option 4 on supervisor failure."""
+
+    started_at: str | None = None
+    stage_started_at: str | None = None
+    start_memory: dict[str, Any] | None = None
+    arm: ArmSpec | None = None
+    prelaunch: dict[str, Any] | None = None
+    completed: list[ArmSpec] | None = None
+    payloads: dict[str, dict[str, Any]] | None = None
+    canonical_validated: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,14 +260,8 @@ def _schedule_for_arm(arm: ArmSpec) -> tuple[str, list[int], list[int], list[int
     return "int4_channel_alpha", [], list(BLOCKS), list(BLOCKS)
 
 
-def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
-    if not isinstance(chain, dict):
-        return ["missing chain object"]
+def _locked_scalar_errors(chain: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if chain.get("arm_label") != arm.expected_label:
-        errors.append(
-            f"arm_label={chain.get('arm_label')!r} expected={arm.expected_label!r}"
-        )
     if not _exact_int(chain.get("tokens"), TOKENS):
         errors.append(f"tokens={chain.get('tokens')!r} expected={TOKENS}")
     if not _exact_int(chain.get("token_seed"), SEED):
@@ -254,6 +272,11 @@ def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
         errors.append(f"blocks={chain.get('blocks')!r} expected={list(BLOCKS)!r}")
     if chain.get("skip_fp16_control") is not False:
         errors.append("FP16 control was skipped or not explicitly recorded")
+    return errors
+
+
+def _schedule_errors(chain: dict[str, Any], arm: ArmSpec) -> list[str]:
+    errors: list[str] = []
 
     mode, hp_blocks, int4_blocks, channel_blocks = _schedule_for_arm(arm)
     for field, expected in (
@@ -265,7 +288,11 @@ def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
             errors.append(f"{field}={chain.get(field)!r} expected={expected!r}")
     if chain.get("expert_mode") != mode:
         errors.append(f"expert_mode={chain.get('expert_mode')!r} expected={mode!r}")
+    return errors
 
+
+def _per_block_protocol_errors(chain: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
     rows = chain.get("per_block")
     if not isinstance(rows, list) or len(rows) != len(BLOCKS):
         errors.append("per_block must contain exactly the four locked blocks")
@@ -287,6 +314,20 @@ def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
             errors.append(f"per_block[{index}] FP16 control cosine is not clean")
     if not _exact_int_list(observed, BLOCKS):
         errors.append(f"per_block order={observed!r} expected={list(BLOCKS)!r}")
+    return errors
+
+
+def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
+    if not isinstance(chain, dict):
+        return ["missing chain object"]
+    errors: list[str] = []
+    if chain.get("arm_label") != arm.expected_label:
+        errors.append(
+            f"arm_label={chain.get('arm_label')!r} expected={arm.expected_label!r}"
+        )
+    errors.extend(_locked_scalar_errors(chain))
+    errors.extend(_schedule_errors(chain, arm))
+    errors.extend(_per_block_protocol_errors(chain))
     return errors
 
 
@@ -818,10 +859,10 @@ def _child_command(args: argparse.Namespace, arm: ArmSpec) -> list[str]:
     command = _common_child_args(args, child_out, _arm_progress(args.out, arm))
     command.extend(arm.cli_tail)
     if arm.stage == "p0":
-        for evidence in (
-            args.out / "int4-baseline" / "metrics.json",
-            args.out / "int4-channel-alpha-123" / "metrics.json",
-        ):
+        for prior in ARMS:
+            if prior.stage == "p0":
+                continue
+            evidence = _arm_output(args.out, prior) / "metrics.json"
             command.extend(("--comparison-metrics", str(evidence)))
     return command
 
@@ -883,6 +924,10 @@ def _failure_text(failure_class: str, arm: ArmSpec, returncode: int | None) -> s
         return f"{arm.expected_label} exited nonzero with return code {returncode}."
     if failure_class == "launch_error":
         return f"{arm.expected_label} could not be launched."
+    if failure_class == "interrupted":
+        return f"The supervisor was interrupted while supervising {arm.expected_label}."
+    if failure_class == "supervisor_error":
+        return f"The supervisor failed while supervising {arm.expected_label}."
     if failure_class == "provenance_mismatch":
         return f"{arm.expected_label} does not match prior-arm provenance/identity."
     if failure_class == "protocol_mismatch":
@@ -1185,7 +1230,7 @@ def _fail(
     return EXIT_SUPERVISOR_FAILCLOSED
 
 
-def run(args: argparse.Namespace) -> int:
+def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     if args.timeout_seconds <= 0:
         raise ValueError("--timeout-seconds must be > 0")
     args.out = args.out.expanduser()
@@ -1208,6 +1253,10 @@ def run(args: argparse.Namespace) -> int:
     completed: list[ArmSpec] = []
     payloads: dict[str, dict[str, Any]] = {}
     reference_identity: dict[str, Any] | None = None
+    state.started_at = started_at
+    state.start_memory = start_memory
+    state.completed = completed
+    state.payloads = payloads
 
     for index, arm in enumerate(ARMS, start=1):
         child_out = _arm_output(args.out, arm)
@@ -1227,6 +1276,9 @@ def run(args: argparse.Namespace) -> int:
             completed=[item.expected_label for item in completed],
             start_memory=start_memory,
         )
+        state.arm = arm
+        state.prelaunch = prelaunch
+        state.stage_started_at = stage_started_at
         _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
         _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
 
@@ -1369,6 +1421,7 @@ def run(args: argparse.Namespace) -> int:
 
         payloads[arm.stage] = payload
         completed.append(arm)
+        state.canonical_validated = len(completed) == len(ARMS)
         _atomic_write_json(
             args.out / "supervisor-progress.json",
             _completed_supervisor_progress(
@@ -1409,6 +1462,119 @@ def run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _publish_supervisor_exception(
+    args: argparse.Namespace,
+    state: _RunState,
+    exc: BaseException,
+) -> int:
+    """Convert an in-flight supervisor exception into canonical Option 4."""
+    if (
+        state.arm is None
+        or state.prelaunch is None
+        or state.started_at is None
+        or state.stage_started_at is None
+        or state.start_memory is None
+    ):
+        raise exc
+    interrupted = isinstance(exc, KeyboardInterrupt)
+    signal_number = (
+        exc.signal_number
+        if isinstance(exc, SupervisorSignal)
+        else int(signal.SIGINT) if interrupted else None
+    )
+    returncode = -signal_number if signal_number is not None else None
+    detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
+    completed = [
+        item
+        for item in (state.completed or [])
+        if item.stage != state.arm.stage
+    ]
+    payloads = {
+        stage: payload
+        for stage, payload in (state.payloads or {}).items()
+        if stage != state.arm.stage
+    }
+    return _fail(
+        args,
+        arm=state.arm,
+        failure_class="interrupted" if interrupted else "supervisor_error",
+        errors=[detail],
+        returncode=returncode,
+        prelaunch=state.prelaunch,
+        completed=completed,
+        payloads=payloads,
+        started_at=state.started_at,
+        stage_started_at=state.stage_started_at,
+        start_memory=state.start_memory,
+    )
+
+
+def _record_post_validation_exception(
+    args: argparse.Namespace,
+    state: _RunState,
+    exc: BaseException,
+) -> int:
+    """Preserve validated P0 evidence when only supervisor bookkeeping fails."""
+    interrupted = isinstance(exc, KeyboardInterrupt)
+    signal_number = (
+        exc.signal_number
+        if isinstance(exc, SupervisorSignal)
+        else int(signal.SIGINT) if interrupted else None
+    )
+    detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
+    payload = {
+        "status": "bookkeeping_failed",
+        "canonical_protocol_validated": True,
+        "canonical_artifacts_preserved": ["metrics.json", "results.md"],
+        "failure_class": "interrupted" if interrupted else "supervisor_error",
+        "error": detail,
+        "signal": (
+            signal.Signals(signal_number).name
+            if signal_number is not None
+            else None
+        ),
+        "signal_number": signal_number,
+        "started_at": state.started_at,
+        "failed_at": _utc_now(),
+    }
+    _best_effort_write_json(args.out / "supervisor-bookkeeping-error.json", payload)
+    _best_effort_write_json(
+        args.out / "host-at-end.json",
+        {
+            "status": "bookkeeping_failed",
+            "canonical_protocol_validated": True,
+            "error": detail,
+            "memory": _proc_meminfo(),
+        },
+    )
+    print(
+        "FAIL-CLOSED supervisor bookkeeping after canonical P0 validation; "
+        "preserved metrics.json/results.md",
+        file=sys.stderr,
+    )
+    return EXIT_SUPERVISOR_FAILCLOSED
+
+
+def run(args: argparse.Namespace) -> int:
+    state = _RunState()
+    try:
+        return _run_supervised(args, state)
+    except KeyboardInterrupt as exc:
+        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if state.canonical_validated:
+            return _record_post_validation_exception(args, state, exc)
+        return _publish_supervisor_exception(args, state, exc)
+    except Exception as exc:
+        traceback.print_exc()
+        if state.canonical_validated:
+            return _record_post_validation_exception(args, state, exc)
+        return _publish_supervisor_exception(args, state, exc)
+
+
+def _raise_supervisor_signal(signal_number: int, _frame: object) -> None:
+    raise SupervisorSignal(signal_number)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--npy-root", type=Path, required=True)
@@ -1436,11 +1602,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    previous_sigterm = signal.signal(signal.SIGTERM, _raise_supervisor_signal)
     try:
         return run(args)
     except (OSError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_SUPERVISOR_FAILCLOSED
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":

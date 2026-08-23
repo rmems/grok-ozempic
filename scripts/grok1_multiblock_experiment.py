@@ -145,6 +145,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
     except BaseException:
         try:
             tmp_path.unlink(missing_ok=True)
@@ -496,6 +497,19 @@ def run_chain(
         hp_label=_schedule_label(resolved_hp, hp_period, explicit_hp),
         int4_side_root=int4_side_root,
     )
+    progress_meta = _arm_meta(
+        blocks,
+        expert_mode,
+        hp_period,
+        resolved_hp,
+        [],
+        explicit_hp=explicit_hp,
+    )
+    progress_base = {
+        **(progress_base or {}),
+        "arm_label": progress_meta["arm_label"],
+        "hp_blocks": progress_meta["hp_blocks"],
+    }
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)
     h0 = embedding_rows(paths.embedding_shard, ids)
@@ -506,7 +520,7 @@ def run_chain(
         _write_progress(
             progress_path,
             {
-                **(progress_base or {}),
+                **progress_base,
                 "pack_provenance": list(pack_provenance),
             },
             current_block=b,
@@ -519,7 +533,7 @@ def run_chain(
         _write_progress(
             progress_path,
             {
-                **(progress_base or {}),
+                **progress_base,
                 "pack_provenance": list(pack_provenance),
             },
             current_block=b,
