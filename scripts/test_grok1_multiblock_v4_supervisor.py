@@ -563,6 +563,191 @@ class SupervisorTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "changed while hashing"):
                     supervisor._embedding_fingerprint(args.embedding_shard)
 
+    def test_embedding_hash_interruption_uses_current_portable_prelaunch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            stale_progress = supervisor._arm_progress(args.out, supervisor.ARMS[0])
+            stale_progress.parent.mkdir(parents=True, exist_ok=True)
+            stale_progress.write_text(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "current_block": 3,
+                        "completed_blocks": [0, 1, 2, 3],
+                        "input_identity": {"npy_root": "/stale/private/npy"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(
+                supervisor,
+                "_embedding_fingerprint",
+                side_effect=MemoryError("synthetic hash interruption"),
+            ):
+                result, run = self._run(args, lambda *_args, **_kwargs: None)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 0)
+            failure = self._failure(args)
+            self.assertIsNone(failure["current_block"])
+            self.assertEqual(failure["completed_blocks"], [])
+            progress = failure["progress"]["child"]
+            self.assertEqual(progress["supervisor_started_at"], failure["started_at"])
+            self.assertEqual(progress["input_identity"]["npy_root"], "<NPY_ROOT>")
+            self.assertEqual(
+                progress["input_identity"]["embedding_shard"], "embedding.npy"
+            )
+            serialized = json.dumps(failure)
+            self.assertNotIn("/stale/private", serialized)
+            self.assertNotIn(str(args.npy_root), serialized)
+            self.assertNotIn(str(args.pack_root), serialized)
+            self.assertNotIn(str(args.int4_side_root), serialized)
+
+    def test_missing_embedding_failure_redacts_every_known_host_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            args = self._args(root)
+            args.embedding_shard.unlink()
+
+            result, run = self._run(args, lambda *_args, **_kwargs: None)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 0)
+            failure = self._failure(args)
+            serialized = json.dumps(failure)
+            self.assertIn("<EMBEDDING_SHARD>", serialized)
+            self.assertNotIn(str(root), serialized)
+            self.assertNotIn("/home/", serialized)
+            self.assertNotIn("/tmp/", serialized)
+
+    def test_staging_cleanup_failure_uses_current_prelaunch_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            stale_progress = supervisor._arm_progress(args.out, supervisor.ARMS[0])
+            stale_progress.parent.mkdir(parents=True, exist_ok=True)
+            stale_progress.write_text(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "current_block": 3,
+                        "completed_blocks": [0, 1, 2, 3],
+                        "input_identity": {"npy_root": "/stale/private/npy"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            staging = args.out / supervisor._P0_STAGING_NAME
+
+            with mock.patch.object(
+                supervisor,
+                "_prepare_p0_staging",
+                side_effect=OSError(f"could not prepare {staging}"),
+            ):
+                result, run = self._run(args, lambda *_args, **_kwargs: None)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 0)
+            failure = self._failure(args)
+            self.assertIsNone(failure["current_block"])
+            self.assertEqual(failure["completed_blocks"], [])
+            self.assertEqual(
+                failure["progress"]["child"]["supervisor_started_at"],
+                failure["started_at"],
+            )
+            serialized = json.dumps(failure)
+            self.assertIn("<OUTPUT_ROOT>/.p0-staging", serialized)
+            self.assertNotIn("/stale/private", serialized)
+            self.assertNotIn(str(args.out), serialized)
+
+    def test_second_staging_cleanup_failure_uses_current_p0_prelaunch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            stale_progress = supervisor._arm_progress(args.out, supervisor.ARMS[2])
+            stale_progress.parent.mkdir(parents=True, exist_ok=True)
+            stale_progress.write_text(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "current_block": 3,
+                        "completed_blocks": [0, 1, 2, 3],
+                        "input_identity": {"npy_root": "/stale/private/npy"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            staging = args.out / supervisor._P0_STAGING_NAME
+
+            def child(command, **_kwargs):
+                command = list(command)
+                _write_success(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with mock.patch.object(
+                supervisor,
+                "_prepare_p0_staging",
+                side_effect=[None, OSError(f"could not prepare {staging}")],
+            ):
+                result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 2)
+            failure = self._failure(args)
+            self.assertEqual(failure["completed_arms"], [
+                supervisor.ARMS[0].expected_label,
+                supervisor.ARMS[1].expected_label,
+            ])
+            self.assertEqual(failure["failed_arm"], supervisor.ARMS[2].expected_label)
+            self.assertIsNone(failure["current_block"])
+            self.assertEqual(failure["completed_blocks"], [])
+            progress = failure["progress"]["child"]
+            self.assertEqual(progress["stage"], "p0")
+            self.assertEqual(
+                progress["input_identity"]["npy_root"], "<NPY_ROOT>"
+            )
+            serialized = json.dumps(failure)
+            self.assertIn("<OUTPUT_ROOT>/.p0-staging", serialized)
+            self.assertNotIn("/stale/private", serialized)
+            self.assertNotIn(str(args.out), serialized)
+
+    def test_failure_payload_recursively_redacts_recovered_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **_kwargs):
+                progress_path = Path(_value(list(command), "--progress-json"))
+                supervisor._atomic_write_json(
+                    progress_path,
+                    {
+                        "status": "running",
+                        "nested": {
+                            str(args.npy_root): [
+                                str(args.pack_root),
+                                {"embedding": str(args.embedding_shard)},
+                            ]
+                        },
+                    },
+                )
+                return subprocess.CompletedProcess(command, 1, "", "")
+
+            result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            failure = self._failure(args)
+            recovered = failure["progress"]["child"]["nested"]
+            self.assertEqual(
+                recovered,
+                {
+                    "<NPY_ROOT>": [
+                        "<PACK_ROOT>",
+                        {"embedding": "<EMBEDDING_SHARD>"},
+                    ]
+                },
+            )
+            serialized = json.dumps(failure)
+            self.assertNotIn(str(Path(td)), serialized)
+
     def test_embedding_digest_is_hashed_once_passed_and_echoed_by_all_arms(
         self,
     ) -> None:

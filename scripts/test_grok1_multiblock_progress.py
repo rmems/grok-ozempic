@@ -43,7 +43,7 @@ def _progress_base() -> dict:
             "top_k": 2,
         },
         "implementation": {"commit": "abc123", "dirty": False},
-        "input_identity": {"embedding_shard": "/weights/embedding.npy"},
+        "input_identity": {"embedding_shard": "embedding.npy"},
         "provenance_identity": {"issue": "GH #85 / Linear RM-608"},
     }
 
@@ -106,14 +106,22 @@ class ProgressParserTests(unittest.TestCase):
             },
         )
         self.assertEqual(record["implementation"], provenance["implementation"])
+        self.assertEqual(record["input_identity"]["npy_root"], "<NPY_ROOT>")
         self.assertEqual(record["input_identity"]["pack_pattern"], "pack-{block}.goz1")
+        self.assertEqual(record["input_identity"]["pack_root"], "<PACK_ROOT>")
         self.assertEqual(
-            record["input_identity"]["int4_side_root"], str(resolved_side_root)
+            record["input_identity"]["int4_side_root"], "<INT4_SIDE_ROOT>"
+        )
+        self.assertEqual(
+            record["input_identity"]["embedding_shard"], "embedding.npy"
         )
         self.assertEqual(
             record["input_identity"]["embedding_sha256"], "d" * 64
         )
         self.assertEqual(record["provenance_identity"]["issue"], provenance["issue"])
+        serialized = json.dumps(record)
+        self.assertNotIn("/weights/", serialized)
+        self.assertNotIn("/resolved/", serialized)
 
 
 class ProgressRunChainTests(unittest.TestCase):

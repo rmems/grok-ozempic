@@ -1012,14 +1012,14 @@ def _progress_record_base(
         },
         "implementation": provenance.get("implementation"),
         "input_identity": {
-            "npy_root": str(paths.npy_root),
+            "npy_root": "<NPY_ROOT>",
             "npy_pattern": paths.npy_pattern,
-            "pack_root": str(paths.pack_root),
+            "pack_root": "<PACK_ROOT>",
             "pack_pattern": paths.pack_pattern,
-            "embedding_shard": str(paths.embedding_shard),
+            "embedding_shard": Path(paths.embedding_shard).name,
             "embedding_sha256": provenance.get("embedding_sha256"),
             "int4_side_root": (
-                str(int4_side_root) if int4_side_root is not None else None
+                "<INT4_SIDE_ROOT>" if int4_side_root is not None else None
             ),
         },
         "provenance_identity": {

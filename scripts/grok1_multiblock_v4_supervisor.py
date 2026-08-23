@@ -329,7 +329,8 @@ def _best_effort_clear_p0_staging(out: Path) -> None:
             _durably_unlink(out / name)
         except OSError as exc:
             print(
-                f"warning: could not clear promoted P0 staging artifact {name}: {exc}",
+                "warning: could not clear promoted P0 staging artifact "
+                f"{name}: {type(exc).__name__}",
                 file=sys.stderr,
             )
 
@@ -1172,6 +1173,39 @@ _CHILD_LOG_PATH_PLACEHOLDERS = {
 }
 
 
+def _portable_failure_detail(args: argparse.Namespace, detail: object) -> str:
+    """Redact known host paths before an error enters committed evidence."""
+    replacements = {
+        str(args.npy_root): "<NPY_ROOT>",
+        str(args.pack_root): "<PACK_ROOT>",
+        str(args.embedding_shard): "<EMBEDDING_SHARD>",
+        str(args.int4_side_root): "<INT4_SIDE_ROOT>",
+        str(args.out): "<OUTPUT_ROOT>",
+        str(REPO_ROOT): "<REPO_ROOT>",
+    }
+    portable = str(detail)
+    for raw, placeholder in sorted(
+        replacements.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        if raw:
+            portable = portable.replace(raw, placeholder)
+    return portable
+
+
+def _portable_failure_value(args: argparse.Namespace, value: Any) -> Any:
+    """Recursively redact known host paths in recovered failure evidence."""
+    if isinstance(value, str):
+        return _portable_failure_detail(args, value)
+    if isinstance(value, list):
+        return [_portable_failure_value(args, item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _portable_failure_detail(args, key): _portable_failure_value(args, item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _portable_child_command(command: Sequence[str]) -> list[str]:
     """Return a reviewable command without host-specific absolute paths."""
     portable = list(command)
@@ -1306,18 +1340,18 @@ def _prelaunch_progress(
         "stage_started_at": stage_started_at,
         "host_memory_at_start": start_memory,
         "input_identity": {
-            "npy_root": str(args.npy_root),
+            "npy_root": "<NPY_ROOT>",
             "npy_pattern": args.npy_pattern,
-            "pack_root": str(args.pack_root),
+            "pack_root": "<PACK_ROOT>",
             "pack_pattern": args.pack_pattern,
-            "embedding_shard": str(args.embedding_shard),
+            "embedding_shard": Path(args.embedding_shard).name,
             "embedding_sha256": (
                 embedding_fingerprint.get("sha256")
                 if embedding_fingerprint is not None
                 else None
             ),
             "embedding_fingerprint": embedding_fingerprint,
-            "int4_side_root": str(args.int4_side_root),
+            "int4_side_root": "<INT4_SIDE_ROOT>",
         },
     }
 
@@ -1623,11 +1657,15 @@ def _fail(
     start_memory: dict[str, Any],
 ) -> int:
     progress, progress_error = _read_progress(_arm_progress(args.out, arm), prelaunch)
+    progress = _portable_failure_value(args, progress)
+    portable_errors = [_portable_failure_detail(args, error) for error in errors]
+    if progress_error is not None:
+        progress_error = _portable_failure_detail(args, progress_error)
     failed_at = _utc_now()
     payload = _failure_payload(
         arm=arm,
         failure_class=failure_class,
-        detail_errors=errors,
+        detail_errors=portable_errors,
         returncode=returncode,
         progress=progress,
         progress_error=progress_error,
@@ -1723,11 +1761,12 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     state.arm = ARMS[0]
     state.prelaunch = fingerprint_prelaunch
     state.stage_started_at = fingerprint_started_at
+    _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
+    _atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
     _prepare_p0_staging(_arm_output(args.out, _ARM_BY_STAGE["p0"]))
     try:
         embedding_fingerprint = _embedding_fingerprint(args.embedding_shard)
     except OSError as exc:
-        _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
         return _fail(
             args,
             arm=ARMS[0],
@@ -1766,6 +1805,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         state.arm = arm
         state.prelaunch = prelaunch
         state.stage_started_at = stage_started_at
+        _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
+        _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
         if arm.stage == "p0":
             _prepare_p0_staging(child_out)
         metrics_path = child_out / "metrics.json"
@@ -1775,8 +1816,6 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             if not arm.evidence_only
             else None
         )
-        _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
-        _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
 
         embedding_errors = _embedding_identity_errors(
             args.embedding_shard, embedding_fingerprint
