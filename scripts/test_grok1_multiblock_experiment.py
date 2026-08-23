@@ -1591,6 +1591,7 @@ class RemedyV4DecisionTests(unittest.TestCase):
             hp_blocks=None,
             comparison_metrics=[],
             skip_fp16_control=False,
+            embedding_sha256="a" * 64,
         )
         _validate_v2_cli(args)
 

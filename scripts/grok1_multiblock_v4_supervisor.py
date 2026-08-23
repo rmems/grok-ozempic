@@ -15,6 +15,7 @@ there is no 2048-token retry or fallback.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -60,6 +61,9 @@ REPO_ROOT = SCRIPT_DIR.parent
 EXPERIMENT_SCRIPT = SCRIPT_DIR / "grok1_multiblock_experiment.py"
 DEFAULT_TIMEOUT_SECONDS = 7 * 24 * 60 * 60
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_EMBEDDING_HASH_CHUNK = 64 * 1024 * 1024
+_IMPROVEMENT_EPS = 1e-3
 _REPORT_OPTION_RE = re.compile(
     r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
 )
@@ -202,7 +206,10 @@ def _best_effort_write_json(path: Path, payload: object) -> None:
     try:
         _atomic_write_json(path, payload)
     except OSError as exc:
-        print(f"warning: could not write supplemental diagnostic {path}: {exc}", file=sys.stderr)
+        print(
+            f"warning: could not write supplemental diagnostic {path}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _exact_int(value: object, expected: int) -> bool:
@@ -217,6 +224,63 @@ def _exact_int_list(value: object, expected: Sequence[int]) -> bool:
 
 def _sha256(value: object) -> bool:
     return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+
+
+def _stat_identity(stat_result: os.stat_result) -> dict[str, int]:
+    """Stable metadata used to pin both a path object and its target."""
+    return {
+        "device": int(stat_result.st_dev),
+        "inode": int(stat_result.st_ino),
+        "size_bytes": int(stat_result.st_size),
+        "mtime_ns": int(stat_result.st_mtime_ns),
+        "ctime_ns": int(stat_result.st_ctime_ns),
+    }
+
+
+def _embedding_path_identity(path: Path) -> dict[str, dict[str, int]]:
+    """Return cheap identities for the link/path object and followed target."""
+    return {
+        "path": _stat_identity(path.lstat()),
+        "target": _stat_identity(path.stat()),
+    }
+
+
+def _embedding_fingerprint(path: Path) -> dict[str, Any]:
+    """Hash one stable embedding target and capture replacement-sensitive metadata."""
+    link_before = _stat_identity(path.lstat())
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        target_before = _stat_identity(os.fstat(handle.fileno()))
+        for block in iter(lambda: handle.read(_EMBEDDING_HASH_CHUNK), b""):
+            digest.update(block)
+        target_after = _stat_identity(os.fstat(handle.fileno()))
+    identity_after = _embedding_path_identity(path)
+    if target_after != target_before:
+        raise OSError(f"embedding target changed while hashing: {path}")
+    if identity_after["path"] != link_before:
+        raise OSError(f"embedding path changed while hashing: {path}")
+    if identity_after["target"] != target_before:
+        raise OSError(f"embedding path target changed while hashing: {path}")
+    return {
+        "sha256": digest.hexdigest(),
+        **identity_after,
+    }
+
+
+def _embedding_identity_errors(path: Path, fingerprint: dict[str, Any]) -> list[str]:
+    """Detect replacement or mutation without re-reading the multi-GiB shard."""
+    try:
+        current = _embedding_path_identity(path)
+    except OSError as exc:
+        return [f"embedding input identity is unavailable: {exc}"]
+    expected = {key: fingerprint.get(key) for key in ("path", "target")}
+    if current != expected:
+        return [
+            "embedding input identity changed after its pinned SHA-256 was computed: "
+            f"expected={json.dumps(expected, sort_keys=True)} "
+            f"observed={json.dumps(current, sort_keys=True)}"
+        ]
+    return []
 
 
 def _artifact_signature(path: Path) -> tuple[int, int, int, int] | None:
@@ -349,7 +413,9 @@ def _expert_metric_errors(expert: dict[str, Any], index: int) -> list[str]:
     errors: list[str] = []
     residual = expert.get("residual_stream_in")
     if not isinstance(residual, dict):
-        errors.append(f"per_block[{index}] missing expert_only.residual_stream_in metrics")
+        errors.append(
+            f"per_block[{index}] missing expert_only.residual_stream_in metrics"
+        )
         residual = {}
     top2 = expert.get(
         "router_topk_set_agreement",
@@ -390,9 +456,16 @@ def _chain_exit_errors(chain: dict[str, Any]) -> list[str]:
                 break
     if not isinstance(exit_metrics, dict):
         return ["end_of_chain is missing expert-only chain-exit metrics"]
-    exit_drift = exit_metrics.get(
-        "residual_drift_relative_norm",
-        exit_metrics.get("residual_in_drift_relative_norm"),
+    exit_drift = next(
+        (
+            exit_metrics[field]
+            for field in (
+                "residual_drift_relative_norm",
+                "residual_in_drift_relative_norm",
+            )
+            if exit_metrics.get(field) is not None
+        ),
+        None,
     )
     if not _metric_in_domain(exit_drift, 0.0):
         return ["expert-only chain-exit drift is missing or out of domain"]
@@ -417,20 +490,36 @@ def _evidence_errors(chain: object) -> list[str]:
     return errors
 
 
-def _provenance_errors(payload: dict[str, Any], arm: ArmSpec) -> list[str]:
+def _provenance_errors(
+    payload: dict[str, Any],
+    arm: ArmSpec,
+    *,
+    expected_embedding_sha256: str,
+) -> list[str]:
     errors: list[str] = []
     provenance = payload.get("provenance")
     if not isinstance(provenance, dict):
         return ["missing provenance object"]
     implementation = provenance.get("implementation")
-    if not isinstance(implementation, dict) or not implementation:
+    if not isinstance(implementation, dict):
         errors.append("missing implementation provenance")
+    else:
+        commit = implementation.get("commit")
+        if not isinstance(commit, str) or _GIT_OID_RE.fullmatch(commit) is None:
+            errors.append("implementation provenance has no valid full commit hash")
+        if implementation.get("dirty") is not False:
+            errors.append("implementation provenance is dirty or unavailable")
     if not isinstance(provenance.get("model"), str) or not provenance.get("model"):
         errors.append("missing model provenance")
     if not isinstance(provenance.get("embedding_shard"), str) or not provenance.get(
         "embedding_shard"
     ):
         errors.append("missing embedding input identity")
+    embedding_sha256 = provenance.get("embedding_sha256")
+    if not _sha256(embedding_sha256):
+        errors.append("missing or invalid embedding SHA-256 provenance")
+    elif embedding_sha256 != expected_embedding_sha256:
+        errors.append("embedding SHA-256 differs from the supervisor-pinned input")
     if provenance.get("skip_fp16_control") is not False:
         errors.append("provenance does not confirm FP16 control")
     expected_cli_arm = "int4" if arm.stage == "baseline" else "int4_channel_alpha"
@@ -503,7 +592,181 @@ def _normalized_arm_list(value: object) -> list[str] | None:
     return normalized
 
 
-def _primary_decision_errors(payload: dict[str, Any]) -> tuple[list[str], int | None]:
+def _chain_exit_drift(chain: dict[str, Any]) -> float:
+    end = chain["end_of_chain"]
+    exit_metrics = end.get("expert_only_chain_exit")
+    if not isinstance(exit_metrics, dict):
+        exit_metrics = end["expert_only_end_residual_in"]
+    for field in (
+        "residual_drift_relative_norm",
+        "residual_in_drift_relative_norm",
+    ):
+        raw = exit_metrics.get(field)
+        if raw is not None:
+            return float(raw)
+    raise ValueError("chain exit has no finite drift metric")
+
+
+def _compounding_label(residual_in: list[float], exit_drift: float) -> str:
+    """Stdlib mirror of the child library's locked residual-growth label."""
+    series = [*residual_in, exit_drift]
+    later = series[1:]
+    if len(later) < 2:
+        return "unknown"
+    ratios = [
+        later[index + 1] / later[index]
+        if later[index] > 1e-12
+        else float("inf")
+        for index in range(len(later) - 1)
+    ]
+    finite = [ratio for ratio in ratios if math.isfinite(ratio)]
+    if (
+        finite
+        and all(ratio < 1.15 for ratio in finite)
+        and later[-1] < later[0] * 1.5 + 1e-6
+    ):
+        return "sublinear_or_saturating"
+    if any(ratio > 1.8 for ratio in finite) or later[-1] > later[0] * 3:
+        return "superlinear_or_runaway"
+    return "roughly_linear"
+
+
+def _ranking_summary(chain: dict[str, Any]) -> dict[str, Any]:
+    """Recompute only the raw fields that drive v4 ranking and viability."""
+    cos: list[float] = []
+    residual_in: list[float] = []
+    top1: list[float] = []
+    top2: list[float] = []
+    expert_load_js_bits: list[float] = []
+    for row in chain["per_block"]:
+        expert = row["expert_only"]
+        cos.append(float(expert["block_output_cosine"]))
+        residual_in.append(
+            float(
+                expert["residual_stream_in"][
+                    "residual_in_drift_relative_norm"
+                ]
+            )
+        )
+        top1.append(float(expert["router_top1_agreement"]))
+        top2.append(
+            float(
+                expert.get(
+                    "router_topk_set_agreement",
+                    expert.get("router_top2_set_agreement"),
+                )
+            )
+        )
+        expert_load_js_bits.append(float(expert["expert_load_js_bits"]))
+    exit_drift = _chain_exit_drift(chain)
+    return {
+        "arm_label": chain["arm_label"],
+        "block_output_cosine": cos,
+        "residual_in_drift": residual_in,
+        "router_top1": top1,
+        "router_top2": top2,
+        "expert_load_js_bits": expert_load_js_bits,
+        "chain_exit_residual_drift": exit_drift,
+        "compounding": _compounding_label(residual_in, exit_drift),
+        "viable": (
+            cos[-1] >= 0.93
+            and min(top1) >= 0.95
+            and min(top2) >= 0.90
+            and exit_drift < 0.25
+            and min(cos) >= 0.90
+        ),
+    }
+
+
+def _candidate_rank(summary: dict[str, Any]) -> tuple[bool, float, float, float]:
+    return (
+        bool(summary["viable"]),
+        float(summary["router_top1"][-1]),
+        float(summary["block_output_cosine"][-1]),
+        -float(summary["chain_exit_residual_drift"]),
+    )
+
+
+def _baseline_delta(
+    candidate: dict[str, Any], baseline: dict[str, Any]
+) -> dict[str, float]:
+    return {
+        "b3_top1_gain": float(candidate["router_top1"][-1])
+        - float(baseline["router_top1"][-1]),
+        "b3_cos_gain": float(candidate["block_output_cosine"][-1])
+        - float(baseline["block_output_cosine"][-1]),
+        "chain_exit_drift_reduction": float(baseline["chain_exit_residual_drift"])
+        - float(candidate["chain_exit_residual_drift"]),
+    }
+
+
+def _expected_ranking(
+    summaries: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    p0 = _ARM_BY_STAGE["p0"].expected_label
+    baseline = summaries[_ARM_BY_STAGE["baseline"].expected_label]
+    ordered = sorted(
+        _CANDIDATE_LABELS,
+        key=lambda label: (_candidate_rank(summaries[label]), label == p0),
+        reverse=True,
+    )
+    winner = ordered[0]
+    exact_tie = _candidate_rank(summaries[_CANDIDATE_LABELS[0]]) == _candidate_rank(
+        summaries[_CANDIDATE_LABELS[1]]
+    )
+    tie_break = (
+        f"exact metric-rank tie; preferred P0 {p0} as the lower-complexity remedy"
+        if exact_tie
+        else "not needed; winner has the highest viability/top-1/cosine/exit-drift rank"
+    )
+    return {
+        "ordered_candidates": ordered,
+        "baseline_comparator": _ARM_BY_STAGE["baseline"].expected_label,
+        "baseline_deltas": {
+            label: _baseline_delta(summaries[label], baseline) for label in ordered
+        },
+        "winner": winner,
+        "tie_break_reason": tie_break,
+    }
+
+
+def _expected_decision_option(
+    summaries: dict[str, dict[str, Any]], ranking: dict[str, Any]
+) -> int:
+    winner = ranking["winner"]
+    if summaries[winner]["viable"]:
+        return 1
+    deltas = ranking["baseline_deltas"][winner]
+    improved = any(
+        float(deltas[field]) > _IMPROVEMENT_EPS
+        for field in (
+            "b3_top1_gain",
+            "b3_cos_gain",
+            "chain_exit_drift_reduction",
+        )
+    )
+    return 2 if improved else 3
+
+
+def _independent_contract(
+    prior_payloads: dict[str, dict[str, Any]], primary: dict[str, Any]
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any], int]:
+    if set(prior_payloads) != {"baseline", "p1"}:
+        raise ValueError(
+            "primary validation requires separately validated baseline and P1"
+        )
+    by_stage = {**prior_payloads, "p0": primary}
+    summaries = {
+        _ARM_BY_STAGE[stage].expected_label: _ranking_summary(payload["chain"])
+        for stage, payload in by_stage.items()
+    }
+    ranking = _expected_ranking(summaries)
+    return summaries, ranking, _expected_decision_option(summaries, ranking)
+
+
+def _primary_decision_errors(
+    payload: dict[str, Any], expected_option: int
+) -> tuple[list[str], int | None]:
     errors: list[str] = []
     decision = payload.get("decision")
     raw_option = decision.get("decision") if isinstance(decision, dict) else None
@@ -516,6 +779,11 @@ def _primary_decision_errors(payload: dict[str, Any]) -> tuple[list[str], int | 
         decision_option = None
     else:
         decision_option = raw_option
+        if decision_option != expected_option:
+            errors.append(
+                f"primary decision option={decision_option} does not match "
+                f"independently derived option={expected_option}"
+            )
         winner = decision.get("best_remedy_arm")
         if winner not in _CANDIDATE_LABELS:
             errors.append(
@@ -551,7 +819,42 @@ def _comparison_completeness_errors(comparison: object) -> list[str]:
     return errors
 
 
-def _ranking_errors(payload: dict[str, Any]) -> list[str]:
+def _summary_errors(
+    comparison: dict[str, Any], expected: dict[str, dict[str, Any]]
+) -> list[str]:
+    claimed = comparison.get("summaries")
+    if not isinstance(claimed, dict) or set(claimed) != set(expected):
+        return ["comparison summaries do not cover exactly the three measured arms"]
+    errors: list[str] = []
+    fields = (
+        "arm_label",
+        "block_output_cosine",
+        "residual_in_drift",
+        "router_top1",
+        "router_top2",
+        "expert_load_js_bits",
+        "chain_exit_residual_drift",
+        "compounding",
+        "viable",
+    )
+    for label, summary in expected.items():
+        observed = claimed.get(label)
+        if not isinstance(observed, dict):
+            errors.append(f"comparison summary for {label} is not an object")
+            continue
+        for field in fields:
+            if observed.get(field) != summary[field]:
+                errors.append(
+                    f"comparison summary {label}.{field} differs from raw chain"
+                )
+    return errors
+
+
+def _ranking_errors(
+    payload: dict[str, Any],
+    expected_summaries: dict[str, dict[str, Any]],
+    expected_ranking: dict[str, Any],
+) -> list[str]:
     comparison = payload.get("comparison")
     decision = payload.get("decision")
     if not isinstance(comparison, dict) or not isinstance(decision, dict):
@@ -559,37 +862,33 @@ def _ranking_errors(payload: dict[str, Any]) -> list[str]:
     ranking = comparison.get("ranking")
     if not isinstance(ranking, dict):
         return ["complete comparison is missing the canonical ranking contract"]
-    errors: list[str] = []
-    ordered = _normalized_arm_list(ranking.get("ordered_candidates"))
-    if (
-        ordered is None
-        or set(ordered) != set(_CANDIDATE_LABELS)
-        or len(ordered) != len(_CANDIDATE_LABELS)
+    errors = _summary_errors(comparison, expected_summaries)
+    for field in (
+        "ordered_candidates",
+        "baseline_comparator",
+        "baseline_deltas",
+        "winner",
+        "tie_break_reason",
     ):
-        errors.append("ranking must contain exactly P0 and P1, never the INT4 baseline")
-    winner = ranking.get("winner")
-    if winner not in _CANDIDATE_LABELS:
-        errors.append("ranking winner is not P0 or P1")
-    if ranking.get("baseline_comparator") != _ARM_BY_STAGE["baseline"].expected_label:
-        errors.append(
-            "ranking baseline comparator is not the re-measured plain INT4 arm"
-        )
-    deltas = ranking.get("baseline_deltas")
-    if not isinstance(deltas, dict) or set(deltas) != set(_CANDIDATE_LABELS):
-        errors.append("ranking baseline deltas do not cover exactly P0 and P1")
-    tie_break = ranking.get("tie_break_reason")
-    if not isinstance(tie_break, str) or not tie_break:
-        errors.append("ranking tie-break reason is missing")
+        if ranking.get(field) != expected_ranking[field]:
+            errors.append(
+                f"ranking {field} differs from independently measured contract"
+            )
+    winner = expected_ranking["winner"]
     if comparison.get("best_remedy_arm") != winner:
-        errors.append("comparison winner differs from ranking winner")
-    if decision.get("best_remedy_arm") != winner:
-        errors.append("decision winner differs from ranking winner")
-    if decision.get("ordered_candidates") != ranking.get("ordered_candidates"):
-        errors.append("decision ordered candidates differ from ranking")
-    if decision.get("baseline_deltas") != deltas:
-        errors.append("decision baseline deltas differ from ranking")
-    if decision.get("tie_break_reason") != tie_break:
-        errors.append("decision tie-break reason differs from ranking")
+        errors.append("comparison winner differs from independently measured winner")
+    decision_expected = {
+        "best_remedy_arm": winner,
+        "ordered_candidates": expected_ranking["ordered_candidates"],
+        "baseline_deltas": expected_ranking["baseline_deltas"],
+        "tie_break_reason": expected_ranking["tie_break_reason"],
+        "compounding": expected_summaries[winner]["compounding"],
+    }
+    for field, expected in decision_expected.items():
+        if decision.get(field) != expected:
+            errors.append(
+                f"decision {field} differs from independently measured contract"
+            )
     return errors
 
 
@@ -602,10 +901,7 @@ def _report_errors(
     signature_after = _artifact_signature(report)
     if signature_after is None:
         return [f"canonical results.md is missing: {report}"]
-    if (
-        signature_before is not None
-        and signature_after[:2] == signature_before[:2]
-    ):
+    if signature_before is not None and signature_after[:2] == signature_before[:2]:
         return [f"P0 child did not refresh stale canonical results.md: {report}"]
     try:
         body = report.read_text(encoding="utf-8")
@@ -624,11 +920,18 @@ def _primary_errors(
     payload: dict[str, Any],
     out: Path,
     report_signature_before: tuple[int, int, int, int] | None,
+    prior_payloads: dict[str, dict[str, Any]],
 ) -> list[str]:
-    errors, decision_option = _primary_decision_errors(payload)
+    try:
+        summaries, expected_ranking, expected_option = _independent_contract(
+            prior_payloads, payload
+        )
+    except (KeyError, TypeError, ValueError, IndexError, OverflowError) as exc:
+        return [f"could not independently recompute canonical ranking: {exc}"]
+    errors, _decision_option = _primary_decision_errors(payload, expected_option)
     errors.extend(_comparison_completeness_errors(payload.get("comparison")))
-    errors.extend(_ranking_errors(payload))
-    errors.extend(_report_errors(out, decision_option, report_signature_before))
+    errors.extend(_ranking_errors(payload, summaries, expected_ranking))
+    errors.extend(_report_errors(out, expected_option, report_signature_before))
     return errors
 
 
@@ -639,6 +942,8 @@ def _validate_artifact(
     signature_before: tuple[int, int, int, int] | None,
     report_signature_before: tuple[int, int, int, int] | None,
     canonical_out: Path,
+    prior_payloads: dict[str, dict[str, Any]],
+    expected_embedding_sha256: str,
 ) -> dict[str, Any]:
     signature_after = _artifact_signature(metrics_path)
     if signature_after is None:
@@ -653,14 +958,25 @@ def _validate_artifact(
     if protocol_errors:
         raise ArtifactError("protocol_mismatch", protocol_errors, payload)
     errors = _evidence_errors(payload.get("chain"))
-    errors.extend(_provenance_errors(payload, arm))
+    errors.extend(
+        _provenance_errors(
+            payload,
+            arm,
+            expected_embedding_sha256=expected_embedding_sha256,
+        )
+    )
     errors.extend(_pack_provenance_errors(payload.get("chain"), arm))
     if arm.evidence_only:
         if "decision" in payload:
             errors.append("evidence-only artifact must not contain a decision")
     else:
         errors.extend(
-            _primary_errors(payload, canonical_out, report_signature_before)
+            _primary_errors(
+                payload,
+                canonical_out,
+                report_signature_before,
+                prior_payloads,
+            )
         )
     if errors:
         raise ArtifactError("invalid_evidence", errors, payload)
@@ -689,6 +1005,7 @@ def _identity(payload: dict[str, Any]) -> dict[str, Any]:
         "model": provenance.get("model"),
         "architecture_source": provenance.get("architecture_source"),
         "embedding_shard": provenance.get("embedding_shard"),
+        "embedding_sha256": provenance.get("embedding_sha256"),
         "pack_sha256": pack_sha,
         "npy_sha256": npy_sha,
     }
@@ -703,6 +1020,7 @@ def _identity_mismatches(
         "model",
         "architecture_source",
         "embedding_shard",
+        "embedding_sha256",
         "pack_sha256",
         "npy_sha256",
     ):
@@ -822,7 +1140,11 @@ def _write_child_log(
 
 
 def _common_child_args(
-    args: argparse.Namespace, child_out: Path, progress: Path
+    args: argparse.Namespace,
+    child_out: Path,
+    progress: Path,
+    *,
+    embedding_sha256: str,
 ) -> list[str]:
     return [
         sys.executable,
@@ -837,6 +1159,8 @@ def _common_child_args(
         args.pack_pattern,
         "--embedding-shard",
         str(args.embedding_shard),
+        "--embedding-sha256",
+        embedding_sha256,
         "--int4-side-root",
         str(args.int4_side_root),
         "--tokens",
@@ -854,9 +1178,16 @@ def _common_child_args(
     ]
 
 
-def _child_command(args: argparse.Namespace, arm: ArmSpec) -> list[str]:
+def _child_command(
+    args: argparse.Namespace, arm: ArmSpec, *, embedding_sha256: str
+) -> list[str]:
     child_out = _arm_output(args.out, arm)
-    command = _common_child_args(args, child_out, _arm_progress(args.out, arm))
+    command = _common_child_args(
+        args,
+        child_out,
+        _arm_progress(args.out, arm),
+        embedding_sha256=embedding_sha256,
+    )
     command.extend(arm.cli_tail)
     if arm.stage == "p0":
         for prior in ARMS:
@@ -875,6 +1206,7 @@ def _prelaunch_progress(
     stage_started_at: str,
     completed: list[str],
     start_memory: dict[str, Any],
+    embedding_fingerprint: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "status": "prelaunch",
@@ -895,6 +1227,12 @@ def _prelaunch_progress(
             "pack_root": str(args.pack_root),
             "pack_pattern": args.pack_pattern,
             "embedding_shard": str(args.embedding_shard),
+            "embedding_sha256": (
+                embedding_fingerprint.get("sha256")
+                if embedding_fingerprint is not None
+                else None
+            ),
+            "embedding_fingerprint": embedding_fingerprint,
             "int4_side_root": str(args.int4_side_root),
         },
     }
@@ -1157,8 +1495,9 @@ def _completed_supervisor_progress(
     started_at: str,
     arm: ArmSpec,
     completed: list[ArmSpec],
+    embedding_fingerprint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "status": status,
         "stage": arm.stage,
         "expected_arm_label": arm.expected_label,
@@ -1168,6 +1507,9 @@ def _completed_supervisor_progress(
         "supervisor_started_at": started_at,
         "updated_at": _utc_now(),
     }
+    if embedding_fingerprint is not None:
+        payload["embedding_fingerprint"] = embedding_fingerprint
+    return payload
 
 
 def _fail(
@@ -1202,6 +1544,9 @@ def _fail(
         failed_at=failed_at,
         start_memory=start_memory,
     )
+    payload["provenance"]["supervisor_input_identity"] = prelaunch.get(
+        "input_identity"
+    )
     _publish_failure(args.out, payload)
     _best_effort_write_json(
         args.out / "host-at-end.json",
@@ -1216,7 +1561,15 @@ def _fail(
         args.out / "supervisor-progress.json",
         {
             **_completed_supervisor_progress(
-                status="failed", started_at=started_at, arm=arm, completed=completed
+                status="failed",
+                started_at=started_at,
+                arm=arm,
+                completed=completed,
+                embedding_fingerprint=(
+                    prelaunch.get("input_identity", {}).get("embedding_fingerprint")
+                    if isinstance(prelaunch.get("input_identity"), dict)
+                    else None
+                ),
             ),
             "failure_class": failure_class,
             "failed_arm": arm.expected_label,
@@ -1228,6 +1581,17 @@ def _fail(
         file=sys.stderr,
     )
     return EXIT_SUPERVISOR_FAILCLOSED
+
+
+def _record_validated_arm(
+    payloads: dict[str, dict[str, Any]],
+    completed: list[ArmSpec],
+    arm: ArmSpec,
+    payload: dict[str, Any],
+) -> None:
+    """Bookkeep one arm only after its canonical acceptance boundary."""
+    payloads[arm.stage] = payload
+    completed.append(arm)
 
 
 def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
@@ -1242,14 +1606,6 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
 
     started_at = _utc_now()
     start_memory = _proc_meminfo()
-    _best_effort_write_json(
-        args.out / "host-at-launch.json",
-        {
-            "status": "prelaunch",
-            "protocol": dict(PROTOCOL),
-            "memory": start_memory,
-        },
-    )
     completed: list[ArmSpec] = []
     payloads: dict[str, dict[str, Any]] = {}
     reference_identity: dict[str, Any] | None = None
@@ -1257,6 +1613,46 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     state.start_memory = start_memory
     state.completed = completed
     state.payloads = payloads
+
+    fingerprint_started_at = _utc_now()
+    fingerprint_prelaunch = _prelaunch_progress(
+        args,
+        ARMS[0],
+        supervisor_started_at=started_at,
+        stage_started_at=fingerprint_started_at,
+        completed=[],
+        start_memory=start_memory,
+        embedding_fingerprint=None,
+    )
+    state.arm = ARMS[0]
+    state.prelaunch = fingerprint_prelaunch
+    state.stage_started_at = fingerprint_started_at
+    try:
+        embedding_fingerprint = _embedding_fingerprint(args.embedding_shard)
+    except OSError as exc:
+        _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
+        return _fail(
+            args,
+            arm=ARMS[0],
+            failure_class="invalid_evidence",
+            errors=[f"could not pin embedding input identity: {exc}"],
+            returncode=None,
+            prelaunch=fingerprint_prelaunch,
+            completed=completed,
+            payloads=payloads,
+            started_at=started_at,
+            stage_started_at=fingerprint_started_at,
+            start_memory=start_memory,
+        )
+    _best_effort_write_json(
+        args.out / "host-at-launch.json",
+        {
+            "status": "prelaunch",
+            "protocol": dict(PROTOCOL),
+            "embedding_fingerprint": embedding_fingerprint,
+            "memory": start_memory,
+        },
+    )
 
     for index, arm in enumerate(ARMS, start=1):
         child_out = _arm_output(args.out, arm)
@@ -1275,6 +1671,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             stage_started_at=stage_started_at,
             completed=[item.expected_label for item in completed],
             start_memory=start_memory,
+            embedding_fingerprint=embedding_fingerprint,
         )
         state.arm = arm
         state.prelaunch = prelaunch
@@ -1282,7 +1679,28 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
         _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
 
-        command = _child_command(args, arm)
+        embedding_errors = _embedding_identity_errors(
+            args.embedding_shard, embedding_fingerprint
+        )
+        if embedding_errors:
+            return _fail(
+                args,
+                arm=arm,
+                failure_class="provenance_mismatch",
+                errors=embedding_errors,
+                returncode=None,
+                prelaunch=prelaunch,
+                completed=completed,
+                payloads=payloads,
+                started_at=started_at,
+                stage_started_at=stage_started_at,
+                start_memory=start_memory,
+            )
+        command = _child_command(
+            args,
+            arm,
+            embedding_sha256=embedding_fingerprint["sha256"],
+        )
         print(f"[{index}/3] launching {arm.expected_label}", flush=True)
         try:
             result = subprocess.run(  # nosec B603  # noqa: S603
@@ -1374,6 +1792,24 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 start_memory=start_memory,
             )
 
+        embedding_errors = _embedding_identity_errors(
+            args.embedding_shard, embedding_fingerprint
+        )
+        if embedding_errors:
+            return _fail(
+                args,
+                arm=arm,
+                failure_class="provenance_mismatch",
+                errors=embedding_errors,
+                returncode=result.returncode,
+                prelaunch=prelaunch,
+                completed=completed,
+                payloads=payloads,
+                started_at=started_at,
+                stage_started_at=stage_started_at,
+                start_memory=start_memory,
+            )
+
         try:
             payload = _validate_artifact(
                 metrics_path,
@@ -1381,6 +1817,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 signature_before=signature_before,
                 report_signature_before=report_signature_before,
                 canonical_out=args.out,
+                prior_payloads=payloads,
+                expected_embedding_sha256=embedding_fingerprint["sha256"],
             )
         except ArtifactError as exc:
             return _fail(
@@ -1419,9 +1857,13 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                     start_memory=start_memory,
                 )
 
-        payloads[arm.stage] = payload
-        completed.append(arm)
-        state.canonical_validated = len(completed) == len(ARMS)
+        # The final child artifact has now passed all scientific, report,
+        # ranking, decision, and cross-arm identity checks.  Mark that boundary
+        # before mutating bookkeeping containers so even MemoryError hereafter
+        # preserves the already validated canonical metrics.json/results.md.
+        if arm.stage == "p0":
+            state.canonical_validated = True
+        _record_validated_arm(payloads, completed, arm, payload)
         _atomic_write_json(
             args.out / "supervisor-progress.json",
             _completed_supervisor_progress(
@@ -1429,6 +1871,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 started_at=started_at,
                 arm=arm,
                 completed=completed,
+                embedding_fingerprint=embedding_fingerprint,
             ),
         )
 
@@ -1443,6 +1886,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 started_at=started_at,
                 arm=ARMS[-1],
                 completed=completed,
+                embedding_fingerprint=embedding_fingerprint,
             ),
             "protocol_complete": True,
             "ended_at": _utc_now(),
@@ -1453,6 +1897,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         {
             "status": "complete",
             "protocol_complete": True,
+            "embedding_fingerprint": embedding_fingerprint,
             "memory": _proc_meminfo(),
         },
     )
@@ -1480,14 +1925,14 @@ def _publish_supervisor_exception(
     signal_number = (
         exc.signal_number
         if isinstance(exc, SupervisorSignal)
-        else int(signal.SIGINT) if interrupted else None
+        else int(signal.SIGINT)
+        if interrupted
+        else None
     )
     returncode = -signal_number if signal_number is not None else None
     detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
     completed = [
-        item
-        for item in (state.completed or [])
-        if item.stage != state.arm.stage
+        item for item in (state.completed or []) if item.stage != state.arm.stage
     ]
     payloads = {
         stage: payload
@@ -1519,7 +1964,9 @@ def _record_post_validation_exception(
     signal_number = (
         exc.signal_number
         if isinstance(exc, SupervisorSignal)
-        else int(signal.SIGINT) if interrupted else None
+        else int(signal.SIGINT)
+        if interrupted
+        else None
     )
     detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
     payload = {
@@ -1529,9 +1976,7 @@ def _record_post_validation_exception(
         "failure_class": "interrupted" if interrupted else "supervisor_error",
         "error": detail,
         "signal": (
-            signal.Signals(signal_number).name
-            if signal_number is not None
-            else None
+            signal.Signals(signal_number).name if signal_number is not None else None
         ),
         "signal_number": signal_number,
         "started_at": state.started_at,

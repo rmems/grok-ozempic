@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import signal
 
@@ -19,6 +20,8 @@ import grok1_multiblock_v4_supervisor as supervisor  # noqa: E402
 _PACK_SHA = "a" * 64
 _NPY_SHA = "b" * 64
 _IMPLEMENTATION = {"commit": "c" * 40, "dirty": False}
+_EMBEDDING_BYTES = b"gh85-v4-supervisor-embedding-fixture\n"
+_EMBEDDING_SHA = hashlib.sha256(_EMBEDDING_BYTES).hexdigest()
 _ARM_FIXTURES = {
     "baseline": {
         "schedule": ("int4", [], [0, 1, 2, 3], []),
@@ -46,6 +49,166 @@ _ARM_FIXTURES = {
     },
 }
 
+# Literal scientific inputs from the canonical 8192-token run.  These are
+# intentionally different by stage so the supervisor tests exercise P1's real
+# canonical win and Option 2 instead of accepting a self-consistent fake P0 win.
+_STAGE_METRICS = {
+    "baseline": {
+        "rows": [
+            (0.998636599415437, 0.0, 1.0, 1.0, 0.0, 0.052476083867624736),
+            (
+                0.9975672646063307,
+                0.052476083867624736,
+                0.9822998046875,
+                0.9385986328125,
+                0.00002033074208447681,
+                0.0698795479982047,
+            ),
+            (
+                0.9886573865540497,
+                0.0698795479982047,
+                0.92626953125,
+                0.8861083984375,
+                0.00019497360882110354,
+                0.1504987802639529,
+            ),
+            (
+                0.9805662657439359,
+                0.1504987802639529,
+                0.82373046875,
+                0.7210693359375,
+                0.0003170502785525748,
+                0.19772214640333557,
+            ),
+        ],
+        "exit": 0.19772214640333557,
+    },
+    "p1": {
+        "rows": [
+            (0.9981363940675975, 0.0, 1.0, 1.0, 0.0, 0.061248773387512494),
+            (
+                0.9982853808940991,
+                0.061248773387512494,
+                0.9820556640625,
+                0.932861328125,
+                0.000034276330251193764,
+                0.058674898865502985,
+            ),
+            (
+                0.9939599269144929,
+                0.058674898865502985,
+                0.9351806640625,
+                0.9066162109375,
+                0.00020028407461690186,
+                0.10976319959391136,
+            ),
+            (
+                0.9900038440611516,
+                0.10976319959391136,
+                0.8873291015625,
+                0.8260498046875,
+                0.00007148238084593193,
+                0.14199439171490524,
+            ),
+        ],
+        "exit": 0.14199439171490524,
+    },
+    "p0": {
+        "rows": [
+            (0.9981363940675975, 0.0, 1.0, 1.0, 0.0, 0.061248773387512494),
+            (
+                0.9970708376561523,
+                0.061248773387512494,
+                0.9820556640625,
+                0.932861328125,
+                0.000034276330251193764,
+                0.07653289247308387,
+            ),
+            (
+                0.9856984885711603,
+                0.07653289247308387,
+                0.9110107421875,
+                0.8681640625,
+                0.00034164579906311755,
+                0.16877270290143606,
+            ),
+            (
+                0.9761822196087365,
+                0.16877270290143606,
+                0.8017578125,
+                0.6864013671875,
+                0.0007234054126472283,
+                0.22110917292671636,
+            ),
+        ],
+        "exit": 0.22110917292671636,
+    },
+}
+
+_EXPECTED_DELTAS = {
+    "expert_int4_channel_alpha_123": {
+        "b3_top1_gain": 0.0635986328125,
+        "b3_cos_gain": 0.0094375783172157,
+        "chain_exit_drift_reduction": 0.05572775468843033,
+    },
+    "expert_int4_channel_alpha": {
+        "b3_top1_gain": -0.02197265625,
+        "b3_cos_gain": -0.004384046135199382,
+        "chain_exit_drift_reduction": -0.02338702652338079,
+    },
+}
+_EXPECTED_ORDER = [
+    "expert_int4_channel_alpha_123",
+    "expert_int4_channel_alpha",
+]
+_EXPECTED_TIE_BREAK = (
+    "not needed; winner has the highest viability/top-1/cosine/exit-drift rank"
+)
+
+
+def _summary(stage: str) -> dict:
+    fixture = _STAGE_METRICS[stage]
+    label = next(arm.expected_label for arm in supervisor.ARMS if arm.stage == stage)
+    rows = fixture["rows"]
+    return {
+        "arm_label": label,
+        "block_output_cosine": [row[0] for row in rows],
+        "residual_in_drift": [row[1] for row in rows],
+        "router_top1": [row[2] for row in rows],
+        "router_top2": [row[3] for row in rows],
+        "expert_load_js_bits": [row[4] for row in rows],
+        "chain_exit_residual_drift": fixture["exit"],
+        "compounding": "superlinear_or_runaway",
+        "viable": False,
+    }
+
+
+def _ranking() -> dict:
+    return {
+        "ordered_candidates": list(_EXPECTED_ORDER),
+        "baseline_comparator": "expert_int4",
+        "baseline_deltas": json.loads(json.dumps(_EXPECTED_DELTAS)),
+        "winner": "expert_int4_channel_alpha_123",
+        "tie_break_reason": _EXPECTED_TIE_BREAK,
+    }
+
+
+def _install_contract(payload: dict, ranking: dict, option: int) -> None:
+    """Install a mutually consistent but not necessarily truthful contract."""
+    ranking_copy = json.loads(json.dumps(ranking))
+    comparison = payload["comparison"]
+    comparison["ranking"] = ranking_copy
+    comparison["ordered_candidates"] = list(ranking_copy["ordered_candidates"])
+    comparison["best_remedy_arm"] = ranking_copy["winner"]
+    decision = payload["decision"]
+    decision["decision"] = option
+    decision["best_remedy_arm"] = ranking_copy["winner"]
+    decision["ordered_candidates"] = list(ranking_copy["ordered_candidates"])
+    decision["baseline_deltas"] = json.loads(
+        json.dumps(ranking_copy["baseline_deltas"])
+    )
+    decision["tie_break_reason"] = ranking_copy["tie_break_reason"]
+
 
 def _value(command: list[str], option: str) -> str:
     return command[command.index(option) + 1]
@@ -66,6 +229,7 @@ def _payload(
     pack_sha: str = _PACK_SHA,
     npy_sha: str = _NPY_SHA,
     implementation: dict | None = None,
+    embedding_sha256: object = _EMBEDDING_SHA,
     tokens: int = supervisor.TOKENS,
     decision: int = 2,
 ) -> dict:
@@ -78,8 +242,11 @@ def _payload(
         "agent": supervisor.AGENT_LINE,
         "model": "Grok-4.5",
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
-        "implementation": implementation or dict(_IMPLEMENTATION),
+        "implementation": (
+            dict(_IMPLEMENTATION) if implementation is None else implementation
+        ),
         "embedding_shard": "embedding.npy",
+        "embedding_sha256": embedding_sha256,
         "skip_fp16_control": False,
         "arm": cli_arm,
         "evidence_role": (
@@ -88,6 +255,7 @@ def _payload(
             else "primary; sole canonical #85 decision"
         ),
     }
+    stage_metrics = _STAGE_METRICS[arm.stage]
     chain = {
         "arm_label": arm.expected_label,
         "expert_mode": mode,
@@ -103,21 +271,23 @@ def _payload(
             {
                 "block": block,
                 "expert_only": {
-                    "block_output_cosine": 0.99,
-                    "router_top1_agreement": 0.98,
-                    "router_top2_set_agreement": 0.99,
-                    "expert_load_js_bits": 0.01,
-                    "block_output_drift_relative_norm": 0.02,
+                    "block_output_cosine": metrics[0],
+                    "router_top1_agreement": metrics[2],
+                    "router_top2_set_agreement": metrics[3],
+                    "expert_load_js_bits": metrics[4],
+                    "block_output_drift_relative_norm": metrics[5],
                     "residual_stream_in": {
-                        "residual_in_drift_relative_norm": 0.01
+                        "residual_in_drift_relative_norm": metrics[1]
                     },
                 },
                 "fp16_control": {"block_output_cosine": 1.0},
             }
-            for block in supervisor.BLOCKS
+            for block, metrics in zip(supervisor.BLOCKS, stage_metrics["rows"])
         ],
         "end_of_chain": {
-            "expert_only_chain_exit": {"residual_drift_relative_norm": 0.03}
+            "expert_only_chain_exit": {
+                "residual_drift_relative_norm": stage_metrics["exit"]
+            }
         },
         "pack_provenance": [
             {
@@ -131,64 +301,82 @@ def _payload(
     }
     result = {"provenance": provenance, "chain": chain}
     if not arm.evidence_only:
-        ranking = {
-            "ordered_candidates": [
-                "expert_int4_channel_alpha",
-                "expert_int4_channel_alpha_123",
-            ],
-            "baseline_comparator": "expert_int4",
-            "baseline_deltas": {
-                "expert_int4_channel_alpha": {
-                    "b3_top1_gain": 0.1,
-                    "b3_cos_gain": 0.1,
-                    "chain_exit_drift_reduction": 0.1,
-                },
-                "expert_int4_channel_alpha_123": {
-                    "b3_top1_gain": 0.05,
-                    "b3_cos_gain": 0.05,
-                    "chain_exit_drift_reduction": 0.05,
-                },
-            },
-            "winner": "expert_int4_channel_alpha",
-            "tie_break_reason": "not needed",
-        }
+        ranking = _ranking()
+        baseline_payload = _payload(
+            supervisor.ARMS[0],
+            pack_sha=pack_sha,
+            npy_sha=npy_sha,
+            implementation=implementation,
+            embedding_sha256=embedding_sha256,
+            tokens=tokens,
+        )
+        p1_payload = _payload(
+            supervisor.ARMS[1],
+            pack_sha=pack_sha,
+            npy_sha=npy_sha,
+            implementation=implementation,
+            embedding_sha256=embedding_sha256,
+            tokens=tokens,
+        )
         result["comparison"] = {
             "protocol_complete": True,
             "completed_arms": [item.expected_label for item in supervisor.ARMS],
             "missing_arms": [],
             "invalid_arms": [],
             "validation_errors": [],
-            "ordered_candidates": [
-                "expert_int4_channel_alpha",
-                "expert_int4_channel_alpha_123",
-            ],
+            "secondary_arms": {
+                supervisor.ARMS[0].expected_label: baseline_payload,
+                supervisor.ARMS[1].expected_label: p1_payload,
+            },
+            "summaries": {
+                arm_spec.expected_label: _summary(arm_spec.stage)
+                for arm_spec in supervisor.ARMS
+            },
+            "ordered_candidates": list(_EXPECTED_ORDER),
             "ranking": ranking,
             "best_remedy_arm": ranking["winner"],
         }
         result["decision"] = {
             "decision": decision,
             "decision_text": "fixture decision",
-            "best_remedy_arm": "expert_int4_channel_alpha",
+            "best_remedy_arm": "expert_int4_channel_alpha_123",
             "rationale": [],
             "protocol_complete": True,
-            "ordered_candidates": ranking["ordered_candidates"],
-            "baseline_deltas": ranking["baseline_deltas"],
+            "ordered_candidates": list(ranking["ordered_candidates"]),
+            "baseline_deltas": json.loads(json.dumps(ranking["baseline_deltas"])),
             "tie_break_reason": ranking["tie_break_reason"],
+            "compounding": "superlinear_or_runaway",
         }
     return result
 
 
 def _write_success(
-    command: list[str], *, write_report: bool = True, **payload_kwargs: object
+    command: list[str],
+    *,
+    write_report: bool = True,
+    mutate=None,
+    **payload_kwargs: object,
 ) -> str | None:
     spec = _spec_for_command(command)
     out = Path(_value(command, "--out"))
     out.mkdir(parents=True, exist_ok=True)
-    metrics_body = json.dumps(_payload(spec, **payload_kwargs), indent=2) + "\n"
+    payload_kwargs.setdefault(
+        "embedding_sha256",
+        (
+            _value(command, "--embedding-sha256")
+            if "--embedding-sha256" in command
+            else _EMBEDDING_SHA
+        ),
+    )
+    payload = _payload(spec, **payload_kwargs)
+    if mutate is not None:
+        mutate(payload)
+    metrics_body = json.dumps(payload, indent=2) + "\n"
     (out / "metrics.json").write_text(metrics_body, encoding="utf-8")
     report_body = None
     if spec.stage == "p0" and write_report:
-        report_body = "# Fixture\n\n**Option 2 — fixture decision**\n"
+        report_option = payload["decision"]["decision"]
+        report_body = f"# Fixture\n\n**Option {report_option} — fixture decision**\n"
         supervisor._atomic_write_text(out / "results.md", report_body)
     progress = Path(_value(command, "--progress-json"))
     supervisor._atomic_write_json(
@@ -205,7 +393,11 @@ def _write_success(
                 "top_k": supervisor.TOP_K,
             },
             "implementation": dict(_IMPLEMENTATION),
-            "input_identity": {"embedding_shard": "embedding.npy"},
+            "input_identity": {
+                "embedding_shard": "embedding.npy",
+                "embedding_sha256": payload_kwargs["embedding_sha256"],
+            },
+            "embedding_sha256": payload_kwargs["embedding_sha256"],
             "provenance_identity": {"model": "Grok-4.5"},
             "current_block": 3,
             "completed_blocks": list(supervisor.BLOCKS),
@@ -216,6 +408,8 @@ def _write_success(
 
 class SupervisorTests(unittest.TestCase):
     def _args(self, root: Path):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "embedding.npy").write_bytes(_EMBEDDING_BYTES)
         return supervisor.build_parser().parse_args(
             [
                 "--npy-root",
@@ -258,6 +452,236 @@ class SupervisorTests(unittest.TestCase):
                     supervisor._schedule_for_arm(arm),
                     _ARM_FIXTURES[arm.stage]["schedule"],
                 )
+
+    def test_literal_chain_summaries_rank_p1_and_derive_option_2(self) -> None:
+        summaries = {
+            arm.expected_label: supervisor._ranking_summary(_payload(arm)["chain"])
+            for arm in supervisor.ARMS
+        }
+        for arm in supervisor.ARMS:
+            self.assertEqual(
+                summaries[arm.expected_label],
+                _summary(arm.stage),
+            )
+        ranking = supervisor._expected_ranking(summaries)
+        self.assertEqual(ranking, _ranking())
+        self.assertEqual(
+            supervisor._expected_decision_option(summaries, ranking),
+            2,
+        )
+
+    def test_exact_candidate_rank_tie_prefers_lower_complexity_p0(self) -> None:
+        summaries = {arm.expected_label: _summary(arm.stage) for arm in supervisor.ARMS}
+        summaries["expert_int4_channel_alpha_123"] = json.loads(
+            json.dumps(summaries["expert_int4_channel_alpha"])
+        )
+        summaries["expert_int4_channel_alpha_123"]["arm_label"] = (
+            "expert_int4_channel_alpha_123"
+        )
+        ranking = supervisor._expected_ranking(summaries)
+        self.assertEqual(
+            ranking["ordered_candidates"],
+            [
+                "expert_int4_channel_alpha",
+                "expert_int4_channel_alpha_123",
+            ],
+        )
+        self.assertEqual(ranking["winner"], "expert_int4_channel_alpha")
+        self.assertIn("exact metric-rank tie", ranking["tie_break_reason"])
+
+    def test_independent_option_helper_covers_viable_and_no_improvement(self) -> None:
+        summaries = {
+            arm.expected_label: supervisor._ranking_summary(_payload(arm)["chain"])
+            for arm in supervisor.ARMS
+        }
+        no_improvement = json.loads(json.dumps(summaries))
+        baseline = no_improvement["expert_int4"]
+        for label in (
+            "expert_int4_channel_alpha",
+            "expert_int4_channel_alpha_123",
+        ):
+            no_improvement[label] = json.loads(json.dumps(baseline))
+            no_improvement[label]["arm_label"] = label
+        ranking = supervisor._expected_ranking(no_improvement)
+        self.assertEqual(
+            supervisor._expected_decision_option(no_improvement, ranking), 3
+        )
+
+        viable = json.loads(json.dumps(summaries))
+        p1 = viable["expert_int4_channel_alpha_123"]
+        p1["block_output_cosine"] = [0.99] * 4
+        p1["router_top1"] = [0.99] * 4
+        p1["router_top2"] = [0.95] * 4
+        p1["chain_exit_residual_drift"] = 0.1
+        p1["viable"] = True
+        ranking = supervisor._expected_ranking(viable)
+        self.assertEqual(ranking["winner"], "expert_int4_channel_alpha_123")
+        self.assertEqual(supervisor._expected_decision_option(viable, ranking), 1)
+
+    def test_embedding_fingerprint_is_stable_and_replacement_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            args = self._args(root)
+            fingerprint = supervisor._embedding_fingerprint(args.embedding_shard)
+            self.assertEqual(fingerprint["sha256"], _EMBEDDING_SHA)
+            self.assertEqual(
+                supervisor._embedding_identity_errors(
+                    args.embedding_shard, fingerprint
+                ),
+                [],
+            )
+            replacement = root / "replacement.npy"
+            replacement.write_bytes(b"x" * len(_EMBEDDING_BYTES))
+            replacement.replace(args.embedding_shard)
+            self.assertTrue(
+                supervisor._embedding_identity_errors(args.embedding_shard, fingerprint)
+            )
+
+    def test_embedding_fingerprint_rejects_change_during_streamed_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            real_fstat = supervisor.os.fstat
+            calls = 0
+
+            def changed_fstat(fd):
+                nonlocal calls
+                calls += 1
+                observed = real_fstat(fd)
+                if calls == 1:
+                    return observed
+                changed = mock.Mock()
+                changed.st_dev = observed.st_dev
+                changed.st_ino = observed.st_ino
+                changed.st_size = observed.st_size
+                changed.st_mtime_ns = observed.st_mtime_ns
+                changed.st_ctime_ns = observed.st_ctime_ns + 1
+                return changed
+
+            with mock.patch.object(supervisor.os, "fstat", side_effect=changed_fstat):
+                with self.assertRaisesRegex(OSError, "changed while hashing"):
+                    supervisor._embedding_fingerprint(args.embedding_shard)
+
+    def test_embedding_digest_is_hashed_once_passed_and_echoed_by_all_arms(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            commands: list[list[str]] = []
+
+            def child(command, **_kwargs):
+                command = list(command)
+                commands.append(command)
+                self.assertEqual(_value(command, "--embedding-sha256"), _EMBEDDING_SHA)
+                _write_success(command)
+                payload = json.loads(
+                    (Path(_value(command, "--out")) / "metrics.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    payload["provenance"]["embedding_sha256"], _EMBEDDING_SHA
+                )
+                progress = json.loads(
+                    Path(_value(command, "--progress-json")).read_text(encoding="utf-8")
+                )
+                self.assertEqual(progress["embedding_sha256"], _EMBEDDING_SHA)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with mock.patch.object(
+                supervisor,
+                "_embedding_fingerprint",
+                wraps=supervisor._embedding_fingerprint,
+            ) as fingerprint:
+                result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_OK)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(fingerprint.call_count, 1)
+            self.assertEqual(len(commands), 3)
+
+    def test_dirty_or_unavailable_implementation_fails_before_baseline_acceptance(
+        self,
+    ) -> None:
+        invalid = {
+            "dirty": {"commit": "c" * 40, "dirty": True},
+            "unknown_cleanliness": {"commit": "c" * 40, "dirty": None},
+            "missing_commit": {"commit": None, "dirty": False},
+            "short_commit": {"commit": "c" * 39, "dirty": False},
+            "uppercase_commit": {"commit": "C" * 40, "dirty": False},
+            "non_hex_commit": {"commit": "z" * 40, "dirty": False},
+        }
+        for case, implementation in invalid.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, **_kwargs):
+                    _write_success(list(command), implementation=implementation)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 1)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "invalid_evidence")
+                self.assertEqual(payload["completed_arms"], [])
+                self.assertEqual(payload["invalid_arms"], ["expert_int4"])
+                self.assertNotIn("ranking", payload["comparison"])
+
+    def test_missing_malformed_or_wrong_embedding_digest_fails_closed(self) -> None:
+        corruptions = {
+            "missing": lambda payload: payload["provenance"].pop("embedding_sha256"),
+            "malformed": lambda payload: payload["provenance"].__setitem__(
+                "embedding_sha256", "not-a-sha"
+            ),
+            "wrong": lambda payload: payload["provenance"].__setitem__(
+                "embedding_sha256", "d" * 64
+            ),
+        }
+        for case, corrupt in corruptions.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, **_kwargs):
+                    _write_success(list(command), mutate=corrupt)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 1)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "invalid_evidence")
+                self.assertEqual(payload["completed_arms"], [])
+                self.assertNotIn("ranking", payload["comparison"])
+
+    def test_embedding_replacement_during_arm_fails_at_the_guard_boundary(self) -> None:
+        for replaced_stage, expected_calls, expected_completed in (
+            ("baseline", 1, []),
+            ("p1", 2, ["expert_int4"]),
+        ):
+            with (
+                self.subTest(stage=replaced_stage),
+                tempfile.TemporaryDirectory() as td,
+            ):
+                root = Path(td)
+                args = self._args(root)
+
+                def child(command, **_kwargs):
+                    command = list(command)
+                    spec = _spec_for_command(command)
+                    _write_success(command)
+                    if spec.stage == replaced_stage:
+                        replacement = root / f"replacement-{spec.stage}.npy"
+                        replacement.write_bytes(b"x" * len(_EMBEDDING_BYTES))
+                        replacement.replace(args.embedding_shard)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, expected_calls)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "provenance_mismatch")
+                self.assertEqual(payload["completed_arms"], expected_completed)
+                self.assertNotIn("ranking", payload["comparison"])
 
     def test_locked_launch_order_arguments_and_successful_non_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -414,6 +838,56 @@ class SupervisorTests(unittest.TestCase):
                 diagnostic["canonical_artifacts_preserved"],
                 ["metrics.json", "results.md"],
             )
+
+    def test_p0_container_memory_error_preserves_validated_canonical_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            canonical: dict[str, str] = {}
+
+            def child(command, **_kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                report = _write_success(command)
+                if spec.stage == "p0":
+                    canonical["metrics"] = (args.out / "metrics.json").read_text(
+                        encoding="utf-8"
+                    )
+                    canonical["report"] = report or ""
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            real_record = supervisor._record_validated_arm
+
+            def fail_p0_record(payloads, completed, arm, payload) -> None:
+                if arm.stage == "p0":
+                    raise MemoryError("synthetic post-validation container failure")
+                real_record(payloads, completed, arm, payload)
+
+            with mock.patch.object(
+                supervisor,
+                "_record_validated_arm",
+                side_effect=fail_p0_record,
+            ):
+                result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(
+                (args.out / "metrics.json").read_text(encoding="utf-8"),
+                canonical["metrics"],
+            )
+            self.assertEqual(
+                (args.out / "results.md").read_text(encoding="utf-8"),
+                canonical["report"],
+            )
+            diagnostic = json.loads(
+                (args.out / "supervisor-bookkeeping-error.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertTrue(diagnostic["canonical_protocol_validated"])
+            self.assertIn("MemoryError", diagnostic["error"])
 
     def test_sigkill_minus_9_and_wrapper_137_fail_closed(self) -> None:
         for returncode in (-signal.SIGKILL, 137):
@@ -686,9 +1160,7 @@ class SupervisorTests(unittest.TestCase):
                 ] = 10**1000
                 out = Path(_value(command, "--out"))
                 out.mkdir(parents=True, exist_ok=True)
-                (out / "metrics.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (out / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             result, run = self._run(args, child)
@@ -710,9 +1182,7 @@ class SupervisorTests(unittest.TestCase):
             "out_of_domain": lambda payload: payload["chain"]["per_block"][0][
                 "expert_only"
             ].__setitem__("router_top2_set_agreement", 2.0),
-            "missing_chain_exit": lambda payload: payload["chain"].pop(
-                "end_of_chain"
-            ),
+            "missing_chain_exit": lambda payload: payload["chain"].pop("end_of_chain"),
         }
         for case, corrupt in cases.items():
             with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
@@ -752,9 +1222,7 @@ class SupervisorTests(unittest.TestCase):
                     ] = -0.1
                 out = Path(_value(command, "--out"))
                 out.mkdir(parents=True, exist_ok=True)
-                (out / "metrics.json").write_text(
-                    json.dumps(payload), encoding="utf-8"
-                )
+                (out / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             result, run = self._run(args, child)
@@ -763,9 +1231,7 @@ class SupervisorTests(unittest.TestCase):
             failure = self._failure(args)
             self.assertEqual(failure["failure_class"], "invalid_evidence")
             self.assertEqual(failure["completed_arms"], ["expert_int4"])
-            self.assertEqual(
-                failure["invalid_arms"], ["expert_int4_channel_alpha_123"]
-            )
+            self.assertEqual(failure["invalid_arms"], ["expert_int4_channel_alpha_123"])
 
     def test_cross_arm_provenance_mismatch_is_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -796,6 +1262,123 @@ class SupervisorTests(unittest.TestCase):
                 "d" * 64,
             )
             self.assertNotIn("ordered_candidates", payload["comparison"])
+
+    def test_self_consistent_forged_ranking_decision_and_summaries_fail_closed(
+        self,
+    ) -> None:
+        def forged_winner(payload: dict) -> None:
+            ranking = _ranking()
+            ranking["ordered_candidates"] = list(reversed(_EXPECTED_ORDER))
+            ranking["winner"] = "expert_int4_channel_alpha"
+            _install_contract(payload, ranking, 2)
+
+        def forged_delta(payload: dict) -> None:
+            ranking = _ranking()
+            ranking["baseline_deltas"]["expert_int4_channel_alpha_123"][
+                "b3_top1_gain"
+            ] += 0.25
+            _install_contract(payload, ranking, 2)
+
+        def forged_tie_reason(payload: dict) -> None:
+            ranking = _ranking()
+            ranking["tie_break_reason"] = (
+                "exact metric-rank tie; preferred P0 despite unequal raw metrics"
+            )
+            _install_contract(payload, ranking, 2)
+
+        def forged_option(payload: dict) -> None:
+            _install_contract(payload, _ranking(), 3)
+
+        def forged_nested_summary(payload: dict) -> None:
+            comparison = payload["comparison"]
+            p1 = comparison["summaries"]["expert_int4_channel_alpha_123"]
+            p1["router_top1"][-1] = 0.5
+            ranking = _ranking()
+            ranking["ordered_candidates"] = list(reversed(_EXPECTED_ORDER))
+            ranking["winner"] = "expert_int4_channel_alpha"
+            ranking["baseline_deltas"]["expert_int4_channel_alpha_123"][
+                "b3_top1_gain"
+            ] = 0.5 - 0.82373046875
+            _install_contract(payload, ranking, 3)
+
+        def forged_nested_exact_tie(payload: dict) -> None:
+            comparison = payload["comparison"]
+            p0 = json.loads(
+                json.dumps(comparison["summaries"]["expert_int4_channel_alpha"])
+            )
+            p0["arm_label"] = "expert_int4_channel_alpha_123"
+            comparison["summaries"]["expert_int4_channel_alpha_123"] = p0
+            ranking = _ranking()
+            ranking["ordered_candidates"] = list(reversed(_EXPECTED_ORDER))
+            ranking["winner"] = "expert_int4_channel_alpha"
+            ranking["baseline_deltas"]["expert_int4_channel_alpha_123"] = json.loads(
+                json.dumps(ranking["baseline_deltas"]["expert_int4_channel_alpha"])
+            )
+            ranking["tie_break_reason"] = (
+                "exact metric-rank tie; preferred P0 "
+                "expert_int4_channel_alpha as the lower-complexity remedy"
+            )
+            _install_contract(payload, ranking, 3)
+
+        def forged_residual_summary(payload: dict) -> None:
+            payload["comparison"]["summaries"][
+                "expert_int4_channel_alpha_123"
+            ]["residual_in_drift"][-1] = 0.001
+
+        def forged_js_summary(payload: dict) -> None:
+            payload["comparison"]["summaries"][
+                "expert_int4_channel_alpha_123"
+            ]["expert_load_js_bits"][-1] = 0.5
+
+        def forged_compounding(payload: dict) -> None:
+            payload["comparison"]["summaries"][
+                "expert_int4_channel_alpha_123"
+            ]["compounding"] = "sublinear_or_saturating"
+            payload["decision"]["compounding"] = "sublinear_or_saturating"
+
+        def forged_decision_compounding(payload: dict) -> None:
+            payload["decision"]["compounding"] = "roughly_linear"
+
+        cases = {
+            "winner_and_order": forged_winner,
+            "baseline_delta": forged_delta,
+            "tie_break": forged_tie_reason,
+            "decision_option": forged_option,
+            "nested_summary": forged_nested_summary,
+            "nested_exact_tie": forged_nested_exact_tie,
+            "residual_summary": forged_residual_summary,
+            "js_summary": forged_js_summary,
+            "compounding_summary": forged_compounding,
+            "decision_compounding": forged_decision_compounding,
+        }
+        for case, mutate in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, current_mutate=mutate, **_kwargs):
+                    command = list(command)
+                    spec = _spec_for_command(command)
+                    _write_success(
+                        command,
+                        mutate=(current_mutate if spec.stage == "p0" else None),
+                    )
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 3)
+                failure = self._failure(args)
+                self.assertEqual(failure["failure_class"], "invalid_evidence")
+                self.assertEqual(
+                    failure["completed_arms"],
+                    [
+                        "expert_int4",
+                        "expert_int4_channel_alpha_123",
+                    ],
+                )
+                self.assertEqual(failure["invalid_arms"], ["expert_int4_channel_alpha"])
+                self.assertEqual(failure["decision"]["decision"], 4)
+                self.assertNotIn("ranking", failure["comparison"])
 
     def test_zero_exit_primary_option_4_is_invalid_and_supervisor_exits_nonzero(
         self,

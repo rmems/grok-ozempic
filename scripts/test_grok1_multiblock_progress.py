@@ -83,9 +83,17 @@ class ProgressParserTests(unittest.TestCase):
             "activation_policy": "activation",
             "scale_policy": "scale",
             "implementation": {"commit": "abc123", "dirty": False},
+            "embedding_sha256": "d" * 64,
         }
 
-        record = multiblock._progress_record_base(args, [0, 1, 2, 3], paths, provenance)
+        resolved_side_root = Path("/resolved/int4-side")
+        record = multiblock._progress_record_base(
+            args,
+            [0, 1, 2, 3],
+            paths,
+            provenance,
+            int4_side_root=resolved_side_root,
+        )
 
         self.assertEqual(record["arm"], "int4_channel_alpha")
         self.assertEqual(
@@ -99,7 +107,12 @@ class ProgressParserTests(unittest.TestCase):
         )
         self.assertEqual(record["implementation"], provenance["implementation"])
         self.assertEqual(record["input_identity"]["pack_pattern"], "pack-{block}.goz1")
-        self.assertIsNone(record["input_identity"]["int4_side_root"])
+        self.assertEqual(
+            record["input_identity"]["int4_side_root"], str(resolved_side_root)
+        )
+        self.assertEqual(
+            record["input_identity"]["embedding_sha256"], "d" * 64
+        )
         self.assertEqual(record["provenance_identity"]["issue"], provenance["issue"])
 
 

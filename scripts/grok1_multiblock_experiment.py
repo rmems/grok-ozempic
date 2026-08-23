@@ -95,6 +95,7 @@ _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 _V3_ARMS = frozenset({"int4"})
 _V4_ARMS = frozenset({"int4_channel_alpha"})
 _INT4_FAMILY_ARMS = _V3_ARMS | _V4_ARMS
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -571,6 +572,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pack-root", type=Path, required=True)
     p.add_argument("--pack-pattern", default="block_{block:03d}-attention_plus_expert.goz1")
     p.add_argument("--embedding-shard", type=Path, required=True)
+    p.add_argument(
+        "--embedding-sha256",
+        default=None,
+        help=(
+            "Whole-shard SHA-256 pinned by the #85 supervisor; required for "
+            "canonical #85 evidence"
+        ),
+    )
     p.add_argument("--tokens", type=int, default=2048)
     # YYYYMMDD decision-run seed; arithmetic form avoids Bandit B105 on *token*.
     p.add_argument("--seed", type=int, default=2026 * 10_000 + 806)
@@ -805,6 +814,12 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
     _validate_int4_family(args, evidence_only)
     _validate_v2_comparison_paths(args, comparison_paths)
     _validate_v2_fp16_control(args)
+    if _is_v4_run(args) and _SHA256_RE.fullmatch(
+        str(getattr(args, "embedding_sha256", ""))
+    ) is None:
+        raise ForwardError(
+            "canonical #85 runs require --embedding-sha256 from the supervisor"
+        )
 
 
 def _validate_v2_evidence_only_arm(args: argparse.Namespace, evidence_only: bool) -> None:
@@ -908,6 +923,7 @@ def _provenance(
     v2: bool = False,
     v3: bool = False,
     v4: bool = False,
+    embedding_sha256: str | None = None,
 ) -> dict:
     if not _is_remedy_arm(arm):
         return {
@@ -943,6 +959,7 @@ def _provenance(
         "numpy": np.__version__,
         "python": platform.python_version(),
         "embedding_shard": Path(paths.embedding_shard).name,
+        "embedding_sha256": embedding_sha256 if v4 else None,
         "skip_fp16_control": bool(skip_fp16),
         "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
         "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
@@ -959,6 +976,8 @@ def _progress_record_base(
     blocks: list[int],
     paths: ChainPaths,
     provenance: dict,
+    *,
+    int4_side_root: Path | None,
 ) -> dict:
     """Build the stable portion of each child progress snapshot."""
     return {
@@ -976,10 +995,9 @@ def _progress_record_base(
             "pack_root": str(paths.pack_root),
             "pack_pattern": paths.pack_pattern,
             "embedding_shard": str(paths.embedding_shard),
+            "embedding_sha256": provenance.get("embedding_sha256"),
             "int4_side_root": (
-                str(getattr(args, "int4_side_root", None))
-                if getattr(args, "int4_side_root", None) is not None
-                else None
+                str(int4_side_root) if int4_side_root is not None else None
             ),
         },
         "provenance_identity": {
@@ -1032,6 +1050,7 @@ def run(args: argparse.Namespace) -> int:
         v2=is_v2 and not is_v3 and not is_v4,
         v3=is_v3 and not is_v4,
         v4=is_v4,
+        embedding_sha256=getattr(args, "embedding_sha256", None),
     )
     raw_progress_path = getattr(args, "progress_json", None)
     progress_path = (
@@ -1049,7 +1068,13 @@ def run(args: argparse.Namespace) -> int:
         hp_blocks=args.hp_blocks,
         int4_side_root=int4_side_root,
         progress_path=progress_path,
-        progress_base=_progress_record_base(args, blocks, paths, prov),
+        progress_base=_progress_record_base(
+            args,
+            blocks,
+            paths,
+            prov,
+            int4_side_root=int4_side_root,
+        ),
     )
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
