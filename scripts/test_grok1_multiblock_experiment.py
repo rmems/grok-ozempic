@@ -421,6 +421,58 @@ class ReportTests(unittest.TestCase):
         self.assertIn("#64", text)
         self.assertIn("Option 1", text)
 
+    def test_v4_report_refreshes_preexisting_analysis_atomically(self) -> None:
+        payload = {
+            "provenance": {"issue": "GH #85", "agent": "fixture"},
+            "decision": {
+                "decision": 3,
+                "decision_text": "current",
+                "best_remedy_arm": V4_PRIMARY_ARM,
+                "rationale": ["current evidence"],
+            },
+            "chain": {"arm_label": V4_PRIMARY_ARM},
+            "comparison": {"summaries": {V4_PRIMARY_ARM: {}}},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            path.write_text("stale same-option analysis", encoding="utf-8")
+            inode_before = path.stat().st_ino
+            with mock.patch.object(multiblock, "_fsync_directory") as sync_directory:
+                multiblock._write_v3_report(path, payload)
+            body = path.read_text(encoding="utf-8")
+            inode_after = path.stat().st_ino
+            sync_directory.assert_called_once_with(path.parent)
+        self.assertNotEqual(inode_after, inode_before)
+        self.assertIn("**Decision:** Option 3", body)
+        self.assertIn(V4_PRIMARY_ARM, body)
+        self.assertNotIn("stale same-option analysis", body)
+
+    def test_atomic_report_replace_failure_preserves_old_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            original = "old report\n"
+            path.write_text(original, encoding="utf-8")
+            with mock.patch.object(
+                multiblock.os, "replace", side_effect=OSError("replace failed")
+            ), self.assertRaisesRegex(OSError, "replace failed"):
+                multiblock._atomic_write_text(path, "new report\n")
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+
+    def test_v3_report_preserves_preexisting_analysis(self) -> None:
+        payload = {
+            "provenance": {"issue": "GH #80"},
+            "decision": {"decision": 2},
+            "chain": {"arm_label": V3_PRIMARY_ARM},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "results.md"
+            original = "# Hand-authored\n\n**Option 2 — preserved**\n"
+            path.write_text(original, encoding="utf-8")
+            multiblock._write_v3_report(path, payload)
+            body = path.read_text(encoding="utf-8")
+        self.assertEqual(body, original)
+
 
 class PeriodicHpScheduleTests(unittest.TestCase):
     def test_n2_on_0_3_is_hp_on_1_and_3(self) -> None:

@@ -283,16 +283,96 @@ def _protocol_errors(chain: object, arm: ArmSpec) -> list[str]:
             errors.append(f"per_block[{index}] missing FP16 control metrics")
             continue
         cosine = control.get("block_output_cosine")
-        if (
-            isinstance(cosine, bool)
-            or not isinstance(cosine, (int, float))
-            or not math.isfinite(float(cosine))
-            or float(cosine) < 0.99
-            or float(cosine) > 1.0 + 1e-9
-        ):
+        if not _metric_in_domain(cosine, 0.99, 1.0 + 1e-9):
             errors.append(f"per_block[{index}] FP16 control cosine is not clean")
     if not _exact_int_list(observed, BLOCKS):
         errors.append(f"per_block order={observed!r} expected={list(BLOCKS)!r}")
+    return errors
+
+
+def _metric_in_domain(value: object, lo: float, hi: float | None = None) -> bool:
+    """Return whether a JSON number is finite, non-boolean, and in range."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        number = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    if not math.isfinite(number) or number < lo:
+        return False
+    return hi is None or number <= hi
+
+
+def _expert_metric_errors(expert: dict[str, Any], index: int) -> list[str]:
+    """Validate one block's scientific inputs to viability and ranking."""
+    errors: list[str] = []
+    residual = expert.get("residual_stream_in")
+    if not isinstance(residual, dict):
+        errors.append(f"per_block[{index}] missing expert_only.residual_stream_in metrics")
+        residual = {}
+    top2 = expert.get(
+        "router_topk_set_agreement",
+        expert.get("router_top2_set_agreement"),
+    )
+    checks = (
+        ("block_output_cosine", expert.get("block_output_cosine"), -1.0, 1.0 + 1e-9),
+        (
+            "residual_stream_in.residual_in_drift_relative_norm",
+            residual.get("residual_in_drift_relative_norm"),
+            0.0,
+            None,
+        ),
+        ("router_top1_agreement", expert.get("router_top1_agreement"), 0.0, 1.0),
+        ("router_top2_set_agreement", top2, 0.0, 1.0),
+        ("expert_load_js_bits", expert.get("expert_load_js_bits"), 0.0, None),
+        (
+            "block_output_drift_relative_norm",
+            expert.get("block_output_drift_relative_norm"),
+            0.0,
+            None,
+        ),
+    )
+    for field, value, lo, hi in checks:
+        if not _metric_in_domain(value, lo, hi):
+            errors.append(f"per_block[{index}] {field} is missing or out of domain")
+    return errors
+
+
+def _chain_exit_errors(chain: dict[str, Any]) -> list[str]:
+    """Require a finite, nonnegative post-chain expert residual drift."""
+    end = chain.get("end_of_chain")
+    exit_metrics: object = None
+    if isinstance(end, dict):
+        for key in ("expert_only_chain_exit", "expert_only_end_residual_in"):
+            if isinstance(end.get(key), dict):
+                exit_metrics = end[key]
+                break
+    if not isinstance(exit_metrics, dict):
+        return ["end_of_chain is missing expert-only chain-exit metrics"]
+    exit_drift = exit_metrics.get(
+        "residual_drift_relative_norm",
+        exit_metrics.get("residual_in_drift_relative_norm"),
+    )
+    if not _metric_in_domain(exit_drift, 0.0):
+        return ["expert-only chain-exit drift is missing or out of domain"]
+    return []
+
+
+def _evidence_errors(chain: object) -> list[str]:
+    """Validate the standard-library-safe v4 ranking evidence subset."""
+    if not isinstance(chain, dict):
+        return ["missing chain object"]
+    rows = chain.get("per_block")
+    if not isinstance(rows, list):
+        return ["per_block evidence is missing"]
+    errors: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        expert = row.get("expert_only")
+        if isinstance(expert, dict):
+            errors.extend(_expert_metric_errors(expert, index))
+    errors.extend(_chain_exit_errors(chain))
     return errors
 
 
@@ -472,8 +552,20 @@ def _ranking_errors(payload: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _report_errors(out: Path, decision_option: int | None) -> list[str]:
+def _report_errors(
+    out: Path,
+    decision_option: int | None,
+    signature_before: tuple[int, int, int, int] | None,
+) -> list[str]:
     report = out / "results.md"
+    signature_after = _artifact_signature(report)
+    if signature_after is None:
+        return [f"canonical results.md is missing: {report}"]
+    if (
+        signature_before is not None
+        and signature_after[:2] == signature_before[:2]
+    ):
+        return [f"P0 child did not refresh stale canonical results.md: {report}"]
     try:
         body = report.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
@@ -487,11 +579,15 @@ def _report_errors(out: Path, decision_option: int | None) -> list[str]:
     return []
 
 
-def _primary_errors(payload: dict[str, Any], out: Path) -> list[str]:
+def _primary_errors(
+    payload: dict[str, Any],
+    out: Path,
+    report_signature_before: tuple[int, int, int, int] | None,
+) -> list[str]:
     errors, decision_option = _primary_decision_errors(payload)
     errors.extend(_comparison_completeness_errors(payload.get("comparison")))
     errors.extend(_ranking_errors(payload))
-    errors.extend(_report_errors(out, decision_option))
+    errors.extend(_report_errors(out, decision_option, report_signature_before))
     return errors
 
 
@@ -500,6 +596,7 @@ def _validate_artifact(
     arm: ArmSpec,
     *,
     signature_before: tuple[int, int, int, int] | None,
+    report_signature_before: tuple[int, int, int, int] | None,
     canonical_out: Path,
 ) -> dict[str, Any]:
     signature_after = _artifact_signature(metrics_path)
@@ -514,13 +611,16 @@ def _validate_artifact(
     protocol_errors = _protocol_errors(payload.get("chain"), arm)
     if protocol_errors:
         raise ArtifactError("protocol_mismatch", protocol_errors, payload)
-    errors = _provenance_errors(payload, arm)
+    errors = _evidence_errors(payload.get("chain"))
+    errors.extend(_provenance_errors(payload, arm))
     errors.extend(_pack_provenance_errors(payload.get("chain"), arm))
     if arm.evidence_only:
         if "decision" in payload:
             errors.append("evidence-only artifact must not contain a decision")
     else:
-        errors.extend(_primary_errors(payload, canonical_out))
+        errors.extend(
+            _primary_errors(payload, canonical_out, report_signature_before)
+        )
     if errors:
         raise ArtifactError("invalid_evidence", errors, payload)
     return payload
@@ -1113,6 +1213,11 @@ def run(args: argparse.Namespace) -> int:
         child_out = _arm_output(args.out, arm)
         metrics_path = child_out / "metrics.json"
         signature_before = _artifact_signature(metrics_path)
+        report_signature_before = (
+            _artifact_signature(args.out / "results.md")
+            if not arm.evidence_only
+            else None
+        )
         stage_started_at = _utc_now()
         prelaunch = _prelaunch_progress(
             args,
@@ -1222,6 +1327,7 @@ def run(args: argparse.Namespace) -> int:
                 metrics_path,
                 arm,
                 signature_before=signature_before,
+                report_signature_before=report_signature_before,
                 canonical_out=args.out,
             )
         except ArtifactError as exc:

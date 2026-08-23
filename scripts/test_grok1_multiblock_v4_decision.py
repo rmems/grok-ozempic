@@ -178,6 +178,35 @@ class V4RankingTests(unittest.TestCase):
         _, decision = self._decision(p0_top1=0.89, p1_top1=0.88, baseline_top1=0.90)
         self.assertEqual(decision["decision"], 3)
 
+    def test_option_3_when_only_losing_candidate_improves_other_metrics(self) -> None:
+        baseline = _v4_chain(V4_INT4_BASELINE_ARM, top1_last=0.900)
+        p0 = _v4_chain(V4_PRIMARY_ARM, top1_last=0.899)
+        p1 = _v4_chain(V4_SECONDARY_ARM, top1_last=0.898)
+        p0["per_block"][-1]["expert_only"]["block_output_cosine"] = 0.994
+        p0["end_of_chain"]["expert_only_chain_exit"][
+            "residual_drift_relative_norm"
+        ] = 0.021
+        p1["per_block"][-1]["expert_only"]["block_output_cosine"] = 0.997
+        p1["end_of_chain"]["expert_only_chain_exit"][
+            "residual_drift_relative_norm"
+        ] = 0.018
+
+        comparison, decision = self._decision(
+            p0=p0,
+            p1=p1,
+            baseline=baseline,
+        )
+
+        self.assertEqual(comparison["ranking"]["winner"], V4_PRIMARY_ARM)
+        self.assertEqual(decision["best_remedy_arm"], V4_PRIMARY_ARM)
+        self.assertEqual(decision["decision"], 3)
+        self.assertIn("Selected stacked / denser INT4 remedy fails", decision["decision_text"])
+        self.assertNotIn("remedies fail", decision["decision_text"])
+        self.assertIn(
+            "selected_stack_improved_vs_remeasured_int4=False",
+            decision["rationale"],
+        )
+
     def test_historical_2048_evidence_remains_cite_only(self) -> None:
         comparison, decision = self._decision()
         note = comparison["baselines_cited"]["historical_80_int4_all"]["note"]

@@ -685,6 +685,29 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
+def _fsync_directory_strict(path: Path) -> None:
+    """Persist certifying-cache namespace changes or fail closed."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
+        # A scale-mode directory that has never existed cannot contain stale
+        # certifying entries, so there is no namespace mutation to persist.
+        return
+    except OSError as exc:
+        raise ForwardError(
+            f"could not open INT4 cache directory for fsync {path}: {exc}"
+        ) from exc
+    try:
+        try:
+            os.fsync(fd)
+        except OSError as exc:
+            raise ForwardError(
+                f"could not fsync INT4 cache directory {path}: {exc}"
+            ) from exc
+    finally:
+        os.close(fd)
+
+
 def _publish_temp(temp_path: Path, final_path: Path) -> None:
     _fsync_file(temp_path)
     os.replace(temp_path, final_path)
@@ -873,9 +896,16 @@ class Int4SideExperts:
         for sidecar_path in self._sidecar_paths():
             self._remove_path(sidecar_path)
         self._remove_path(self._fingerprint_path(name))
+        # A replacement q must never become durable while an old certifying
+        # sidecar can reappear after a crash.  The two scale modes live in
+        # separate directories, so persist both deletion sets before moving on.
+        _fsync_directory_strict(self._absmax_dir)
+        _fsync_directory_strict(self._ls_dir)
         self._publish_hook("sidecars_invalidated", q_path)
         for scale_path in self._scale_paths(name):
             self._remove_path(scale_path)
+        _fsync_directory_strict(self._absmax_dir)
+        _fsync_directory_strict(self._ls_dir)
         self._publish_hook("scale_modes_invalidated", q_path)
 
     def _invalidate_active_sidecar(self) -> None:
@@ -3455,16 +3485,14 @@ def assemble_remedy_v4_comparison(
 
 
 def _v4_int4_baseline_context(
-    summaries: dict, stack_labels: list[str], best: dict
+    summaries: dict, best: dict
 ) -> tuple[bool, str, dict | None]:
-    """Return (any_improved, base_note, early_option4_or_None)."""
+    """Return (selected_improved, base_note, early_option4_or_None)."""
     int4_base = summaries.get(V4_INT4_BASELINE_ARM)
     if int4_base is not None and _v3_middle_complete(int4_base):
-        any_improved = any(
-            _v4_improved_vs_int4(summaries[label], int4_base) for label in stack_labels
-        )
+        selected_improved = _v4_improved_vs_int4(best, int4_base)
         base_top1 = float(int4_base["router_top1"][-1])
-        return any_improved, f"remeasured_int4_b3_top1={base_top1:.6f}", None
+        return selected_improved, f"remeasured_int4_b3_top1={base_top1:.6f}", None
     base_note = "remeasured_int4_baseline=missing"
     if best.get("viable"):
         return False, base_note, None
@@ -3478,13 +3506,13 @@ def _v4_int4_baseline_context(
     return False, base_note, early
 
 
-def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
+def _v4_outcome(best: dict, *, selected_improved: bool) -> tuple[int, str]:
     if best.get("viable"):
         return (
             1,
             "Stacked / denser INT4 remedy restores multi-block viability at Grok-1 max context.",
         )
-    if any_improved:
+    if selected_improved:
         return (
             2,
             "Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still "
@@ -3492,13 +3520,13 @@ def _v4_outcome(best: dict, *, any_improved: bool) -> tuple[int, str]:
         )
     return (
         3,
-        "Stacked / denser INT4 remedies fail to beat re-measured INT4 alone — the gap is "
-        "not closed by LS-α or the HP123 schedule.",
+        "Selected stacked / denser INT4 remedy fails to beat re-measured INT4 alone — "
+        "the canonical winner does not close the gap.",
     )
 
 
 def _v4_decision_rationale(
-    best_label: str, best: dict, *, base_note: str, any_improved: bool
+    best_label: str, best: dict, *, base_note: str, selected_improved: bool
 ) -> list[str]:
     return [
         f"best_stack_arm={best_label}",
@@ -3506,7 +3534,7 @@ def _v4_decision_rationale(
         f"best_b3_cos={float(best['block_output_cosine'][-1]):.6f}",
         f"best_chain_exit_drift={best.get('chain_exit_residual_drift')}",
         base_note,
-        f"any_stack_improved_vs_remeasured_int4={any_improved}",
+        f"selected_stack_improved_vs_remeasured_int4={selected_improved}",
         f"tokens={BASELINE_85['tokens']}",
         "codec=research_int4_channel_alpha_side INT4 codes × LS channel-α",
         "#80_historical_b3_top1=0.850586@2048 P0 all-INT4 (cite only; not same-budget)",
@@ -3557,14 +3585,15 @@ def decide_remedy_v4(comparison: dict) -> dict:
             "unknown",
         )
     best = summaries[best_label]
-    any_improved, base_note, early = _v4_int4_baseline_context(
-        summaries, stack_labels, best
-    )
+    selected_improved, base_note, early = _v4_int4_baseline_context(summaries, best)
     if early is not None:
         return early
-    decision, text = _v4_outcome(best, any_improved=any_improved)
+    decision, text = _v4_outcome(best, selected_improved=selected_improved)
     rationale = _v4_decision_rationale(
-        best_label, best, base_note=base_note, any_improved=any_improved
+        best_label,
+        best,
+        base_note=base_note,
+        selected_improved=selected_improved,
     )
     payload = _decision_payload(decision, text, rationale, best.get("compounding", "unknown"))
     payload["best_remedy_arm"] = best_label

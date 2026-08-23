@@ -153,6 +153,39 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         raise
 
 
+def _fsync_directory(path: Path) -> None:
+    """Make a successful same-directory rename durable."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_text(path: Path, body: str) -> None:
+    """Atomically replace ``path`` with one complete UTF-8 document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def _write_progress(
     path: Path | None,
     base: dict | None,
@@ -1128,14 +1161,20 @@ def _selected_option_in_report(body: str) -> int | None:
 
 
 def _write_v3_report(report: Path, payload: dict) -> None:
-    """Write #80 results.md without clobbering a pre-authored analysis.
+    """Write a v3/v4 report, refreshing every canonical #85 P0 run.
 
-    ``metrics.json`` is the machine source of truth. A long hand-authored report
-    is kept on reruns; only a missing file gets a generated skeleton.
+    #80 keeps its pre-authored analysis on reruns.  The supervised #85 protocol
+    instead requires the P0 child to refresh ``results.md`` so a stale report
+    with the same option cannot be mistaken for current canonical evidence.
     """
     decision = payload.get("decision") or {}
     option = decision.get("decision")
-    if report.is_file():
+    chain = payload.get("chain") or {}
+    provenance = payload.get("provenance") or {}
+    arm = str(chain.get("arm_label") or "") if isinstance(chain, dict) else ""
+    issue = str(provenance.get("issue") or "") if isinstance(provenance, dict) else ""
+    refresh_required = "#85" in issue or arm.startswith("expert_int4_channel_alpha")
+    if report.is_file() and not refresh_required:
         reported = _selected_option_in_report(report.read_text(encoding="utf-8"))
         if option is not None and reported != option:
             print(
@@ -1145,7 +1184,7 @@ def _write_v3_report(report: Path, payload: dict) -> None:
             )
         print(f"kept existing {report} (pre-authored; metrics.json is SoT)")
         return
-    report.write_text(_v3_results_md(payload), encoding="utf-8")
+    _atomic_write_text(report, _v3_results_md(payload))
     print(f"wrote {report}")
 
 

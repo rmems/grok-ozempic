@@ -105,6 +105,79 @@ class ChunkedQuantizationTests(unittest.TestCase):
 
 
 class AtomicSideTableTests(unittest.TestCase):
+    def test_shared_q_invalidation_fsyncs_both_mode_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            side = Int4SideExperts(
+                _reference(_arrays()),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            events: list[tuple[str, Path | str]] = []
+            real_fsync = lib._fsync_directory_strict
+
+            def record_fsync(path: Path) -> None:
+                events.append(("fsync", path))
+                real_fsync(path)
+
+            def record_hook(_self, step: str, _path: Path) -> None:
+                events.append(("hook", step))
+
+            with mock.patch.object(
+                lib, "_fsync_directory_strict", side_effect=record_fsync
+            ), mock.patch.object(
+                Int4SideExperts, "_publish_hook", autospec=True, side_effect=record_hook
+            ):
+                side._invalidate_shared_q_chain("gate")
+
+            self.assertEqual(
+                events,
+                [
+                    ("fsync", side._absmax_dir),
+                    ("fsync", side._ls_dir),
+                    ("hook", "sidecars_invalidated"),
+                    ("fsync", side._absmax_dir),
+                    ("fsync", side._ls_dir),
+                    ("hook", "scale_modes_invalidated"),
+                ],
+            )
+
+    def test_invalidation_fsync_failure_aborts_before_q_publication(self) -> None:
+        for failure in ("open", "fsync"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as td:
+                reference = _reference(_arrays(1))
+                side = Int4SideExperts(
+                    reference,
+                    side_root=Path(td),
+                    block=0,
+                    scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+                )
+                source = _arrays(2)["gate"]
+                fingerprint = _reference_fingerprint(source)
+                events: list[str] = []
+
+                def record(_self, step: str, _path: Path) -> None:
+                    events.append(step)
+
+                failure_patch = (
+                    mock.patch.object(lib.os, "open", side_effect=OSError("open failed"))
+                    if failure == "open"
+                    else mock.patch.object(
+                        lib.os, "fsync", side_effect=OSError("fsync failed")
+                    )
+                )
+                with failure_patch, mock.patch.object(
+                    Int4SideExperts, "_publish_hook", autospec=True, side_effect=record
+                ), self.assertRaisesRegex(lib.ForwardError, "INT4 cache directory"):
+                    side._build_shared_codes(
+                        "gate",
+                        source,
+                        tuple(int(value) for value in source.shape),
+                        fingerprint,
+                    )
+                self.assertNotIn("q_published", events)
+                self.assertNotIn("fingerprint_published", events)
+
     def test_publication_order_is_q_then_fingerprint_then_scale_then_sidecar(self) -> None:
         events: list[str] = []
 
@@ -142,9 +215,14 @@ class AtomicSideTableTests(unittest.TestCase):
             with self.subTest(step=interrupted_step), tempfile.TemporaryDirectory() as td:
                 fired = False
 
-                def interrupt(_self, step: str, _path: Path) -> None:
+                def interrupt(
+                    _self,
+                    step: str,
+                    _path: Path,
+                    target_step: str = interrupted_step,
+                ) -> None:
                     nonlocal fired
-                    if step == interrupted_step and not fired:
+                    if step == target_step and not fired:
                         fired = True
                         raise RuntimeError(f"interrupt after {step}")
 

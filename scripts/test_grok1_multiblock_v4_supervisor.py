@@ -86,11 +86,23 @@ def _payload(
         "per_block": [
             {
                 "block": block,
-                "expert_only": {"block_output_cosine": 0.99},
+                "expert_only": {
+                    "block_output_cosine": 0.99,
+                    "router_top1_agreement": 0.98,
+                    "router_top2_set_agreement": 0.99,
+                    "expert_load_js_bits": 0.01,
+                    "block_output_drift_relative_norm": 0.02,
+                    "residual_stream_in": {
+                        "residual_in_drift_relative_norm": 0.01
+                    },
+                },
                 "fp16_control": {"block_output_cosine": 1.0},
             }
             for block in supervisor.BLOCKS
         ],
+        "end_of_chain": {
+            "expert_only_chain_exit": {"residual_drift_relative_norm": 0.03}
+        },
         "pack_provenance": [
             {
                 "block": block,
@@ -150,16 +162,18 @@ def _payload(
     return result
 
 
-def _write_success(command: list[str], **payload_kwargs: object) -> str | None:
+def _write_success(
+    command: list[str], *, write_report: bool = True, **payload_kwargs: object
+) -> str | None:
     spec = _spec_for_command(command)
     out = Path(_value(command, "--out"))
     out.mkdir(parents=True, exist_ok=True)
     metrics_body = json.dumps(_payload(spec, **payload_kwargs), indent=2) + "\n"
     (out / "metrics.json").write_text(metrics_body, encoding="utf-8")
     report_body = None
-    if spec.stage == "p0":
+    if spec.stage == "p0" and write_report:
         report_body = "# Fixture\n\n**Option 2 — fixture decision**\n"
-        (out / "results.md").write_text(report_body, encoding="utf-8")
+        supervisor._atomic_write_text(out / "results.md", report_body)
     progress = Path(_value(command, "--progress-json"))
     supervisor._atomic_write_json(
         progress,
@@ -323,8 +337,8 @@ class SupervisorTests(unittest.TestCase):
                 args = self._args(Path(td))
                 result, run = self._run(
                     args,
-                    lambda command, **kwargs: subprocess.CompletedProcess(
-                        command, returncode, "", "killed"
+                    lambda command, return_code=returncode, **kwargs: (
+                        subprocess.CompletedProcess(command, return_code, "", "killed")
                     ),
                 )
                 self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
@@ -420,8 +434,8 @@ class SupervisorTests(unittest.TestCase):
                         json.dumps(_payload(supervisor.ARMS[0])), encoding="utf-8"
                     )
 
-                def child(command, **kwargs):
-                    if case == "malformed":
+                def child(command, current_case=case, **kwargs):
+                    if current_case == "malformed":
                         out = Path(_value(list(command), "--out"))
                         out.mkdir(parents=True, exist_ok=True)
                         (out / "metrics.json").write_text("{broken", encoding="utf-8")
@@ -433,6 +447,55 @@ class SupervisorTests(unittest.TestCase):
                 payload = self._failure(args)
                 self.assertEqual(payload["failure_class"], "invalid_evidence")
                 self.assertEqual(payload["failed_arm"], "expert_int4")
+
+    def test_zero_exit_p0_metadata_touch_does_not_refresh_results_report(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            (args.out / "results.md").write_text(
+                "# Stale fixture\n\n**Option 2 — obsolete winner and measurements**\n",
+                encoding="utf-8",
+            )
+
+            def child(command, **kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                _write_success(command, write_report=spec.stage != "p0")
+                if spec.stage == "p0":
+                    (args.out / "results.md").touch()
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 3)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "invalid_evidence")
+            self.assertEqual(payload["failed_arm"], "expert_int4_channel_alpha")
+            self.assertTrue(
+                any(
+                    "stale canonical results.md" in error
+                    for error in payload["failure"]["errors"]
+                )
+            )
+
+    def test_zero_exit_p0_atomic_report_replacement_is_fresh(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            original = "# Fixture\n\n**Option 2 — fixture decision**\n"
+            (args.out / "results.md").write_text(original, encoding="utf-8")
+
+            def child(command, **kwargs):
+                _write_success(list(command))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+            self.assertEqual(result, supervisor.EXIT_OK)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(
+                (args.out / "results.md").read_text(encoding="utf-8"),
+                original,
+            )
 
     def test_protocol_mismatch_is_distinct_and_never_retries_2048(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -452,6 +515,100 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(payload["failure_class"], "protocol_mismatch")
             self.assertEqual(payload["active_tokens"], 8192)
             self.assertFalse(any("2048" in command for command in commands))
+
+    def test_overflowing_fp16_metric_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                payload = _payload(spec)
+                payload["chain"]["per_block"][0]["fp16_control"][
+                    "block_output_cosine"
+                ] = 10**1000
+                out = Path(_value(command, "--out"))
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "metrics.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "protocol_mismatch")
+            self.assertEqual(payload["completed_arms"], [])
+            self.assertEqual(payload["invalid_arms"], ["expert_int4"])
+
+    def test_malformed_baseline_metrics_never_count_as_completed(self) -> None:
+        cases = {
+            "missing": lambda payload: payload["chain"]["per_block"][0][
+                "expert_only"
+            ].pop("router_top1_agreement"),
+            "non_finite": lambda payload: payload["chain"]["per_block"][0][
+                "expert_only"
+            ].__setitem__("router_top1_agreement", float("nan")),
+            "out_of_domain": lambda payload: payload["chain"]["per_block"][0][
+                "expert_only"
+            ].__setitem__("router_top2_set_agreement", 2.0),
+            "missing_chain_exit": lambda payload: payload["chain"].pop(
+                "end_of_chain"
+            ),
+        }
+        for case, corrupt in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, corrupt_case=corrupt, **kwargs):
+                    command = list(command)
+                    spec = _spec_for_command(command)
+                    payload = _payload(spec)
+                    corrupt_case(payload)
+                    out = Path(_value(command, "--out"))
+                    out.mkdir(parents=True, exist_ok=True)
+                    (out / "metrics.json").write_text(
+                        json.dumps(payload), encoding="utf-8"
+                    )
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 1)
+                failure = self._failure(args)
+                self.assertEqual(failure["failure_class"], "invalid_evidence")
+                self.assertEqual(failure["completed_arms"], [])
+                self.assertEqual(failure["invalid_arms"], ["expert_int4"])
+
+    def test_malformed_p1_metrics_stop_after_valid_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                payload = _payload(spec)
+                if spec.stage == "p1":
+                    payload["chain"]["per_block"][0]["expert_only"][
+                        "block_output_drift_relative_norm"
+                    ] = -0.1
+                out = Path(_value(command, "--out"))
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "metrics.json").write_text(
+                    json.dumps(payload), encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 2)
+            failure = self._failure(args)
+            self.assertEqual(failure["failure_class"], "invalid_evidence")
+            self.assertEqual(failure["completed_arms"], ["expert_int4"])
+            self.assertEqual(
+                failure["invalid_arms"], ["expert_int4_channel_alpha_123"]
+            )
 
     def test_cross_arm_provenance_mismatch_is_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as td:
