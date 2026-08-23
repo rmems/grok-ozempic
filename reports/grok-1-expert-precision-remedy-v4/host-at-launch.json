@@ -17,15 +17,15 @@
     }
   },
   "memory": {
-    "captured_at": "2026-08-23T11:44:50.286975Z",
-    "children_max_rss_kib": 29188,
+    "captured_at": "2026-08-23T15:26:14.198308Z",
+    "children_max_rss_kib": 28784,
     "launch_gate_applied": false,
     "source": "/proc/meminfo + resource.getrusage",
-    "supervisor_max_rss_kib": 1044508,
+    "supervisor_max_rss_kib": 1416108,
     "values": {
-      "MemAvailable_bytes": 23277445120,
+      "MemAvailable_bytes": 22173421568,
       "MemTotal_bytes": 64906240000,
-      "SwapFree_bytes": 225280,
+      "SwapFree_bytes": 557056,
       "SwapTotal_bytes": 8589930496
     }
   },

@@ -1,38 +1,38 @@
-started_at: 2026-08-23T13:50:17.661304Z
-ended_at: 2026-08-23T14:52:56.168034Z
-command: /home/raulmc/rmems/grok-ozempic/.venv/bin/python3 /home/raulmc/rmems/grok-ozempic-wt-85-supervisor/scripts/grok1_multiblock_experiment.py --npy-root /home/raulmc/.models/xai-grok-1/export-npy --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy --embedding-sha256 55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6 --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4 --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-channel-alpha.json --arm int4_channel_alpha --write-report-md --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-baseline/metrics.json --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-channel-alpha-123/metrics.json
+started_at: 2026-08-23T17:24:02.882707Z
+ended_at: 2026-08-23T18:24:24.648897Z
+command: python3 scripts/grok1_multiblock_experiment.py --npy-root '<NPY_ROOT>' --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root '<PACK_ROOT>' --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard '<EMBEDDING_SHARD>' --embedding-sha256 55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6 --int4-side-root '<INT4_SIDE_ROOT>' --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4 --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-channel-alpha.json --arm int4_channel_alpha --write-report-md --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-baseline/metrics.json --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-channel-alpha-123/metrics.json
 returncode: 0
 timeout: false
 
 ----- stdout -----
 == block 000  residual_in shape=(8192, 6144)
   reference forward ...
-    241.7s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    199.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_channel_alpha_side) ...
-    323.0s  cos=0.998136 top1=1.000000 drift=0.000000
+    272.2s  cos=0.998136 top1=1.000000 drift=0.000000
   fp16 control ...
-    297.0s  block_out_cos=0.999966
+    288.1s  block_out_cos=0.999966
 == block 001  residual_in shape=(8192, 6144)
   reference forward ...
-    233.6s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    218.7s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_channel_alpha_side) ...
-    325.9s  cos=0.997071 top1=0.982056 drift=0.061249
+    316.5s  cos=0.997071 top1=0.982056 drift=0.061249
   fp16 control ...
-    284.0s  block_out_cos=0.999966
+    278.1s  block_out_cos=0.999966
 == block 002  residual_in shape=(8192, 6144)
   reference forward ...
-    232.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    246.9s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_channel_alpha_side) ...
-    333.6s  cos=0.985698 top1=0.911011 drift=0.076533
+    305.9s  cos=0.985698 top1=0.911011 drift=0.076533
   fp16 control ...
-    279.5s  block_out_cos=0.999765
+    290.5s  block_out_cos=0.999765
 == block 003  residual_in shape=(8192, 6144)
   reference forward ...
-    226.6s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    210.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_channel_alpha_side) ...
-    316.8s  cos=0.976182 top1=0.801758 drift=0.168773
+    301.4s  cos=0.976182 top1=0.801758 drift=0.168773
   fp16 control ...
-    273.2s  block_out_cos=0.999437
+    292.6s  block_out_cos=0.999437
 wrote reports/grok-1-expert-precision-remedy-v4/metrics.json
 DECISION option 2: Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still compounds / misses the ~0.95 viability band.
 wrote reports/grok-1-expert-precision-remedy-v4/results.md

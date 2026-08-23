@@ -12,7 +12,7 @@
     "top_k": 2
   },
   "implementation": {
-    "commit": "734ed5a4252de06266a8566f582d1b9ad7286d59",
+    "commit": "35c4927b8abd8a084f0b820c3b1112faafabd60d",
     "dirty": false
   },
   "input_identity": {
@@ -22,11 +22,11 @@
     "pack_pattern": "block_{block:03d}-attention_plus_expert.goz1",
     "embedding_shard": "/home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy",
     "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
-    "int4_side_root": "/home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a"
+    "int4_side_root": "/home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-35c4927"
   },
   "provenance_identity": {
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
-    "agent": "Grok Build: Grok 4.5 (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
     "model": "Grok-4.5",
     "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",

@@ -4,7 +4,9 @@
 
 **Issue:** GH #85 / Linear RM-608 / beads `goz-3h3`
 
-**Implementation commit:** `734ed5a4252de06266a8566f582d1b9ad7286d59` (`implementation.dirty: false`)
+**Implementation commit:** `35c4927b8abd8a084f0b820c3b1112faafabd60d` (`implementation.dirty: false`)
+
+**Runtime:** Python 3.14.6; NumPy 2.5.1
 
 **Embedding SHA-256:** `55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6`
 
@@ -41,7 +43,7 @@ The all-block P0 candidate, `expert_int4_channel_alpha`, is lower complexity but
 
 ## Same-budget comparison
 
-All values below are measured at 8192 tokens with the same seed, blocks, `top_k`, packs, NPY inputs, clean implementation commit, and pinned embedding content.
+All values below are measured at 8192 tokens with the same seed, blocks, `top_k`, packs, NPY inputs, clean implementation commit, Python/NumPy runtime, and pinned embedding content.
 
 | Signal | INT4 baseline (comparator) | P1 alpha+HP123 | P0 alpha all blocks |
 |---|---:|---:|---:|
@@ -59,14 +61,17 @@ Historical issue #80 P0 all-INT4 reported block-3 top-1 **0.850586 at 2048 token
 
 - A standard-library-only out-of-process supervisor launched exactly one arm at a time in the locked order: baseline -> P1 -> P0.
 - The supervisor hard-locked tokens 8192, seed 20260806, blocks `0,1,2,3`, `top_k=2`, and FP16 controls. `fallback_tokens` is `null`; no 2048-token command was launched.
-- The supervisor hashed the entire 3,221,225,600-byte embedding shard once in approximately 64 MiB chunks, pinned the digest into every child artifact, and verified the path and opened target identity before and after the run.
-- Baseline and P1 wrote evidence-only `metrics.json` files. P0 consumed both as `--comparison-metrics`, assembled the decision, and owned the canonical `metrics.json` and `results.md`.
+- The supervisor hashed the entire 3,221,225,600-byte embedding shard once in approximately 64 MiB chunks, pinned the digest into every child artifact, and verified both the path and opened target identity before and after the run.
+- Each child fingerprinted every NPY source directory before source loading and again after all forwards. The post-forward fingerprint had to equal the pre-forward fingerprint before provenance or canonical evidence could be accepted.
+- Baseline and P1 wrote evidence-only `metrics.json` files. P0 consumed both as `--comparison-metrics`, assembled the decision, and owned the canonical `metrics.json` and generated `results.md` skeleton.
 - The supervisor independently recomputed complete summaries, candidate ranking, baseline deltas, tie behavior, and the decision from the three raw chains before accepting the P0 artifacts.
+- The supervisor required the same implementation SHA, clean-tree state, embedding digest, architecture source, Python version, and NumPy version across all arms.
 - Each arm used a sequential, paired residual trajectory. No Gaussian proxy was used, and embedding input was not substituted for blocks greater than 0.
 - Only expert payload precision changed. Attention, routers, norms, and the FP reference remained high precision.
 - Plain INT4 uses persisted per-output-channel absmax codes/scales. The alpha arms reuse the shared INT4 codes with float64 least-squares per-output-channel alpha scales.
 - Expert tensors were traversed deterministically in approximately 64 MiB whole-row intra-expert chunks. Reference fingerprints streamed in C order; quantization used a two-pass absmax build and read-only memory-mapped code reuse.
-- The external side-table cache was fresh for this implementation identity. It finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
+- Cache publication uses a persistent per-block POSIX advisory lock shared by absmax and LS-alpha modes, atomic replacement, file `fsync`, and strict parent-directory `fsync`; active-sidecar removal is also directory-synced. The cache therefore requires a local POSIX filesystem with working `flock` and directory `fsync` semantics.
+- The external side-table cache was fresh for this implementation identity. Directory `gh85-v4-8192-int4-side-35c4927` finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
 
 ## Per-block evidence
 
@@ -122,7 +127,7 @@ The deterministic FP16 control trajectory is identical across the three arms and
 
 ## Provenance
 
-The supervisor ran from 2026-08-23 11:44:50Z through 14:52:56Z (3:08:05.900). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
+The supervisor ran from 2026-08-23 15:26:14Z through 18:24:24Z (2:58:10.469). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
 
 | block | GOZ1 pack SHA-256 | NPY directory SHA-256 |
 |---:|---|---|
@@ -131,24 +136,29 @@ The supervisor ran from 2026-08-23 11:44:50Z through 14:52:56Z (3:08:05.900). It
 | 2 | `e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560` | `5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f` |
 | 3 | `9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302` | `39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7` |
 
-The launch snapshot recorded 64,906,240,000 bytes total RAM, 23,277,445,120 bytes available RAM, and 225,280 bytes free swap. No launch gate was applied. The end snapshot recorded 22,540,877,824 bytes available RAM and a maximum child RSS of 15,707,640 KiB. These are observational host snapshots, not proof of behavior on another host.
+The launch snapshot recorded 64,906,240,000 bytes total RAM, 22,173,421,568 bytes available RAM, and 557,056 bytes free swap. No launch gate was applied. The end snapshot recorded 24,801,542,144 bytes available RAM and a maximum child RSS of 15,706,816 KiB. These are observational host snapshots, not proof of behavior on another host.
 
 ## Reproduction
 
-Implementation must be committed and clean before launch. Run only the supervisor:
+Implementation must be committed and clean before launch. Configure local input paths, then run only the supervisor:
 
 ```bash
+GH85_NPY_ROOT=/path/to/export-npy
+GH85_PACK_ROOT=/path/to/multiblock-68
+GH85_EMBEDDING=/path/to/embedding__slot_00__token_embedding.npy
+GH85_SIDE_ROOT=/path/to/cache/gh85-v4-8192-int4-side-35c4927
+
 python3 scripts/grok1_multiblock_v4_supervisor.py \
-  --npy-root /home/raulmc/.models/xai-grok-1/export-npy \
+  --npy-root "$GH85_NPY_ROOT" \
   --npy-pattern 'goz68-block_{block:03d}-attn' \
-  --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 \
+  --pack-root "$GH85_PACK_ROOT" \
   --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' \
-  --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy \
-  --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a \
+  --embedding-shard "$GH85_EMBEDDING" \
+  --int4-side-root "$GH85_SIDE_ROOT" \
   --out reports/grok-1-expert-precision-remedy-v4
 ```
 
-The supervisor owns the baseline -> P1 -> P0 launch order and fails closed to Option 4 on a child failure, timeout, invalid/stale evidence, protocol mismatch, or provenance mismatch. Do not replace it with three direct experiment commands.
+The supervisor owns the baseline -> P1 -> P0 launch order and fails closed to Option 4 on a child failure, timeout, invalid/stale evidence, protocol mismatch, or provenance mismatch. Do not replace it with three direct experiment commands. Persistent child logs redact the interpreter and absolute input paths while preserving the actual executed argument order.
 
 ## Artifacts
 
