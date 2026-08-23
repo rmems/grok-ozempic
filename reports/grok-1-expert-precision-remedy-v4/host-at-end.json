@@ -1,0 +1,17 @@
+{
+  "memory": {
+    "captured_at": "2026-08-23T10:12:33.133071Z",
+    "children_max_rss_kib": 15708372,
+    "launch_gate_applied": false,
+    "source": "/proc/meminfo + resource.getrusage",
+    "supervisor_max_rss_kib": 365344,
+    "values": {
+      "MemAvailable_bytes": 26896441344,
+      "MemTotal_bytes": 64906240000,
+      "SwapFree_bytes": 188416,
+      "SwapTotal_bytes": 8589930496
+    }
+  },
+  "protocol_complete": true,
+  "status": "complete"
+}

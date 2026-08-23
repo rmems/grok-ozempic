@@ -1,0 +1,29 @@
+{
+  "memory": {
+    "captured_at": "2026-08-23T07:25:45.528250Z",
+    "children_max_rss_kib": 26980,
+    "launch_gate_applied": false,
+    "source": "/proc/meminfo + resource.getrusage",
+    "supervisor_max_rss_kib": 365344,
+    "values": {
+      "MemAvailable_bytes": 20329181184,
+      "MemTotal_bytes": 64906240000,
+      "SwapFree_bytes": 1409024,
+      "SwapTotal_bytes": 8589930496
+    }
+  },
+  "protocol": {
+    "blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "fallback_tokens": null,
+    "fp16_control": true,
+    "seed": 20260806,
+    "tokens": 8192,
+    "top_k": 2
+  },
+  "status": "prelaunch"
+}

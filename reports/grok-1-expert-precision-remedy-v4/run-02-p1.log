@@ -1,0 +1,39 @@
+started_at: 2026-08-23T08:27:31.057102Z
+ended_at: 2026-08-23T09:16:07.564865Z
+command: /home/raulmc/rmems/grok-ozempic/.venv/bin/python3 /home/raulmc/rmems/grok-ozempic-wt-85-supervisor/scripts/grok1_multiblock_experiment.py --npy-root /home/raulmc/.models/xai-grok-1/export-npy --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-382c890 --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4/int4-channel-alpha-123 --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-channel-alpha-123.json --arm int4_channel_alpha --hp-blocks 1,2,3 --evidence-only
+returncode: 0
+timeout: false
+
+----- stdout -----
+== block 000  residual_in shape=(8192, 6144)
+  reference forward ...
+    196.1s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_channel_alpha_side) ...
+    253.7s  cos=0.998136 top1=1.000000 drift=0.000000
+  fp16 control ...
+    289.8s  block_out_cos=0.999966
+== block 001  residual_in shape=(8192, 6144)
+  reference forward ...
+    148.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (expert_int4_channel_alpha_123) ...
+    220.2s  cos=0.998285 top1=0.982056 drift=0.061249
+  fp16 control ...
+    269.4s  block_out_cos=0.999966
+== block 002  residual_in shape=(8192, 6144)
+  reference forward ...
+    145.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (expert_int4_channel_alpha_123) ...
+    232.6s  cos=0.993960 top1=0.935181 drift=0.058675
+  fp16 control ...
+    279.1s  block_out_cos=0.999765
+== block 003  residual_in shape=(8192, 6144)
+  reference forward ...
+    154.8s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (expert_int4_channel_alpha_123) ...
+    226.3s  cos=0.990004 top1=0.887329 drift=0.109763
+  fp16 control ...
+    276.6s  block_out_cos=0.999437
+wrote reports/grok-1-expert-precision-remedy-v4/int4-channel-alpha-123/metrics.json
+EVIDENCE ONLY: no decision emitted
+
+----- stderr -----
