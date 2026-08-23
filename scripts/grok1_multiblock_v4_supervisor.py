@@ -95,12 +95,11 @@ class _RunState:
     """Minimum live context needed to publish Option 4 on supervisor failure."""
 
     started_at: str | None = None
-    stage_started_at: str | None = None
     start_memory: dict[str, Any] | None = None
-    arm: ArmSpec | None = None
-    prelaunch: dict[str, Any] | None = None
     completed: list[ArmSpec] | None = None
     payloads: dict[str, dict[str, Any]] | None = None
+    embedding_fingerprint: dict[str, Any] | None = None
+    published_progress: _PublishedProgress | None = None
     canonical_validated: bool = False
 
 
@@ -112,6 +111,15 @@ class ArmSpec:
     progress_name: str
     cli_tail: tuple[str, ...]
     evidence_only: bool
+
+
+@dataclass(frozen=True)
+class _PublishedProgress:
+    """One atomically selected, fully initialized progress journal."""
+
+    arm: ArmSpec
+    prelaunch: dict[str, Any]
+    stage_started_at: str
 
 
 ARMS = (
@@ -657,9 +665,7 @@ def _compounding_label(residual_in: list[float], exit_drift: float) -> str:
     if len(later) < 2:
         return "unknown"
     ratios = [
-        later[index + 1] / later[index]
-        if later[index] > 1e-12
-        else float("inf")
+        later[index + 1] / later[index] if later[index] > 1e-12 else float("inf")
         for index in range(len(later) - 1)
     ]
     finite = [ratio for ratio in ratios if math.isfinite(ratio)]
@@ -685,11 +691,7 @@ def _ranking_summary(chain: dict[str, Any]) -> dict[str, Any]:
         expert = row["expert_only"]
         cos.append(float(expert["block_output_cosine"]))
         residual_in.append(
-            float(
-                expert["residual_stream_in"][
-                    "residual_in_drift_relative_norm"
-                ]
-            )
+            float(expert["residual_stream_in"]["residual_in_drift_relative_norm"])
         )
         top1.append(float(expert["router_top1_agreement"]))
         top2.append(
@@ -1157,6 +1159,19 @@ def _proc_meminfo() -> dict[str, Any]:
     return result
 
 
+def _pending_memory_snapshot(captured_at: str) -> dict[str, Any]:
+    """Return schema-stable evidence before interruptible host capture."""
+    return {
+        "captured_at": captured_at,
+        "source": "capture pending",
+        "values": {},
+        "supervisor_max_rss_kib": 0,
+        "children_max_rss_kib": 0,
+        "launch_gate_applied": False,
+        "error": "supervisor setup did not complete host-memory capture",
+    }
+
+
 def _as_text(value: object) -> str:
     if value is None:
         return ""
@@ -1229,6 +1244,24 @@ def _portable_child_command(command: Sequence[str]) -> list[str]:
     return portable
 
 
+def _portable_child_output(command: Sequence[str], value: object) -> str:
+    """Redact known argv path prefixes from captured child output."""
+    portable_command = _portable_child_command(command)
+    replacements = [
+        (raw, portable)
+        for raw, portable in zip(command, portable_command)
+        if raw != portable and Path(raw).is_absolute()
+    ]
+    replacements.append((str(REPO_ROOT), "<REPO_ROOT>"))
+    body = _as_text(value)
+    for raw, portable in sorted(
+        replacements, key=lambda item: len(item[0]), reverse=True
+    ):
+        if raw not in ("", os.sep):
+            body = body.replace(raw, portable)
+    return body
+
+
 def _write_child_log(
     path: Path,
     command: Sequence[str],
@@ -1249,9 +1282,9 @@ def _write_child_log(
             f"timeout: {str(timeout).lower()}",
             "",
             "----- stdout -----",
-            _as_text(stdout),
+            _portable_child_output(command, stdout),
             "----- stderr -----",
-            _as_text(stderr),
+            _portable_child_output(command, stderr),
         ]
     )
     _atomic_write_text(path, body.rstrip() + "\n")
@@ -1655,8 +1688,15 @@ def _fail(
     started_at: str,
     stage_started_at: str,
     start_memory: dict[str, Any],
+    progress_override: dict[str, Any] | None = None,
 ) -> int:
-    progress, progress_error = _read_progress(_arm_progress(args.out, arm), prelaunch)
+    if progress_override is None:
+        progress, progress_error = _read_progress(
+            _arm_progress(args.out, arm), prelaunch
+        )
+    else:
+        progress = dict(progress_override)
+        progress_error = None
     progress = _portable_failure_value(args, progress)
     portable_errors = [_portable_failure_detail(args, error) for error in errors]
     if progress_error is not None:
@@ -1677,9 +1717,7 @@ def _fail(
         failed_at=failed_at,
         start_memory=start_memory,
     )
-    payload["provenance"]["supervisor_input_identity"] = prelaunch.get(
-        "input_identity"
-    )
+    payload["provenance"]["supervisor_input_identity"] = prelaunch.get("input_identity")
     _publish_failure(args.out, payload)
     _best_effort_clear_p0_staging(_arm_output(args.out, _ARM_BY_STAGE["p0"]))
     _best_effort_write_json(
@@ -1728,25 +1766,70 @@ def _record_validated_arm(
     completed.append(arm)
 
 
+def _bootstrap_run_state(_args: argparse.Namespace, state: _RunState) -> None:
+    """Populate fail-closed context before any filesystem or host setup."""
+    started_at = _utc_now()
+    start_memory = _pending_memory_snapshot(started_at)
+    state.started_at = started_at
+    state.start_memory = start_memory
+    state.completed = []
+    state.payloads = {}
+
+
+def _ensure_failure_state(_args: argparse.Namespace, state: _RunState) -> None:
+    """Complete partially bootstrapped state after a one-shot interruption."""
+    started_at = state.started_at or _utc_now()
+    state.started_at = started_at
+    state.start_memory = state.start_memory or _pending_memory_snapshot(started_at)
+    state.completed = state.completed if state.completed is not None else []
+    state.payloads = state.payloads if state.payloads is not None else {}
+
+
 def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
+    if (
+        state.started_at is None
+        or state.start_memory is None
+        or state.completed is None
+        or state.payloads is None
+    ):
+        raise RuntimeError("supervisor state was not bootstrapped")
+
+    started_at = state.started_at
+    start_memory = state.start_memory
+    completed = state.completed
+    payloads = state.payloads
+
     if args.timeout_seconds <= 0:
         raise ValueError("--timeout-seconds must be > 0")
     args.out = args.out.expanduser()
+    args.out.mkdir(parents=True, exist_ok=True)
+    _durably_unlink(args.out / "metrics.json")
+    fingerprint_started_at = _utc_now()
+    fingerprint_prelaunch = _prelaunch_progress(
+        args,
+        ARMS[0],
+        supervisor_started_at=started_at,
+        stage_started_at=fingerprint_started_at,
+        completed=[],
+        start_memory=start_memory,
+        embedding_fingerprint=None,
+    )
+    state.published_progress = None
+    _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
+    _atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
+    state.published_progress = _PublishedProgress(
+        arm=ARMS[0],
+        prelaunch=fingerprint_prelaunch,
+        stage_started_at=fingerprint_started_at,
+    )
+
     args.npy_root = args.npy_root.expanduser()
     args.pack_root = args.pack_root.expanduser()
     args.embedding_shard = args.embedding_shard.expanduser()
     args.int4_side_root = args.int4_side_root.expanduser()
-    args.out.mkdir(parents=True, exist_ok=True)
-
-    started_at = _utc_now()
     start_memory = _proc_meminfo()
-    completed: list[ArmSpec] = []
-    payloads: dict[str, dict[str, Any]] = {}
     reference_identity: dict[str, Any] | None = None
-    state.started_at = started_at
     state.start_memory = start_memory
-    state.completed = completed
-    state.payloads = payloads
 
     fingerprint_started_at = _utc_now()
     fingerprint_prelaunch = _prelaunch_progress(
@@ -1758,11 +1841,14 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         start_memory=start_memory,
         embedding_fingerprint=None,
     )
-    state.arm = ARMS[0]
-    state.prelaunch = fingerprint_prelaunch
-    state.stage_started_at = fingerprint_started_at
+    state.published_progress = None
     _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
     _atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
+    state.published_progress = _PublishedProgress(
+        arm=ARMS[0],
+        prelaunch=fingerprint_prelaunch,
+        stage_started_at=fingerprint_started_at,
+    )
     _prepare_p0_staging(_arm_output(args.out, _ARM_BY_STAGE["p0"]))
     try:
         embedding_fingerprint = _embedding_fingerprint(args.embedding_shard)
@@ -1780,6 +1866,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             stage_started_at=fingerprint_started_at,
             start_memory=start_memory,
         )
+    state.embedding_fingerprint = embedding_fingerprint
     _best_effort_write_json(
         args.out / "host-at-launch.json",
         {
@@ -1802,11 +1889,14 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             start_memory=start_memory,
             embedding_fingerprint=embedding_fingerprint,
         )
-        state.arm = arm
-        state.prelaunch = prelaunch
-        state.stage_started_at = stage_started_at
+        state.published_progress = None
         _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
         _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
+        state.published_progress = _PublishedProgress(
+            arm=arm,
+            prelaunch=prelaunch,
+            stage_started_at=stage_started_at,
+        )
         if arm.stage == "p0":
             _prepare_p0_staging(child_out)
         metrics_path = child_out / "metrics.json"
@@ -2053,14 +2143,34 @@ def _publish_supervisor_exception(
     exc: BaseException,
 ) -> int:
     """Convert an in-flight supervisor exception into canonical Option 4."""
-    if (
-        state.arm is None
-        or state.prelaunch is None
-        or state.started_at is None
-        or state.stage_started_at is None
-        or state.start_memory is None
-    ):
-        raise exc
+    args.out = args.out.expanduser()
+    args.out.mkdir(parents=True, exist_ok=True)
+    # Invalidate stale success before any diagnostic construction can fail.
+    _durably_unlink(args.out / "metrics.json")
+    _ensure_failure_state(args, state)
+    assert state.started_at is not None
+    assert state.start_memory is not None
+    completed = list(state.completed or [])
+    payloads = dict(state.payloads or {})
+    completed_stages = {item.stage for item in completed}
+    arm = next((item for item in ARMS if item.stage not in completed_stages), ARMS[-1])
+    published = state.published_progress
+    if published is not None and published.arm.stage == arm.stage:
+        prelaunch = published.prelaunch
+        stage_started_at = published.stage_started_at
+        progress_override = None
+    else:
+        stage_started_at = _utc_now()
+        prelaunch = _prelaunch_progress(
+            args,
+            arm,
+            supervisor_started_at=state.started_at,
+            stage_started_at=stage_started_at,
+            completed=[item.expected_label for item in completed],
+            start_memory=state.start_memory,
+            embedding_fingerprint=state.embedding_fingerprint,
+        )
+        progress_override = prelaunch
     interrupted = isinstance(exc, KeyboardInterrupt)
     signal_number = (
         exc.signal_number
@@ -2071,26 +2181,23 @@ def _publish_supervisor_exception(
     )
     returncode = -signal_number if signal_number is not None else None
     detail = f"{type(exc).__name__}: {exc}".rstrip(": ")
-    completed = [
-        item for item in (state.completed or []) if item.stage != state.arm.stage
-    ]
+    completed = [item for item in completed if item.stage != arm.stage]
     payloads = {
-        stage: payload
-        for stage, payload in (state.payloads or {}).items()
-        if stage != state.arm.stage
+        stage: payload for stage, payload in payloads.items() if stage != arm.stage
     }
     return _fail(
         args,
-        arm=state.arm,
+        arm=arm,
         failure_class="interrupted" if interrupted else "supervisor_error",
         errors=[detail],
         returncode=returncode,
-        prelaunch=state.prelaunch,
+        prelaunch=prelaunch,
         completed=completed,
         payloads=payloads,
         started_at=state.started_at,
-        stage_started_at=state.stage_started_at,
+        stage_started_at=stage_started_at,
         start_memory=state.start_memory,
+        progress_override=progress_override,
     )
 
 
@@ -2143,6 +2250,7 @@ def _record_post_validation_exception(
 def run(args: argparse.Namespace) -> int:
     state = _RunState()
     try:
+        _bootstrap_run_state(args, state)
         return _run_supervised(args, state)
     except KeyboardInterrupt as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)

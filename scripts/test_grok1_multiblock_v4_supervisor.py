@@ -9,6 +9,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -563,6 +564,330 @@ class SupervisorTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "changed while hashing"):
                     supervisor._embedding_fingerprint(args.embedding_shard)
 
+    def test_early_interrupts_replace_stale_success_with_current_option4(
+        self,
+    ) -> None:
+        phases = (
+            "out_expanduser",
+            "out_mkdir",
+            "npy_expanduser",
+            "meminfo",
+            "prelaunch_write",
+        )
+        signals = (
+            ("sigterm", lambda: supervisor.SupervisorSignal(signal.SIGTERM), "SIGTERM"),
+            ("keyboard", KeyboardInterrupt, "SIGINT"),
+        )
+
+        for phase in phases:
+            for signal_name, make_exception, expected_signal in signals:
+                with (
+                    self.subTest(phase=phase, signal=signal_name),
+                    tempfile.TemporaryDirectory() as td,
+                ):
+                    root = Path(td)
+                    args = self._args(root)
+                    args.out.mkdir(parents=True, exist_ok=True)
+                    (args.out / "metrics.json").write_text(
+                        json.dumps({"decision": {"decision": 2}}), encoding="utf-8"
+                    )
+                    (args.out / "results.md").write_text(
+                        "# stale success\n\n**Option 2 — stale**\n", encoding="utf-8"
+                    )
+                    supervisor._arm_progress(args.out, supervisor.ARMS[0]).write_text(
+                        json.dumps(
+                            {
+                                "current_block": 3,
+                                "completed_blocks": [0, 1, 2, 3],
+                                "input_identity": {"npy_root": "/stale/private/npy"},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    memory = {
+                        "captured_at": "2026-08-23T00:00:00Z",
+                        "values": {"MemAvailable_bytes": 1},
+                        "launch_gate_applied": False,
+                    }
+                    tripped = False
+                    exception = make_exception()
+                    real_expanduser = Path.expanduser
+                    real_mkdir = Path.mkdir
+                    real_atomic_write_json = supervisor._atomic_write_json
+
+                    def interrupt_expanduser(path):
+                        nonlocal tripped
+                        target = (
+                            args.npy_root if phase == "npy_expanduser" else args.out
+                        )
+                        if not tripped and path == target:
+                            tripped = True
+                            raise exception
+                        return real_expanduser(path)
+
+                    def interrupt_mkdir(path, *call_args, **call_kwargs):
+                        nonlocal tripped
+                        if not tripped and path == args.out:
+                            tripped = True
+                            raise exception
+                        return real_mkdir(path, *call_args, **call_kwargs)
+
+                    def interrupt_meminfo():
+                        nonlocal tripped
+                        if not tripped:
+                            tripped = True
+                            raise exception
+                        return memory
+
+                    def interrupt_prelaunch_write(path, payload):
+                        nonlocal tripped
+                        if not tripped and path == supervisor._arm_progress(
+                            args.out, supervisor.ARMS[0]
+                        ):
+                            tripped = True
+                            raise exception
+                        return real_atomic_write_json(path, payload)
+
+                    phase_patch = {
+                        "out_expanduser": mock.patch.object(
+                            Path,
+                            "expanduser",
+                            autospec=True,
+                            side_effect=interrupt_expanduser,
+                        ),
+                        "npy_expanduser": mock.patch.object(
+                            Path,
+                            "expanduser",
+                            autospec=True,
+                            side_effect=interrupt_expanduser,
+                        ),
+                        "out_mkdir": mock.patch.object(
+                            Path,
+                            "mkdir",
+                            autospec=True,
+                            side_effect=interrupt_mkdir,
+                        ),
+                        "meminfo": mock.patch.object(
+                            supervisor,
+                            "_proc_meminfo",
+                            side_effect=interrupt_meminfo,
+                        ),
+                        "prelaunch_write": mock.patch.object(
+                            supervisor,
+                            "_atomic_write_json",
+                            side_effect=interrupt_prelaunch_write,
+                        ),
+                    }[phase]
+                    memory_patch = (
+                        mock.patch.object(
+                            supervisor, "_proc_meminfo", return_value=memory
+                        )
+                        if phase != "meminfo"
+                        else nullcontext()
+                    )
+
+                    with (
+                        phase_patch,
+                        memory_patch,
+                        mock.patch.object(supervisor.subprocess, "run") as child_run,
+                    ):
+                        result = supervisor.run(args)
+
+                    self.assertTrue(tripped)
+                    self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                    self.assertEqual(child_run.call_count, 0)
+                    failure = self._failure(args)
+                    self.assertEqual(failure["decision"]["decision"], 4)
+                    self.assertFalse(failure["protocol_complete"])
+                    self.assertEqual(failure["failure_class"], "interrupted")
+                    self.assertEqual(failure["signal"], expected_signal)
+                    self.assertIsNone(failure["current_block"])
+                    self.assertEqual(failure["completed_blocks"], [])
+                    serialized = json.dumps(failure)
+                    self.assertNotIn("/stale/private", serialized)
+                    self.assertNotIn("stale success", serialized)
+
+    def test_bootstrap_interrupt_still_invalidates_stale_success(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            (args.out / "metrics.json").write_text(
+                json.dumps({"decision": {"decision": 2}}), encoding="utf-8"
+            )
+            real_utc_now = supervisor._utc_now
+            calls = 0
+
+            def interrupt_first_timestamp():
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise supervisor.SupervisorSignal(signal.SIGTERM)
+                return real_utc_now()
+
+            with (
+                mock.patch.object(
+                    supervisor, "_utc_now", side_effect=interrupt_first_timestamp
+                ),
+                mock.patch.object(supervisor.subprocess, "run") as child_run,
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(child_run.call_count, 0)
+            failure = self._failure(args)
+            self.assertEqual(failure["failure_class"], "interrupted")
+            self.assertEqual(failure["failed_arm"], "expert_int4")
+            self.assertEqual(failure["completed_arms"], [])
+            self.assertEqual(failure["completed_blocks"], [])
+
+    def test_transition_interrupts_keep_prior_arms_and_fail_the_next_arm(
+        self,
+    ) -> None:
+        cases = (
+            ("p1", 1, ["expert_int4"]),
+            (
+                "p0",
+                2,
+                ["expert_int4", "expert_int4_channel_alpha_123"],
+            ),
+        )
+        phases = ("prelaunch", "arm_progress", "supervisor_progress")
+        memory = {
+            "captured_at": "2026-08-23T00:00:00Z",
+            "values": {"MemAvailable_bytes": 1},
+            "launch_gate_applied": False,
+        }
+
+        for target_stage, expected_calls, expected_completed in cases:
+            target = next(arm for arm in supervisor.ARMS if arm.stage == target_stage)
+            for phase in phases:
+                with (
+                    self.subTest(target_stage=target_stage, phase=phase),
+                    tempfile.TemporaryDirectory() as td,
+                ):
+                    args = self._args(Path(td))
+                    tripped = False
+                    real_prelaunch = supervisor._prelaunch_progress
+                    real_atomic_write_json = supervisor._atomic_write_json
+
+                    def child(command, **_kwargs):
+                        _write_success(list(command))
+                        return subprocess.CompletedProcess(command, 0, "", "")
+
+                    def interrupt_prelaunch(*call_args, **call_kwargs):
+                        nonlocal tripped
+                        arm = call_args[1]
+                        if (
+                            not tripped
+                            and phase == "prelaunch"
+                            and arm.stage == target_stage
+                        ):
+                            tripped = True
+                            raise supervisor.SupervisorSignal(signal.SIGTERM)
+                        return real_prelaunch(*call_args, **call_kwargs)
+
+                    def interrupt_progress_write(path, payload):
+                        nonlocal tripped
+                        is_target_prelaunch = (
+                            isinstance(payload, dict)
+                            and payload.get("status") == "prelaunch"
+                            and payload.get("stage") == target_stage
+                        )
+                        should_interrupt = (
+                            phase == "arm_progress"
+                            and path == supervisor._arm_progress(args.out, target)
+                        ) or (
+                            phase == "supervisor_progress"
+                            and path == args.out / "supervisor-progress.json"
+                        )
+                        if not tripped and is_target_prelaunch and should_interrupt:
+                            tripped = True
+                            raise supervisor.SupervisorSignal(signal.SIGTERM)
+                        return real_atomic_write_json(path, payload)
+
+                    with (
+                        mock.patch.object(
+                            supervisor,
+                            "_prelaunch_progress",
+                            side_effect=interrupt_prelaunch,
+                        ),
+                        mock.patch.object(
+                            supervisor,
+                            "_atomic_write_json",
+                            side_effect=interrupt_progress_write,
+                        ),
+                        mock.patch.object(
+                            supervisor.subprocess, "run", side_effect=child
+                        ) as child_run,
+                        mock.patch.object(
+                            supervisor, "_proc_meminfo", return_value=memory
+                        ),
+                    ):
+                        result = supervisor.run(args)
+
+                    self.assertTrue(tripped)
+                    self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                    self.assertEqual(child_run.call_count, expected_calls)
+                    failure = self._failure(args)
+                    self.assertEqual(failure["failure_class"], "interrupted")
+                    self.assertEqual(failure["failed_arm"], target.expected_label)
+                    self.assertEqual(failure["completed_arms"], expected_completed)
+                    self.assertEqual(failure["completed_blocks"], [])
+                    self.assertEqual(
+                        failure["progress"]["child"]["stage"], target_stage
+                    )
+                    supervisor_progress = json.loads(
+                        (args.out / "supervisor-progress.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    self.assertEqual(
+                        supervisor_progress["failed_arm"], target.expected_label
+                    )
+                    self.assertEqual(
+                        supervisor_progress["completed_arms"], expected_completed
+                    )
+
+    def test_exception_path_invalidates_metrics_before_diagnostic_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            metrics = args.out / "metrics.json"
+            report = args.out / "results.md"
+            metrics.write_text("stale option 2\n", encoding="utf-8")
+            report.write_text("stale report\n", encoding="utf-8")
+            real_expanduser = Path.expanduser
+            tripped = False
+
+            def interrupt_first_expanduser(path):
+                nonlocal tripped
+                if not tripped and path == args.out:
+                    tripped = True
+                    raise RuntimeError("synthetic setup failure")
+                return real_expanduser(path)
+
+            with (
+                mock.patch.object(
+                    Path,
+                    "expanduser",
+                    autospec=True,
+                    side_effect=interrupt_first_expanduser,
+                ),
+                mock.patch.object(
+                    supervisor,
+                    "_failure_payload",
+                    side_effect=RuntimeError("synthetic diagnostic failure"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "synthetic diagnostic failure"),
+            ):
+                supervisor.run(args)
+
+            self.assertTrue(tripped)
+            self.assertFalse(metrics.exists())
+            self.assertEqual(report.read_text(encoding="utf-8"), "stale report\n")
+
     def test_embedding_hash_interruption_uses_current_portable_prelaunch(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
@@ -693,18 +1018,19 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(run.call_count, 2)
             failure = self._failure(args)
-            self.assertEqual(failure["completed_arms"], [
-                supervisor.ARMS[0].expected_label,
-                supervisor.ARMS[1].expected_label,
-            ])
+            self.assertEqual(
+                failure["completed_arms"],
+                [
+                    supervisor.ARMS[0].expected_label,
+                    supervisor.ARMS[1].expected_label,
+                ],
+            )
             self.assertEqual(failure["failed_arm"], supervisor.ARMS[2].expected_label)
             self.assertIsNone(failure["current_block"])
             self.assertEqual(failure["completed_blocks"], [])
             progress = failure["progress"]["child"]
             self.assertEqual(progress["stage"], "p0")
-            self.assertEqual(
-                progress["input_identity"]["npy_root"], "<NPY_ROOT>"
-            )
+            self.assertEqual(progress["input_identity"]["npy_root"], "<NPY_ROOT>")
             serialized = json.dumps(failure)
             self.assertIn("<OUTPUT_ROOT>/.p0-staging", serialized)
             self.assertNotIn("/stale/private", serialized)
@@ -944,10 +1270,7 @@ class SupervisorTests(unittest.TestCase):
                     )
                     self.assertFalse((staging / "metrics.json").exists())
                     self.assertFalse((staging / "results.md").exists())
-                    self.assertEqual(
-                        (args.out / "metrics.json").read_text(encoding="utf-8"),
-                        prior_metrics,
-                    )
+                    self.assertFalse((args.out / "metrics.json").exists())
                     self.assertEqual(
                         (args.out / "results.md").read_text(encoding="utf-8"),
                         prior_report,
@@ -955,14 +1278,11 @@ class SupervisorTests(unittest.TestCase):
                 report = _write_success(command)
                 if spec.stage == "p0":
                     staged_out = Path(_value(command, "--out"))
-                    primary_bodies["metrics"] = (
-                        staged_out / "metrics.json"
-                    ).read_text(encoding="utf-8")
-                    primary_bodies["report"] = report or ""
-                    self.assertEqual(
-                        (args.out / "metrics.json").read_text(encoding="utf-8"),
-                        prior_metrics,
+                    primary_bodies["metrics"] = (staged_out / "metrics.json").read_text(
+                        encoding="utf-8"
                     )
+                    primary_bodies["report"] = report or ""
+                    self.assertFalse((args.out / "metrics.json").exists())
                 self.assertEqual(kwargs["shell"], False)
                 self.assertEqual(kwargs["capture_output"], True)
                 self.assertEqual(kwargs["text"], True)
@@ -977,10 +1297,7 @@ class SupervisorTests(unittest.TestCase):
                 arm = call_args[1]
                 if arm.stage == "p0":
                     self.assertEqual(call_args[0].parent, staging)
-                    self.assertEqual(
-                        (args.out / "metrics.json").read_text(encoding="utf-8"),
-                        prior_metrics,
-                    )
+                    self.assertFalse((args.out / "metrics.json").exists())
                     self.assertEqual(
                         (args.out / "results.md").read_text(encoding="utf-8"),
                         prior_report,
@@ -1065,9 +1382,9 @@ class SupervisorTests(unittest.TestCase):
                 report = _write_success(command)
                 if spec.stage == "p0":
                     staged_out = Path(_value(command, "--out"))
-                    canonical["metrics"] = (
-                        staged_out / "metrics.json"
-                    ).read_text(encoding="utf-8")
+                    canonical["metrics"] = (staged_out / "metrics.json").read_text(
+                        encoding="utf-8"
+                    )
                     canonical["report"] = report or ""
                 return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -1132,16 +1449,17 @@ class SupervisorTests(unittest.TestCase):
                 ) as fsync_directory,
             ):
                 for attempt in ("initial", "supervisor-exception retry"):
-                    with self.subTest(attempt=attempt), self.assertRaisesRegex(
-                        OSError, "synthetic directory fsync failure"
+                    with (
+                        self.subTest(attempt=attempt),
+                        self.assertRaisesRegex(
+                            OSError, "synthetic directory fsync failure"
+                        ),
                     ):
                         supervisor._publish_failure(out, {})
 
             self.assertEqual(fsync_directory.call_args_list, [mock.call(out)] * 2)
             self.assertFalse(metrics_path.exists())
-            self.assertEqual(
-                report_path.read_text(encoding="utf-8"), "stale report\n"
-            )
+            self.assertEqual(report_path.read_text(encoding="utf-8"), "stale report\n")
 
     def test_validated_success_publishes_metrics_last(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1226,9 +1544,9 @@ class SupervisorTests(unittest.TestCase):
                 report = _write_success(command)
                 if spec.stage == "p0":
                     staged_out = Path(_value(command, "--out"))
-                    canonical["metrics"] = (
-                        staged_out / "metrics.json"
-                    ).read_text(encoding="utf-8")
+                    canonical["metrics"] = (staged_out / "metrics.json").read_text(
+                        encoding="utf-8"
+                    )
                     canonical["report"] = report or ""
                 return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -1317,15 +1635,9 @@ class SupervisorTests(unittest.TestCase):
                 if spec.stage != "p0":
                     _write_success(command)
                     return subprocess.CompletedProcess(command, 0, "", "")
-                self.assertEqual(
-                    (args.out / "metrics.json").read_text(encoding="utf-8"),
-                    prior_metrics,
-                )
+                self.assertFalse((args.out / "metrics.json").exists())
                 _write_success(command, write_report=False)
-                self.assertEqual(
-                    (args.out / "metrics.json").read_text(encoding="utf-8"),
-                    prior_metrics,
-                )
+                self.assertFalse((args.out / "metrics.json").exists())
                 staged = Path(_value(command, "--out")) / "metrics.json"
                 self.assertEqual(
                     json.loads(staged.read_text(encoding="utf-8"))["decision"][
@@ -1353,7 +1665,9 @@ class SupervisorTests(unittest.TestCase):
             staging = args.out / supervisor._P0_STAGING_NAME
             staging.mkdir(parents=True)
             for name in ("metrics.json", "results.md"):
-                (staging / name).write_text("rejected stale evidence\n", encoding="utf-8")
+                (staging / name).write_text(
+                    "rejected stale evidence\n", encoding="utf-8"
+                )
 
             result, run = self._run(
                 args,
@@ -1370,11 +1684,22 @@ class SupervisorTests(unittest.TestCase):
 
     def test_timeout_has_distinct_failure_class(self) -> None:
         with tempfile.TemporaryDirectory() as td:
-            args = self._args(Path(td))
+            root = Path(td)
+            args = self._args(root)
 
             def timeout(command, **kwargs):
+                command = list(command)
+                child_out = Path(_value(command, "--out"))
                 raise subprocess.TimeoutExpired(
-                    command, kwargs["timeout"], "partial", "late"
+                    command,
+                    kwargs["timeout"],
+                    output=(
+                        f"wrote {child_out / 'metrics.json'}\nratio=1/8192\n"
+                    ).encode(),
+                    stderr=(
+                        f"failed {args.npy_root / 'block.npy'} "
+                        f"from {args.pack_root / 'pack.goz1'}\n"
+                    ).encode(),
                 )
 
             result, run = self._run(args, timeout)
@@ -1386,7 +1711,13 @@ class SupervisorTests(unittest.TestCase):
             self.assertIsNone(payload["signal"])
             log = (args.out / "run-01-baseline.log").read_text(encoding="utf-8")
             self.assertIn("timeout: true", log)
-            self.assertIn("partial", log)
+            self.assertIn("wrote <HOST_PATH>/int4-baseline/metrics.json", log)
+            self.assertIn("failed <NPY_ROOT>/block.npy", log)
+            self.assertIn("from <PACK_ROOT>/pack.goz1", log)
+            self.assertIn("ratio=1/8192", log)
+            self.assertNotIn(str(root), log)
+            self.assertNotIn("/home/", log)
+            self.assertNotIn("/tmp/", log)
 
     def test_child_log_command_uses_portable_paths_without_mutating_argv(
         self,
@@ -1408,8 +1739,19 @@ class SupervisorTests(unittest.TestCase):
                 started_at="2026-08-23T00:00:00Z",
                 ended_at="2026-08-23T00:01:00Z",
                 returncode=0,
-                stdout="complete",
-                stderr="",
+                stdout=(
+                    f"wrote {Path(_value(command, '--out')) / 'metrics.json'}\n"
+                    "cos=0.990004 drift=1.4199439171490524e-01 "
+                    "ratio=1/8192 throughput=64 MiB/s"
+                ),
+                stderr=(
+                    f"npy={args.npy_root / 'block.npy'}\n"
+                    f"pack={args.pack_root / 'pack.goz1'}\n"
+                    f"embedding={args.embedding_shard}\n"
+                    f"cache={args.int4_side_root / 'codes.npy'}\n"
+                    f"script={supervisor.EXPERIMENT_SCRIPT}\n"
+                    f"python={sys.executable}"
+                ),
             )
 
             self.assertEqual(command, original_command)
@@ -1431,6 +1773,21 @@ class SupervisorTests(unittest.TestCase):
             self.assertNotIn(str(root), command_line)
             self.assertNotIn(str(supervisor.REPO_ROOT), command_line)
             self.assertNotIn(sys.executable, command_line)
+            self.assertNotIn(str(root), log)
+            self.assertNotIn(str(supervisor.REPO_ROOT), log)
+            self.assertNotIn(sys.executable, log)
+            self.assertIn("wrote <HOST_PATH>/.p0-staging/metrics.json", log)
+            self.assertIn("npy=<NPY_ROOT>/block.npy", log)
+            self.assertIn("pack=<PACK_ROOT>/pack.goz1", log)
+            self.assertIn("embedding=<EMBEDDING_SHARD>", log)
+            self.assertIn("cache=<INT4_SIDE_ROOT>/codes.npy", log)
+            self.assertIn("script=scripts/grok1_multiblock_experiment.py", log)
+            self.assertIn("python=python3", log)
+            self.assertIn(
+                "cos=0.990004 drift=1.4199439171490524e-01 "
+                "ratio=1/8192 throughput=64 MiB/s",
+                log,
+            )
 
     def test_launch_error_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1835,19 +2192,19 @@ class SupervisorTests(unittest.TestCase):
             _install_contract(payload, ranking, 3)
 
         def forged_residual_summary(payload: dict) -> None:
-            payload["comparison"]["summaries"][
-                "expert_int4_channel_alpha_123"
-            ]["residual_in_drift"][-1] = 0.001
+            payload["comparison"]["summaries"]["expert_int4_channel_alpha_123"][
+                "residual_in_drift"
+            ][-1] = 0.001
 
         def forged_js_summary(payload: dict) -> None:
-            payload["comparison"]["summaries"][
-                "expert_int4_channel_alpha_123"
-            ]["expert_load_js_bits"][-1] = 0.5
+            payload["comparison"]["summaries"]["expert_int4_channel_alpha_123"][
+                "expert_load_js_bits"
+            ][-1] = 0.5
 
         def forged_compounding(payload: dict) -> None:
-            payload["comparison"]["summaries"][
-                "expert_int4_channel_alpha_123"
-            ]["compounding"] = "sublinear_or_saturating"
+            payload["comparison"]["summaries"]["expert_int4_channel_alpha_123"][
+                "compounding"
+            ] = "sublinear_or_saturating"
             payload["decision"]["compounding"] = "sublinear_or_saturating"
 
         def forged_decision_compounding(payload: dict) -> None:
