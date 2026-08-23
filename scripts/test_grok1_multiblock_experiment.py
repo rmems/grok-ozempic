@@ -210,7 +210,7 @@ class ResidualMetricsTests(unittest.TestCase):
 
 
 class RunBlockInputIdentityTests(unittest.TestCase):
-    """A block result is publishable only while its NPY inputs stay stable."""
+    """A block result is publishable only while its byte inputs stay stable."""
 
     @staticmethod
     def _cfg() -> multiblock._BlockRunCfg:
@@ -224,8 +224,16 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             int4_side_root=None,
         )
 
-    def _run_with_digests(self, before: str, after: str):
+    def _run_with_digests(
+        self,
+        npy_before: str,
+        npy_after: str,
+        *,
+        pack_before: str = "d" * 64,
+        pack_after: str | None = None,
+    ):
         events: list[str] = []
+        pack_after = pack_before if pack_after is None else pack_after
         h_ref = np.ones((2, 3), dtype=np.float32)
         h_pilot = h_ref.copy()
         ref_out = h_ref + 1.0
@@ -252,11 +260,31 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             "block_output_cosine": 1.0,
             "router_top1_agreement": 1.0,
         }
-        provenance = {"block": 0, "npy_sha256": after}
+        provenance = {
+            "block": 0,
+            "npy_sha256": npy_after,
+            "pack_sha256": pack_before,
+        }
 
         def record_fingerprint(_path: Path) -> str:
-            events.append("fingerprint")
-            return before if events.count("fingerprint") == 1 else after
+            events.append("npy_fingerprint")
+            return (
+                npy_before
+                if events.count("npy_fingerprint") == 1
+                else npy_after
+            )
+
+        def record_pack_sha256(_path: Path) -> str:
+            events.append("pack_sha256")
+            return (
+                pack_before
+                if events.count("pack_sha256") == 1
+                else pack_after
+            )
+
+        def record_sources(*_args, **_kwargs):
+            events.append("load_sources")
+            return reference, pack, mixed, None
 
         def forward(*_args, **_kwargs):
             events.append("forward")
@@ -279,8 +307,13 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             ) as fingerprint,
             mock.patch.object(
                 multiblock,
+                "sha256_file",
+                side_effect=record_pack_sha256,
+            ) as pack_fingerprint,
+            mock.patch.object(
+                multiblock,
                 "load_block_sources",
-                return_value=(reference, pack, mixed, None),
+                side_effect=record_sources,
             ),
             mock.patch.object(multiblock, "forward_block", side_effect=forward),
             mock.patch.object(multiblock, "compare", return_value=comparison),
@@ -301,8 +334,21 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             [mock.call(Path("npy")), mock.call(Path("npy"))],
         )
         self.assertEqual(
+            pack_fingerprint.call_args_list,
+            [mock.call(Path("block.goz1")), mock.call(Path("block.goz1"))],
+        )
+        self.assertEqual(
             events,
-            ["fingerprint", "forward", "forward", "fingerprint", "provenance"],
+            [
+                "npy_fingerprint",
+                "pack_sha256",
+                "load_sources",
+                "forward",
+                "forward",
+                "npy_fingerprint",
+                "provenance",
+                "pack_sha256",
+            ],
         )
         provenance_row.assert_called_once_with(
             0,
@@ -310,7 +356,8 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             Path("npy"),
             pack,
             applied_scale_sources={"gate": "research_int4_side"},
-            npy_sha256=after,
+            npy_sha256=npy_after,
+            pack_sha256=pack_before,
         )
         return result
 
@@ -320,6 +367,7 @@ class RunBlockInputIdentityTests(unittest.TestCase):
         self.assertEqual(row["block"], 0)
         np.testing.assert_array_equal(streams[0], np.full((2, 3), 2.0))
         self.assertEqual(provenance["npy_sha256"], digest)
+        self.assertEqual(provenance["pack_sha256"], "d" * 64)
 
     def test_rejects_changed_npy_fingerprint(self) -> None:
         with self.assertRaisesRegex(
@@ -327,6 +375,43 @@ class RunBlockInputIdentityTests(unittest.TestCase):
             "NPY inputs changed while the forward was being measured",
         ):
             self._run_with_digests("a" * 64, "b" * 64)
+
+    def test_rejects_changed_pack_fingerprint(self) -> None:
+        with self.assertRaisesRegex(
+            ForwardError,
+            "GOZ1 pack changed while the forward was being measured",
+        ):
+            self._run_with_digests(
+                "a" * 64,
+                "a" * 64,
+                pack_before="b" * 64,
+                pack_after="c" * 64,
+            )
+
+
+class PackProvenanceTests(unittest.TestCase):
+    def test_explicit_pack_digest_bypasses_cached_pack_fingerprint(self) -> None:
+        digest = "e" * 64
+        pack = mock.Mock()
+        pack.tensor_names.return_value = []
+        pack.scale_sources = {}
+        pack.scales.return_value = {}
+        pack.metadata = {}
+        pack.pack_sha256.side_effect = AssertionError("cached digest consulted")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pack_path = root / "block.goz1"
+            pack_path.write_bytes(b"pack")
+            row = multiblock.pack_provenance_row(
+                0,
+                pack_path,
+                root,
+                pack,
+                npy_sha256="f" * 64,
+                pack_sha256=digest,
+            )
+        self.assertEqual(row["pack_sha256"], digest)
+        pack.pack_sha256.assert_not_called()
 
 
 class _FakePack:

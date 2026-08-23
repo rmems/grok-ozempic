@@ -29,7 +29,7 @@ from grok1_block_forward import (  # noqa: E402
     ForwardError,
     UnresolvedArchitectureError,
 )
-from grok1_block_weights import implementation_commit  # noqa: E402
+from grok1_block_weights import implementation_commit, sha256_file  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     AGENT_LINE,
     BASELINE_64,
@@ -232,6 +232,7 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
     h_ref, h_pilot, h_fp16 = streams
     npy_dir, pack_path = _block_paths(paths, b)
     npy_sha256_before = npy_dir_fingerprint(npy_dir)
+    pack_sha256_before = sha256_file(pack_path)
     print(f"== block {b:03d}  residual_in shape={h_ref.shape}", flush=True)
     reference, pack, mixed, control = load_block_sources(
         b,
@@ -285,7 +286,13 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         pack,
         applied_scale_sources=applied,
         npy_sha256=npy_sha256_after,
+        pack_sha256=pack_sha256_before,
     )
+    pack_sha256_after = sha256_file(pack_path)
+    if pack_sha256_after != pack_sha256_before:
+        raise ForwardError(
+            f"block {b}: GOZ1 pack changed while the forward was being measured"
+        )
     return row, (ref_trace.block_out, pilot_trace.block_out, next_fp16), prov
 
 

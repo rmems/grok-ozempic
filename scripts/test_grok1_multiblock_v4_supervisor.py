@@ -720,10 +720,23 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(payload["completed_arms"], expected_completed)
                 self.assertNotIn("ranking", payload["comparison"])
 
-    def test_locked_launch_order_arguments_and_successful_non_overwrite(self) -> None:
+    def test_locked_launch_order_arguments_and_supervised_p0_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             args = self._args(root)
+            args.out.mkdir(parents=True, exist_ok=True)
+            prior_metrics = "previous accepted metrics\n"
+            prior_report = "previous accepted report\n"
+            (args.out / "metrics.json").write_text(prior_metrics, encoding="utf-8")
+            (args.out / "results.md").write_text(prior_report, encoding="utf-8")
+            staging = args.out / supervisor._P0_STAGING_NAME
+            staging.mkdir()
+            (staging / "metrics.json").write_text(
+                "stale staged metrics\n", encoding="utf-8"
+            )
+            (staging / "results.md").write_text(
+                "stale staged report\n", encoding="utf-8"
+            )
             commands: list[list[str]] = []
             primary_bodies: dict[str, str] = {}
 
@@ -744,12 +757,27 @@ class SupervisorTests(unittest.TestCase):
                     self.assertTrue(
                         (args.out / "int4-channel-alpha-123" / "metrics.json").is_file()
                     )
+                    self.assertFalse((staging / "metrics.json").exists())
+                    self.assertFalse((staging / "results.md").exists())
+                    self.assertEqual(
+                        (args.out / "metrics.json").read_text(encoding="utf-8"),
+                        prior_metrics,
+                    )
+                    self.assertEqual(
+                        (args.out / "results.md").read_text(encoding="utf-8"),
+                        prior_report,
+                    )
                 report = _write_success(command)
                 if spec.stage == "p0":
-                    primary_bodies["metrics"] = (args.out / "metrics.json").read_text(
-                        encoding="utf-8"
-                    )
+                    staged_out = Path(_value(command, "--out"))
+                    primary_bodies["metrics"] = (
+                        staged_out / "metrics.json"
+                    ).read_text(encoding="utf-8")
                     primary_bodies["report"] = report or ""
+                    self.assertEqual(
+                        (args.out / "metrics.json").read_text(encoding="utf-8"),
+                        prior_metrics,
+                    )
                 self.assertEqual(kwargs["shell"], False)
                 self.assertEqual(kwargs["capture_output"], True)
                 self.assertEqual(kwargs["text"], True)
@@ -758,7 +786,26 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(kwargs["cwd"], str(supervisor.REPO_ROOT))
                 return subprocess.CompletedProcess(command, 0, "ok", "")
 
-            result, run = self._run(args, child)
+            real_validate = supervisor._validate_artifact
+
+            def validate_staged(*call_args, **call_kwargs):
+                arm = call_args[1]
+                if arm.stage == "p0":
+                    self.assertEqual(call_args[0].parent, staging)
+                    self.assertEqual(
+                        (args.out / "metrics.json").read_text(encoding="utf-8"),
+                        prior_metrics,
+                    )
+                    self.assertEqual(
+                        (args.out / "results.md").read_text(encoding="utf-8"),
+                        prior_report,
+                    )
+                return real_validate(*call_args, **call_kwargs)
+
+            with mock.patch.object(
+                supervisor, "_validate_artifact", side_effect=validate_staged
+            ):
+                result, run = self._run(args, child)
             self.assertEqual(result, supervisor.EXIT_OK)
             self.assertEqual(run.call_count, 3)
             self.assertEqual(
@@ -782,7 +829,10 @@ class SupervisorTests(unittest.TestCase):
                 Path(_value(commands[1], "--out")).name,
                 "int4-channel-alpha-123",
             )
-            self.assertEqual(Path(_value(commands[2], "--out")), args.out)
+            self.assertEqual(
+                Path(_value(commands[2], "--out")),
+                args.out / supervisor._P0_STAGING_NAME,
+            )
             p0_comparisons = [
                 commands[2][index + 1]
                 for index, item in enumerate(commands[2])
@@ -792,15 +842,17 @@ class SupervisorTests(unittest.TestCase):
                 [Path(path).parent.name for path in p0_comparisons],
                 ["int4-baseline", "int4-channel-alpha-123"],
             )
-            # The P0 child owns these. The supervisor validates but never rewrites them.
+            # Only the supervisor promotes the validated staged pair.
             self.assertEqual(
-                (args.out / "metrics.json").read_text(encoding="utf-8"),
-                primary_bodies["metrics"],
+                json.loads((args.out / "metrics.json").read_text(encoding="utf-8")),
+                json.loads(primary_bodies["metrics"]),
             )
             self.assertEqual(
                 (args.out / "results.md").read_text(encoding="utf-8"),
                 primary_bodies["report"],
             )
+            self.assertFalse((staging / "metrics.json").exists())
+            self.assertFalse((staging / "results.md").exists())
             final_progress = json.loads(
                 (args.out / "supervisor-progress.json").read_text(encoding="utf-8")
             )
@@ -827,9 +879,10 @@ class SupervisorTests(unittest.TestCase):
                 spec = _spec_for_command(command)
                 report = _write_success(command)
                 if spec.stage == "p0":
-                    canonical["metrics"] = (args.out / "metrics.json").read_text(
-                        encoding="utf-8"
-                    )
+                    staged_out = Path(_value(command, "--out"))
+                    canonical["metrics"] = (
+                        staged_out / "metrics.json"
+                    ).read_text(encoding="utf-8")
                     canonical["report"] = report or ""
                 return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -854,8 +907,8 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(run.call_count, 3)
             self.assertEqual(
-                (args.out / "metrics.json").read_text(encoding="utf-8"),
-                canonical["metrics"],
+                json.loads((args.out / "metrics.json").read_text(encoding="utf-8")),
+                json.loads(canonical["metrics"]),
             )
             self.assertEqual(
                 (args.out / "results.md").read_text(encoding="utf-8"),
@@ -905,6 +958,76 @@ class SupervisorTests(unittest.TestCase):
                 report_path.read_text(encoding="utf-8"), "stale report\n"
             )
 
+    def test_validated_success_publishes_metrics_last(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            events: list[tuple[str, Path, object | None]] = []
+            payload = {"decision": {"decision": 2}}
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "_durably_unlink",
+                    side_effect=lambda path: events.append(("unlink", path, None)),
+                ),
+                mock.patch.object(
+                    supervisor,
+                    "_atomic_write_text",
+                    side_effect=lambda path, body: events.append(
+                        ("report", path, body)
+                    ),
+                ),
+                mock.patch.object(
+                    supervisor,
+                    "_atomic_write_json",
+                    side_effect=lambda path, body: events.append(
+                        ("metrics", path, body)
+                    ),
+                ),
+            ):
+                supervisor._publish_validated_success(out, payload, "validated\n")
+
+            self.assertEqual(
+                events,
+                [
+                    ("unlink", out / "metrics.json", None),
+                    ("report", out / "results.md", "validated\n"),
+                    ("metrics", out / "metrics.json", payload),
+                ],
+            )
+
+    def test_failed_success_promotion_never_marks_canonical_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **_kwargs):
+                _write_success(list(command))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "_publish_validated_success",
+                    side_effect=OSError("synthetic promotion failure"),
+                ),
+                mock.patch.object(
+                    supervisor,
+                    "_record_post_validation_exception",
+                    wraps=supervisor._record_post_validation_exception,
+                ) as post_validation,
+            ):
+                result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 3)
+            self.assertFalse(post_validation.called)
+            failure = self._failure(args)
+            self.assertEqual(failure["decision"]["decision"], 4)
+            self.assertEqual(failure["failure_class"], "supervisor_error")
+            self.assertIn(
+                "synthetic promotion failure", " ".join(failure["failure"]["errors"])
+            )
+
     def test_p0_container_memory_error_preserves_validated_canonical_evidence(
         self,
     ) -> None:
@@ -917,9 +1040,10 @@ class SupervisorTests(unittest.TestCase):
                 spec = _spec_for_command(command)
                 report = _write_success(command)
                 if spec.stage == "p0":
-                    canonical["metrics"] = (args.out / "metrics.json").read_text(
-                        encoding="utf-8"
-                    )
+                    staged_out = Path(_value(command, "--out"))
+                    canonical["metrics"] = (
+                        staged_out / "metrics.json"
+                    ).read_text(encoding="utf-8")
                     canonical["report"] = report or ""
                 return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -940,8 +1064,8 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(run.call_count, 3)
             self.assertEqual(
-                (args.out / "metrics.json").read_text(encoding="utf-8"),
-                canonical["metrics"],
+                json.loads((args.out / "metrics.json").read_text(encoding="utf-8")),
+                json.loads(canonical["metrics"]),
             )
             self.assertEqual(
                 (args.out / "results.md").read_text(encoding="utf-8"),
@@ -986,12 +1110,78 @@ class SupervisorTests(unittest.TestCase):
                 )
                 self.assertEqual(payload["invalid_arms"], ["expert_int4"])
                 self.assertEqual(
-                    json.loads((args.out / "host-at-end.json").read_text())["status"],
+                    json.loads(
+                        (args.out / "host-at-end.json").read_text(encoding="utf-8")
+                    )["status"],
                     "failed",
                 )
                 report = (args.out / "results.md").read_text(encoding="utf-8")
                 self.assertIn("consistent with OOM or an external SIGKILL", report)
                 self.assertIn("Option 4", report)
+
+    def test_p0_partial_staging_sigkill_never_exposes_option_1_to_3(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            prior_metrics = "previous accepted canonical metrics\n"
+            (args.out / "metrics.json").write_text(prior_metrics, encoding="utf-8")
+
+            def child(command, **_kwargs):
+                command = list(command)
+                spec = _spec_for_command(command)
+                if spec.stage != "p0":
+                    _write_success(command)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                self.assertEqual(
+                    (args.out / "metrics.json").read_text(encoding="utf-8"),
+                    prior_metrics,
+                )
+                _write_success(command, write_report=False)
+                self.assertEqual(
+                    (args.out / "metrics.json").read_text(encoding="utf-8"),
+                    prior_metrics,
+                )
+                staged = Path(_value(command, "--out")) / "metrics.json"
+                self.assertEqual(
+                    json.loads(staged.read_text(encoding="utf-8"))["decision"][
+                        "decision"
+                    ],
+                    2,
+                )
+                return subprocess.CompletedProcess(command, -signal.SIGKILL, "", "")
+
+            result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 3)
+            failure = self._failure(args)
+            self.assertEqual(failure["decision"]["decision"], 4)
+            self.assertEqual(failure["failure_class"], "sigkill")
+            self.assertEqual(failure["failed_arm"], "expert_int4_channel_alpha")
+            staging = args.out / supervisor._P0_STAGING_NAME
+            self.assertFalse((staging / "metrics.json").exists())
+            self.assertFalse((staging / "results.md").exists())
+
+    def test_startup_clears_stale_p0_staging_before_early_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            staging = args.out / supervisor._P0_STAGING_NAME
+            staging.mkdir(parents=True)
+            for name in ("metrics.json", "results.md"):
+                (staging / name).write_text("rejected stale evidence\n", encoding="utf-8")
+
+            result, run = self._run(
+                args,
+                lambda command, **_kwargs: subprocess.CompletedProcess(
+                    command, -signal.SIGKILL, "", ""
+                ),
+            )
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(self._failure(args)["decision"]["decision"], 4)
+            self.assertFalse((staging / "metrics.json").exists())
+            self.assertFalse((staging / "results.md").exists())
 
     def test_timeout_has_distinct_failure_class(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1050,7 +1240,7 @@ class SupervisorTests(unittest.TestCase):
                 "<PACK_ROOT>",
                 "<EMBEDDING_SHARD>",
                 "<INT4_SIDE_ROOT>",
-                "<HOST_PATH>/report",
+                "<HOST_PATH>/.p0-staging",
             ):
                 self.assertIn(placeholder, command_line)
             self.assertNotIn(str(root), command_line)
@@ -1189,7 +1379,7 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(payload["failure_class"], "invalid_evidence")
                 self.assertEqual(payload["failed_arm"], "expert_int4")
 
-    def test_zero_exit_p0_metadata_touch_does_not_refresh_results_report(self) -> None:
+    def test_zero_exit_p0_missing_staged_report_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
             args.out.mkdir(parents=True, exist_ok=True)
@@ -1202,8 +1392,6 @@ class SupervisorTests(unittest.TestCase):
                 command = list(command)
                 spec = _spec_for_command(command)
                 _write_success(command, write_report=spec.stage != "p0")
-                if spec.stage == "p0":
-                    (args.out / "results.md").touch()
                 return subprocess.CompletedProcess(command, 0, "", "")
 
             result, run = self._run(args, child)
@@ -1214,7 +1402,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(payload["failed_arm"], "expert_int4_channel_alpha")
             self.assertTrue(
                 any(
-                    "stale canonical results.md" in error
+                    "P0 results.md is missing" in error
                     for error in payload["failure"]["errors"]
                 )
             )

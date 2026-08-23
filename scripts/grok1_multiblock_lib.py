@@ -716,8 +716,8 @@ def _durable_replace(temp_path: Path, final_path: Path) -> None:
             final_path.unlink(missing_ok=True)
             _fsync_directory_strict(final_path.parent)
         except BaseException:
-            # Preserve the publication failure. The final path has at least
-            # been removed from this process's visible namespace.
+            # Preserve the original publication failure even when this
+            # best-effort namespace rollback also fails.
             pass
         raise
 
@@ -1363,15 +1363,23 @@ def pack_provenance_row(
     *,
     applied_scale_sources: dict[str, str] | None = None,
     npy_sha256: str | None = None,
+    pack_sha256: str | None = None,
 ) -> dict:
-    """Machine-readable pack provenance for one block."""
+    """Machine-readable pack provenance for one block.
+
+    Callers that verify pack identity around a measurement may provide the
+    uncached digest so provenance records those verified bytes instead of the
+    ``PackWeights`` instance's cached construction-time fingerprint.
+    """
     names = pack.tensor_names()
     versions = {pack.container_version(n) for n in names}
     versions.discard(None)
     return {
         "block": block,
         "pack": _host_safe_name(pack_path),
-        "pack_sha256": pack.pack_sha256(),
+        "pack_sha256": (
+            pack_sha256 if pack_sha256 is not None else pack.pack_sha256()
+        ),
         "pack_bytes": pack_path.stat().st_size,
         "npy_dir": _host_safe_name(npy_dir),
         "npy_sha256": npy_sha256 or npy_dir_fingerprint(npy_dir),

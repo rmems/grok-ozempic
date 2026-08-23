@@ -66,6 +66,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _EMBEDDING_HASH_CHUNK = 64 * 1024 * 1024
 _IMPROVEMENT_EPS = 1e-3
+_P0_STAGING_NAME = ".p0-staging"
 _REPORT_OPTION_RE = re.compile(
     r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
 )
@@ -139,7 +140,7 @@ ARMS = (
     ArmSpec(
         stage="p0",
         expected_label="expert_int4_channel_alpha",
-        output_name=None,
+        output_name=_P0_STAGING_NAME,
         progress_name="progress-int4-channel-alpha.json",
         cli_tail=("--arm", "int4_channel_alpha", "--write-report-md"),
         evidence_only=False,
@@ -181,16 +182,7 @@ def _atomic_write_text(path: Path, body: str) -> None:
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
         temp_name = None
-        # Best effort directory fsync makes the rename durable on filesystems
-        # that support it.  The final file is already atomic if this fails.
-        try:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-        except OSError:
-            return
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory_strict(path.parent)
     finally:
         if temp_name is not None:
             try:
@@ -321,6 +313,25 @@ def _arm_output(out: Path, arm: ArmSpec) -> Path:
 
 def _arm_progress(out: Path, arm: ArmSpec) -> Path:
     return out / arm.progress_name
+
+
+def _prepare_p0_staging(out: Path) -> None:
+    """Remove only prior unaccepted P0 artifacts before launching its child."""
+    out.mkdir(parents=True, exist_ok=True)
+    _durably_unlink(out / "metrics.json")
+    _durably_unlink(out / "results.md")
+
+
+def _best_effort_clear_p0_staging(out: Path) -> None:
+    """Discard promoted staging files without risking canonical evidence."""
+    for name in ("metrics.json", "results.md"):
+        try:
+            _durably_unlink(out / name)
+        except OSError as exc:
+            print(
+                f"warning: could not clear promoted P0 staging artifact {name}: {exc}",
+                file=sys.stderr,
+            )
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -923,28 +934,32 @@ def _ranking_errors(
     return errors
 
 
-def _report_errors(
+def _validate_report(
     out: Path,
     decision_option: int | None,
     signature_before: tuple[int, int, int, int] | None,
-) -> list[str]:
+) -> tuple[list[str], str | None]:
     report = out / "results.md"
     signature_after = _artifact_signature(report)
     if signature_after is None:
-        return [f"canonical results.md is missing: {report}"]
+        return [f"P0 results.md is missing: {report}"], None
     if signature_before is not None and signature_after[:2] == signature_before[:2]:
-        return [f"P0 child did not refresh stale canonical results.md: {report}"]
+        return [f"P0 child did not refresh stale results.md: {report}"], None
     try:
         body = report.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
-        return [f"canonical results.md is missing or unreadable: {exc}"]
+        return [f"P0 results.md is missing or unreadable: {exc}"], None
     match = _REPORT_OPTION_RE.search(body)
     report_option = int(match.group(1) or match.group(2)) if match else None
     if decision_option is not None and report_option != decision_option:
-        return [
-            f"results.md option={report_option!r} does not match metrics option={decision_option}"
-        ]
-    return []
+        return (
+            [
+                f"results.md option={report_option!r} does not match "
+                f"metrics option={decision_option}"
+            ],
+            None,
+        )
+    return [], body
 
 
 def _primary_errors(
@@ -952,18 +967,21 @@ def _primary_errors(
     out: Path,
     report_signature_before: tuple[int, int, int, int] | None,
     prior_payloads: dict[str, dict[str, Any]],
-) -> list[str]:
+) -> tuple[list[str], str | None]:
     try:
         summaries, expected_ranking, expected_option = _independent_contract(
             prior_payloads, payload
         )
     except (KeyError, TypeError, ValueError, IndexError, OverflowError) as exc:
-        return [f"could not independently recompute canonical ranking: {exc}"]
+        return [f"could not independently recompute canonical ranking: {exc}"], None
     errors, _decision_option = _primary_decision_errors(payload, expected_option)
     errors.extend(_comparison_completeness_errors(payload.get("comparison")))
     errors.extend(_ranking_errors(payload, summaries, expected_ranking))
-    errors.extend(_report_errors(out, expected_option, report_signature_before))
-    return errors
+    report_errors, report_body = _validate_report(
+        out, expected_option, report_signature_before
+    )
+    errors.extend(report_errors)
+    return errors, report_body
 
 
 def _validate_artifact(
@@ -972,10 +990,10 @@ def _validate_artifact(
     *,
     signature_before: tuple[int, int, int, int] | None,
     report_signature_before: tuple[int, int, int, int] | None,
-    canonical_out: Path,
+    artifact_out: Path,
     prior_payloads: dict[str, dict[str, Any]],
     expected_embedding_sha256: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str | None]:
     signature_after = _artifact_signature(metrics_path)
     if signature_after is None:
         raise ArtifactError("invalid_evidence", [f"missing artifact: {metrics_path}"])
@@ -997,21 +1015,21 @@ def _validate_artifact(
         )
     )
     errors.extend(_pack_provenance_errors(payload.get("chain"), arm))
+    report_body: str | None = None
     if arm.evidence_only:
         if "decision" in payload:
             errors.append("evidence-only artifact must not contain a decision")
     else:
-        errors.extend(
-            _primary_errors(
-                payload,
-                canonical_out,
-                report_signature_before,
-                prior_payloads,
-            )
+        primary_errors, report_body = _primary_errors(
+            payload,
+            artifact_out,
+            report_signature_before,
+            prior_payloads,
         )
+        errors.extend(primary_errors)
     if errors:
         raise ArtifactError("invalid_evidence", errors, payload)
-    return payload
+    return payload, report_body
 
 
 def _identity(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1549,11 +1567,20 @@ def _publish_failure(out: Path, payload: dict[str, Any]) -> None:
     """Atomically publish each canonical Option-4 artifact.
 
     ``metrics.json`` is the machine source of truth.  Any prior canonical
-    machine artifact is durably unlinked before the Markdown report changes,
+    ``metrics.json`` is durably unlinked before the Markdown report changes,
     then the Option-4 metrics are replaced last.
     """
     _durably_unlink(out / "metrics.json")
     _atomic_write_text(out / "results.md", _render_failure_report(payload))
+    _atomic_write_json(out / "metrics.json", payload)
+
+
+def _publish_validated_success(
+    out: Path, payload: dict[str, Any], report_body: str
+) -> None:
+    """Promote a validated P0 pair with canonical machine evidence last."""
+    _durably_unlink(out / "metrics.json")
+    _atomic_write_text(out / "results.md", report_body)
     _atomic_write_json(out / "metrics.json", payload)
 
 
@@ -1616,6 +1643,7 @@ def _fail(
         "input_identity"
     )
     _publish_failure(args.out, payload)
+    _best_effort_clear_p0_staging(_arm_output(args.out, _ARM_BY_STAGE["p0"]))
     _best_effort_write_json(
         args.out / "host-at-end.json",
         {
@@ -1695,6 +1723,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     state.arm = ARMS[0]
     state.prelaunch = fingerprint_prelaunch
     state.stage_started_at = fingerprint_started_at
+    _prepare_p0_staging(_arm_output(args.out, _ARM_BY_STAGE["p0"]))
     try:
         embedding_fingerprint = _embedding_fingerprint(args.embedding_shard)
     except OSError as exc:
@@ -1724,13 +1753,6 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
 
     for index, arm in enumerate(ARMS, start=1):
         child_out = _arm_output(args.out, arm)
-        metrics_path = child_out / "metrics.json"
-        signature_before = _artifact_signature(metrics_path)
-        report_signature_before = (
-            _artifact_signature(args.out / "results.md")
-            if not arm.evidence_only
-            else None
-        )
         stage_started_at = _utc_now()
         prelaunch = _prelaunch_progress(
             args,
@@ -1744,6 +1766,15 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         state.arm = arm
         state.prelaunch = prelaunch
         state.stage_started_at = stage_started_at
+        if arm.stage == "p0":
+            _prepare_p0_staging(child_out)
+        metrics_path = child_out / "metrics.json"
+        signature_before = _artifact_signature(metrics_path)
+        report_signature_before = (
+            _artifact_signature(child_out / "results.md")
+            if not arm.evidence_only
+            else None
+        )
         _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
         _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
 
@@ -1879,12 +1910,12 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             )
 
         try:
-            payload = _validate_artifact(
+            payload, report_body = _validate_artifact(
                 metrics_path,
                 arm,
                 signature_before=signature_before,
                 report_signature_before=report_signature_before,
-                canonical_out=args.out,
+                artifact_out=child_out,
                 prior_payloads=payloads,
                 expected_embedding_sha256=embedding_fingerprint["sha256"],
             )
@@ -1926,11 +1957,14 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 )
 
         # The final child artifact has now passed all scientific, report,
-        # ranking, decision, and cross-arm identity checks.  Mark that boundary
-        # before mutating bookkeeping containers so even MemoryError hereafter
-        # preserves the already validated canonical metrics.json/results.md.
+        # ranking, decision, and cross-arm identity checks.  Only the supervisor
+        # may promote it from staging, with canonical metrics published last.
         if arm.stage == "p0":
+            if report_body is None:
+                raise AssertionError("validated P0 artifact has no report body")
+            _publish_validated_success(args.out, payload, report_body)
             state.canonical_validated = True
+            _best_effort_clear_p0_staging(child_out)
         _record_validated_arm(payloads, completed, arm, payload)
         _atomic_write_json(
             args.out / "supervisor-progress.json",
@@ -1943,9 +1977,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             ),
         )
 
-    # The P0 child owns canonical metrics.json/results.md.  After validating the
-    # complete three-arm result, the supervisor only updates its own progress
-    # record; it must not rewrite or reformat the scientific artifacts.
+    # Canonical scientific artifacts were promoted only after all three arms
+    # passed validation. Remaining writes are supplemental supervisor records.
     _atomic_write_json(
         args.out / "supervisor-progress.json",
         {
