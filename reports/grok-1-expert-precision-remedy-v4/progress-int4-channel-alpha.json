@@ -12,17 +12,17 @@
     "top_k": 2
   },
   "implementation": {
-    "commit": "35c4927b8abd8a084f0b820c3b1112faafabd60d",
+    "commit": "7232973a0059497055104cd1a35072204535b2c2",
     "dirty": false
   },
   "input_identity": {
-    "npy_root": "/home/raulmc/.models/xai-grok-1/export-npy",
+    "npy_root": "<NPY_ROOT>",
     "npy_pattern": "goz68-block_{block:03d}-attn",
-    "pack_root": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68",
+    "pack_root": "<PACK_ROOT>",
     "pack_pattern": "block_{block:03d}-attention_plus_expert.goz1",
-    "embedding_shard": "/home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
     "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
-    "int4_side_root": "/home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-35c4927"
+    "int4_side_root": "<INT4_SIDE_ROOT>"
   },
   "provenance_identity": {
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",

@@ -21,7 +21,7 @@
       "size_bytes": 3221225600
     }
   },
-  "ended_at": "2026-08-23T18:24:24.667617Z",
+  "ended_at": "2026-08-23T23:21:47.169271Z",
   "expected_arm_label": "expert_int4_channel_alpha",
   "planned_arms": [
     "expert_int4",
@@ -44,6 +44,6 @@
   "protocol_complete": true,
   "stage": "p0",
   "status": "complete",
-  "supervisor_started_at": "2026-08-23T15:26:14.198298Z",
-  "updated_at": "2026-08-23T18:24:24.667602Z"
+  "supervisor_started_at": "2026-08-23T20:21:48.902000Z",
+  "updated_at": "2026-08-23T23:21:47.169262Z"
 }

@@ -4,7 +4,7 @@
 
 **Issue:** GH #85 / Linear RM-608 / beads `goz-3h3`
 
-**Implementation commit:** `35c4927b8abd8a084f0b820c3b1112faafabd60d` (`implementation.dirty: false`)
+**Implementation commit:** `7232973a0059497055104cd1a35072204535b2c2` (`implementation.dirty: false`)
 
 **Runtime:** Python 3.14.6; NumPy 2.5.1
 
@@ -71,7 +71,7 @@ Historical issue #80 P0 all-INT4 reported block-3 top-1 **0.850586 at 2048 token
 - Plain INT4 uses persisted per-output-channel absmax codes/scales. The alpha arms reuse the shared INT4 codes with float64 least-squares per-output-channel alpha scales.
 - Expert tensors were traversed deterministically in approximately 64 MiB whole-row intra-expert chunks. Reference fingerprints streamed in C order; quantization used a two-pass absmax build and read-only memory-mapped code reuse.
 - Cache publication uses a persistent per-block POSIX advisory lock shared by absmax and LS-alpha modes, atomic replacement, file `fsync`, and strict parent-directory `fsync`; active-sidecar removal is also directory-synced. The cache therefore requires a local POSIX filesystem with working `flock` and directory `fsync` semantics.
-- The external side-table cache was fresh for this implementation identity. Directory `gh85-v4-8192-int4-side-35c4927` finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
+- The external side-table cache was fresh for this implementation identity. Directory `gh85-v4-8192-int4-side-7232973` finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
 
 ## Per-block evidence
 
@@ -127,7 +127,7 @@ The deterministic FP16 control trajectory is identical across the three arms and
 
 ## Provenance
 
-The supervisor ran from 2026-08-23 15:26:14Z through 18:24:24Z (2:58:10.469). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
+The supervisor ran from 2026-08-23 20:21:48Z through 23:21:47Z (2:59:58.267). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
 
 | block | GOZ1 pack SHA-256 | NPY directory SHA-256 |
 |---:|---|---|
@@ -136,7 +136,7 @@ The supervisor ran from 2026-08-23 15:26:14Z through 18:24:24Z (2:58:10.469). It
 | 2 | `e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560` | `5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f` |
 | 3 | `9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302` | `39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7` |
 
-The launch snapshot recorded 64,906,240,000 bytes total RAM, 22,173,421,568 bytes available RAM, and 557,056 bytes free swap. No launch gate was applied. The end snapshot recorded 24,801,542,144 bytes available RAM and a maximum child RSS of 15,706,816 KiB. These are observational host snapshots, not proof of behavior on another host.
+The launch snapshot recorded 64,906,240,000 bytes total RAM, 21,069,172,736 bytes available RAM, and 184,320 bytes free swap. No launch gate was applied. The end snapshot recorded 20,392,099,840 bytes available RAM and a maximum child RSS of 15,678,876 KiB. These are observational host snapshots, not proof of behavior on another host.
 
 ## Reproduction
 
@@ -146,7 +146,7 @@ Implementation must be committed and clean before launch. Configure local input 
 GH85_NPY_ROOT=/path/to/export-npy
 GH85_PACK_ROOT=/path/to/multiblock-68
 GH85_EMBEDDING=/path/to/embedding__slot_00__token_embedding.npy
-GH85_SIDE_ROOT=/path/to/cache/gh85-v4-8192-int4-side-35c4927
+GH85_SIDE_ROOT=/path/to/cache/gh85-v4-8192-int4-side-7232973
 
 python3 scripts/grok1_multiblock_v4_supervisor.py \
   --npy-root "$GH85_NPY_ROOT" \
