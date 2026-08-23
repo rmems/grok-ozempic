@@ -1,10 +1,12 @@
 # Expert stacked INT4 + LS channel-alpha multi-block fidelity (#85)
 
-**Agent:** Grok Build: Grok 4.5 (xAI)
+**Agent:** Grok Build: Grok 4.5 (high) (xAI)
 
 **Issue:** GH #85 / Linear RM-608 / beads `goz-3h3`
 
-**Implementation commit:** `382c89093eaf8c5d9d9f7a4565a4489922eb363a` (`implementation.dirty: false`)
+**Implementation commit:** `734ed5a4252de06266a8566f582d1b9ad7286d59` (`implementation.dirty: false`)
+
+**Embedding SHA-256:** `55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6`
 
 **Run status:** complete; the supervisor validated all three mandatory arms and the canonical P0 artifacts
 
@@ -39,7 +41,7 @@ The all-block P0 candidate, `expert_int4_channel_alpha`, is lower complexity but
 
 ## Same-budget comparison
 
-All values below are measured at 8192 tokens with the same seed, blocks, `top_k`, packs, NPY inputs, and clean implementation commit.
+All values below are measured at 8192 tokens with the same seed, blocks, `top_k`, packs, NPY inputs, clean implementation commit, and pinned embedding content.
 
 | Signal | INT4 baseline (comparator) | P1 alpha+HP123 | P0 alpha all blocks |
 |---|---:|---:|---:|
@@ -57,7 +59,9 @@ Historical issue #80 P0 all-INT4 reported block-3 top-1 **0.850586 at 2048 token
 
 - A standard-library-only out-of-process supervisor launched exactly one arm at a time in the locked order: baseline -> P1 -> P0.
 - The supervisor hard-locked tokens 8192, seed 20260806, blocks `0,1,2,3`, `top_k=2`, and FP16 controls. `fallback_tokens` is `null`; no 2048-token command was launched.
+- The supervisor hashed the entire 3,221,225,600-byte embedding shard once in approximately 64 MiB chunks, pinned the digest into every child artifact, and verified the path and opened target identity before and after the run.
 - Baseline and P1 wrote evidence-only `metrics.json` files. P0 consumed both as `--comparison-metrics`, assembled the decision, and owned the canonical `metrics.json` and `results.md`.
+- The supervisor independently recomputed complete summaries, candidate ranking, baseline deltas, tie behavior, and the decision from the three raw chains before accepting the P0 artifacts.
 - Each arm used a sequential, paired residual trajectory. No Gaussian proxy was used, and embedding input was not substituted for blocks greater than 0.
 - Only expert payload precision changed. Attention, routers, norms, and the FP reference remained high precision.
 - Plain INT4 uses persisted per-output-channel absmax codes/scales. The alpha arms reuse the shared INT4 codes with float64 least-squares per-output-channel alpha scales.
@@ -118,7 +122,7 @@ The deterministic FP16 control trajectory is identical across the three arms and
 
 ## Provenance
 
-The supervisor ran from 2026-08-23 07:25:45Z through 10:12:33Z (2:46:47.597). It recorded the clean implementation identity before launch, revalidated protocol and provenance after every child, and validated the P0/P1 ranking after the final arm.
+The supervisor ran from 2026-08-23 11:44:50Z through 14:52:56Z (3:08:05.900). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
 
 | block | GOZ1 pack SHA-256 | NPY directory SHA-256 |
 |---:|---|---|
@@ -127,7 +131,7 @@ The supervisor ran from 2026-08-23 07:25:45Z through 10:12:33Z (2:46:47.597). It
 | 2 | `e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560` | `5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f` |
 | 3 | `9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302` | `39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7` |
 
-The launch snapshot recorded 64,906,240,000 bytes total RAM, 20,329,181,184 bytes available RAM, and 1,409,024 bytes free swap. No launch gate was applied. The end snapshot recorded 26,896,441,344 bytes available RAM and a maximum child RSS of 15,708,372 KiB. These are observational host snapshots, not proof of behavior on another host.
+The launch snapshot recorded 64,906,240,000 bytes total RAM, 23,277,445,120 bytes available RAM, and 225,280 bytes free swap. No launch gate was applied. The end snapshot recorded 22,540,877,824 bytes available RAM and a maximum child RSS of 15,707,640 KiB. These are observational host snapshots, not proof of behavior on another host.
 
 ## Reproduction
 
@@ -140,7 +144,7 @@ python3 scripts/grok1_multiblock_v4_supervisor.py \
   --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 \
   --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' \
   --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy \
-  --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-382c890 \
+  --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a \
   --out reports/grok-1-expert-precision-remedy-v4
 ```
 

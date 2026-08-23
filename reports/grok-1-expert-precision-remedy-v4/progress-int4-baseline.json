@@ -12,7 +12,7 @@
     "top_k": 2
   },
   "implementation": {
-    "commit": "382c89093eaf8c5d9d9f7a4565a4489922eb363a",
+    "commit": "734ed5a4252de06266a8566f582d1b9ad7286d59",
     "dirty": false
   },
   "input_identity": {
@@ -21,7 +21,8 @@
     "pack_root": "/home/raulmc/.models/xai-grok-1/artifacts/multiblock-68",
     "pack_pattern": "block_{block:03d}-attention_plus_expert.goz1",
     "embedding_shard": "/home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy",
-    "int4_side_root": "/home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-382c890"
+    "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "int4_side_root": "/home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a"
   },
   "provenance_identity": {
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
@@ -32,6 +33,8 @@
     "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
     "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle"
   },
+  "arm_label": "expert_int4",
+  "hp_blocks": [],
   "pack_provenance": [
     {
       "block": 0,

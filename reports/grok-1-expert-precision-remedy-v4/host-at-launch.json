@@ -1,14 +1,31 @@
 {
+  "embedding_fingerprint": {
+    "path": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    },
+    "sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "target": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    }
+  },
   "memory": {
-    "captured_at": "2026-08-23T07:25:45.528250Z",
-    "children_max_rss_kib": 26980,
+    "captured_at": "2026-08-23T11:44:50.286975Z",
+    "children_max_rss_kib": 29188,
     "launch_gate_applied": false,
     "source": "/proc/meminfo + resource.getrusage",
-    "supervisor_max_rss_kib": 365344,
+    "supervisor_max_rss_kib": 1044508,
     "values": {
-      "MemAvailable_bytes": 20329181184,
+      "MemAvailable_bytes": 23277445120,
       "MemTotal_bytes": 64906240000,
-      "SwapFree_bytes": 1409024,
+      "SwapFree_bytes": 225280,
       "SwapTotal_bytes": 8589930496
     }
   },

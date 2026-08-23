@@ -1,38 +1,38 @@
-started_at: 2026-08-23T07:25:45.533819Z
-ended_at: 2026-08-23T08:27:31.040599Z
-command: /home/raulmc/rmems/grok-ozempic/.venv/bin/python3 /home/raulmc/rmems/grok-ozempic-wt-85-supervisor/scripts/grok1_multiblock_experiment.py --npy-root /home/raulmc/.models/xai-grok-1/export-npy --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-382c890 --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4/int4-baseline --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-baseline.json --arm int4 --evidence-only
+started_at: 2026-08-23T11:44:52.674857Z
+ended_at: 2026-08-23T12:50:05.557520Z
+command: /home/raulmc/rmems/grok-ozempic/.venv/bin/python3 /home/raulmc/rmems/grok-ozempic-wt-85-supervisor/scripts/grok1_multiblock_experiment.py --npy-root /home/raulmc/.models/xai-grok-1/export-npy --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy --embedding-sha256 55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6 --int4-side-root /home/raulmc/.models/xai-grok-1/artifacts/gh85-v4-8192-int4-side-734ed5a --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4/int4-baseline --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-baseline.json --arm int4 --evidence-only
 returncode: 0
 timeout: false
 
 ----- stdout -----
 == block 000  residual_in shape=(8192, 6144)
   reference forward ...
-    247.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    263.6s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    300.2s  cos=0.998637 top1=1.000000 drift=0.000000
+    349.2s  cos=0.998637 top1=1.000000 drift=0.000000
   fp16 control ...
-    301.4s  block_out_cos=0.999966
+    287.2s  block_out_cos=0.999966
 == block 001  residual_in shape=(8192, 6144)
   reference forward ...
-    227.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    251.4s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    278.9s  cos=0.997567 top1=0.982300 drift=0.052476
+    316.8s  cos=0.997567 top1=0.982300 drift=0.052476
   fp16 control ...
-    279.2s  block_out_cos=0.999966
+    290.1s  block_out_cos=0.999966
 == block 002  residual_in shape=(8192, 6144)
   reference forward ...
-    227.9s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    244.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    298.0s  cos=0.988657 top1=0.926270 drift=0.069880
+    325.4s  cos=0.988657 top1=0.926270 drift=0.069880
   fp16 control ...
-    281.3s  block_out_cos=0.999765
+    300.7s  block_out_cos=0.999765
 == block 003  residual_in shape=(8192, 6144)
   reference forward ...
-    240.7s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    240.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    298.3s  cos=0.980566 top1=0.823730 drift=0.150499
+    315.1s  cos=0.980566 top1=0.823730 drift=0.150499
   fp16 control ...
-    297.2s  block_out_cos=0.999437
+    288.6s  block_out_cos=0.999437
 wrote reports/grok-1-expert-precision-remedy-v4/int4-baseline/metrics.json
 EVIDENCE ONLY: no decision emitted
 

@@ -4,7 +4,24 @@
     "expert_int4_channel_alpha_123",
     "expert_int4_channel_alpha"
   ],
-  "ended_at": "2026-08-23T10:12:33.125207Z",
+  "embedding_fingerprint": {
+    "path": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    },
+    "sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "target": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    }
+  },
+  "ended_at": "2026-08-23T14:52:56.186811Z",
   "expected_arm_label": "expert_int4_channel_alpha",
   "planned_arms": [
     "expert_int4",
@@ -27,6 +44,6 @@
   "protocol_complete": true,
   "stage": "p0",
   "status": "complete",
-  "supervisor_started_at": "2026-08-23T07:25:45.528237Z",
-  "updated_at": "2026-08-23T10:12:33.125197Z"
+  "supervisor_started_at": "2026-08-23T11:44:50.286965Z",
+  "updated_at": "2026-08-23T14:52:56.186800Z"
 }
