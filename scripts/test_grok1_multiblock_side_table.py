@@ -6,6 +6,7 @@ import hashlib
 import json
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -149,45 +150,147 @@ class AtomicSideTableTests(unittest.TestCase):
             )
 
     def test_invalidation_fsync_failure_aborts_before_q_publication(self) -> None:
-        for failure in ("open", "fsync"):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as td:
-                reference = _reference(_arrays(1))
-                side = Int4SideExperts(
-                    reference,
-                    side_root=Path(td),
-                    block=0,
-                    scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
-                )
-                source = _arrays(2)["gate"]
-                fingerprint = _reference_fingerprint(source)
-                events: list[str] = []
+        with tempfile.TemporaryDirectory() as td:
+            reference = _reference(_arrays(1))
+            side = Int4SideExperts(
+                reference,
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            source = _arrays(2)["gate"]
+            fingerprint = _reference_fingerprint(source)
+            events: list[str] = []
 
-                def record(
-                    _self,
-                    step: str,
-                    _path: Path,
-                    _events: list[str] = events,
-                ) -> None:
-                    _events.append(step)
+            def record(_self, step: str, _path: Path) -> None:
+                events.append(step)
 
-                failure_patch = (
-                    mock.patch.object(lib.os, "open", side_effect=OSError("open failed"))
-                    if failure == "open"
-                    else mock.patch.object(
-                        lib.os, "fsync", side_effect=OSError("fsync failed")
-                    )
+            with mock.patch.object(
+                lib,
+                "_fsync_directory_strict",
+                side_effect=lib.ForwardError("could not fsync INT4 cache directory"),
+            ), mock.patch.object(
+                Int4SideExperts, "_publish_hook", autospec=True, side_effect=record
+            ), self.assertRaisesRegex(lib.ForwardError, "INT4 cache directory"):
+                side._build_shared_codes(
+                    "gate",
+                    source,
+                    tuple(int(value) for value in source.shape),
+                    fingerprint,
                 )
-                with failure_patch, mock.patch.object(
-                    Int4SideExperts, "_publish_hook", autospec=True, side_effect=record
-                ), self.assertRaisesRegex(lib.ForwardError, "INT4 cache directory"):
-                    side._build_shared_codes(
-                        "gate",
-                        source,
-                        tuple(int(value) for value in source.shape),
-                        fingerprint,
-                    )
-                self.assertNotIn("q_published", events)
-                self.assertNotIn("fingerprint_published", events)
+            self.assertNotIn("q_published", events)
+            self.assertNotIn("fingerprint_published", events)
+
+    def test_publication_fsync_failure_removes_each_ambiguous_final(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            q_temp = root / ".gate.npy.tmp"
+            q_final = root / "gate.npy"
+            q_temp.write_bytes(b"complete-q")
+            with mock.patch.object(
+                lib,
+                "_fsync_directory_strict",
+                side_effect=lib.ForwardError("directory fsync failed"),
+            ), self.assertRaisesRegex(lib.ForwardError, "directory fsync failed"):
+                lib._publish_temp(q_temp, q_final)
+            self.assertFalse(q_final.exists())
+
+            sidecar = root / "sidecar.json"
+            with mock.patch.object(
+                lib,
+                "_fsync_directory_strict",
+                side_effect=lib.ForwardError("directory fsync failed"),
+            ), self.assertRaisesRegex(lib.ForwardError, "directory fsync failed"):
+                lib._atomic_write_json(sidecar, {"complete": True})
+            self.assertFalse(sidecar.exists())
+
+            scale = root / "scale.npy"
+            with mock.patch.object(
+                lib,
+                "_fsync_directory_strict",
+                side_effect=lib.ForwardError("directory fsync failed"),
+            ), self.assertRaisesRegex(lib.ForwardError, "directory fsync failed"):
+                lib._atomic_save_npy(scale, np.ones((2, 3), dtype=np.float32))
+            self.assertFalse(scale.exists())
+
+    def test_active_sidecar_deletion_is_directory_fsynced(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            side = Int4SideExperts(
+                _reference(_arrays()),
+                side_root=Path(td),
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+            sidecar = side._side_dir / "sidecar.json"
+            self.assertTrue(sidecar.is_file())
+            with mock.patch.object(
+                lib,
+                "_fsync_directory_strict",
+                wraps=lib._fsync_directory_strict,
+            ) as fsync:
+                side._invalidate_active_sidecar()
+            self.assertFalse(sidecar.exists())
+            fsync.assert_called_once_with(side._side_dir)
+
+    def test_per_block_lock_serializes_cache_transactions(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            lock_path = Path(td) / "block_000" / ".int4-side.lock"
+            first_entered = threading.Event()
+            release_first = threading.Event()
+            second_started = threading.Event()
+            second_entered = threading.Event()
+
+            def hold_first() -> None:
+                with lib._int4_cache_lock(lock_path):
+                    first_entered.set()
+                    release_first.wait(timeout=2)
+
+            def enter_second() -> None:
+                second_started.set()
+                with lib._int4_cache_lock(lock_path):
+                    second_entered.set()
+
+            first = threading.Thread(target=hold_first)
+            second = threading.Thread(target=enter_second)
+            first.start()
+            self.assertTrue(first_entered.wait(timeout=2))
+            second.start()
+            self.assertTrue(second_started.wait(timeout=2))
+            self.assertFalse(second_entered.wait(timeout=0.05))
+            release_first.set()
+            self.assertTrue(second_entered.wait(timeout=2))
+            first.join(timeout=2)
+            second.join(timeout=2)
+            self.assertFalse(first.is_alive())
+            self.assertFalse(second.is_alive())
+
+    def test_both_modes_use_the_same_persistent_block_lock(self) -> None:
+        observed: list[Path] = []
+        real_lock = lib._int4_cache_lock
+
+        def record_lock(path: Path):
+            observed.append(path)
+            return real_lock(path)
+
+        with tempfile.TemporaryDirectory() as td, mock.patch.object(
+            lib, "_int4_cache_lock", side_effect=record_lock
+        ):
+            root = Path(td)
+            reference = _reference(_arrays())
+            Int4SideExperts(
+                reference,
+                side_root=root,
+                block=0,
+                scale_mode=INT4_SCALE_ABSMAX,
+            )
+            Int4SideExperts(
+                reference,
+                side_root=root,
+                block=0,
+                scale_mode=INT4_SCALE_LS_CHANNEL_ALPHA,
+            )
+        expected = Path(td) / "block_000" / ".int4-side.lock"
+        self.assertEqual(observed, [expected, expected])
 
     def test_publication_order_is_q_then_fingerprint_then_scale_then_sidecar(self) -> None:
         events: list[str] = []

@@ -13,8 +13,14 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - exercised only off POSIX
+    _fcntl = None
 
 import numpy as np
 
@@ -52,7 +58,7 @@ REMEDY_V3_AGENT_LINE = (
 )
 
 REMEDY_V4_AGENT_LINE = (
-    "Grok Build: Grok 4.5 (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
+    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
 )
 
 # #85 / RM-608 — Grok-1 max *sequence* budget for the real causal forward.
@@ -671,20 +677,6 @@ def _fsync_file(path: Path) -> None:
         os.close(fd)
 
 
-def _fsync_directory(path: Path) -> None:
-    """Best-effort durability for a same-directory atomic publication."""
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
 def _fsync_directory_strict(path: Path) -> None:
     """Persist certifying-cache namespace changes or fail closed."""
     try:
@@ -708,10 +700,31 @@ def _fsync_directory_strict(path: Path) -> None:
         os.close(fd)
 
 
+def _durable_replace(temp_path: Path, final_path: Path) -> None:
+    """Rename a complete cache entry and prove its directory entry durable.
+
+    A rename followed by a directory-fsync failure is not a successful
+    certifying publication.  Remove the ambiguous final name before returning
+    the original error so a later reader cannot mistake it for durable cache
+    state.
+    """
+    os.replace(temp_path, final_path)
+    try:
+        _fsync_directory_strict(final_path.parent)
+    except BaseException:
+        try:
+            final_path.unlink(missing_ok=True)
+            _fsync_directory_strict(final_path.parent)
+        except BaseException:
+            # Preserve the publication failure. The final path has at least
+            # been removed from this process's visible namespace.
+            pass
+        raise
+
+
 def _publish_temp(temp_path: Path, final_path: Path) -> None:
     _fsync_file(temp_path)
-    os.replace(temp_path, final_path)
-    _fsync_directory(final_path.parent)
+    _durable_replace(temp_path, final_path)
 
 
 def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
@@ -721,8 +734,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
             handle.write(json.dumps(payload, indent=2) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-        _fsync_directory(path.parent)
+        _durable_replace(temp_path, path)
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -734,10 +746,37 @@ def _atomic_save_npy(path: Path, array: np.ndarray) -> None:
             np.save(handle, np.asarray(array), allow_pickle=False)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-        _fsync_directory(path.parent)
+        _durable_replace(temp_path, path)
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+@contextmanager
+def _int4_cache_lock(path: Path) -> Iterator[None]:
+    """Serialize one block's shared q/scale/sidecar cache transaction.
+
+    The certifying cache requires a local POSIX filesystem that supports both
+    advisory ``flock`` and directory fsync.  All writers in this repository use
+    the same persistent per-block lock file.
+    """
+    if _fcntl is None:
+        raise ForwardError(
+            "INT4 certifying cache requires POSIX advisory flock support"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise ForwardError(f"could not open INT4 cache lock {path}: {exc}") from exc
+    try:
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+        except OSError as exc:
+            raise ForwardError(f"could not acquire INT4 cache lock {path}: {exc}") from exc
+        yield
+    finally:
+        os.close(fd)
 
 
 class Int4SideExperts:
@@ -748,7 +787,8 @@ class Int4SideExperts:
     claim pack_v2. Layout under ``side_root/block_{BBB}/``:
     ``{tensor}__q_int8.npy``, ``{tensor}__scale_f32.npy``, ``sidecar.json``.
     Missing tables are built once from the FP32 reference and written before
-    any forward access.
+    any forward access. The cache root must be on a local POSIX filesystem with
+    working advisory ``flock`` and directory fsync semantics.
     """
 
     def __init__(
@@ -780,7 +820,9 @@ class Int4SideExperts:
         self._block = int(block)
         self._set_paths(Path(side_root).expanduser())
         self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        self._write_sidecar(self._build_sidecar(codec))
+        lock_path = self._absmax_dir / ".int4-side.lock"
+        with _int4_cache_lock(lock_path):
+            self._write_sidecar(self._build_sidecar(codec))
 
     def _set_paths(self, root: Path) -> None:
         """Absmax keeps the #80 layout; LS-α nests the scale under ``ls-alpha/``.
@@ -910,6 +952,7 @@ class Int4SideExperts:
 
     def _invalidate_active_sidecar(self) -> None:
         self._remove_path(self._side_dir / "sidecar.json")
+        _fsync_directory_strict(self._side_dir)
 
     def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Scale layout for preserved-expert INT4 scales.
@@ -1319,6 +1362,7 @@ def pack_provenance_row(
     pack: PackWeights,
     *,
     applied_scale_sources: dict[str, str] | None = None,
+    npy_sha256: str | None = None,
 ) -> dict:
     """Machine-readable pack provenance for one block."""
     names = pack.tensor_names()
@@ -1330,7 +1374,7 @@ def pack_provenance_row(
         "pack_sha256": pack.pack_sha256(),
         "pack_bytes": pack_path.stat().st_size,
         "npy_dir": _host_safe_name(npy_dir),
-        "npy_sha256": npy_dir_fingerprint(npy_dir),
+        "npy_sha256": npy_sha256 or npy_dir_fingerprint(npy_dir),
         "container_versions": sorted(versions),
         "scale_sources": dict(applied_scale_sources or pack.scale_sources),
         "pack_scale_sources": dict(pack.scale_sources),

@@ -209,6 +209,126 @@ class ResidualMetricsTests(unittest.TestCase):
         self.assertGreater(m["residual_in_drift_relative_norm"], 0.9)
 
 
+class RunBlockInputIdentityTests(unittest.TestCase):
+    """A block result is publishable only while its NPY inputs stay stable."""
+
+    @staticmethod
+    def _cfg() -> multiblock._BlockRunCfg:
+        return multiblock._BlockRunCfg(
+            top_k=2,
+            skip_fp16=True,
+            expert_mode="int4",
+            hp_blocks=frozenset(),
+            hp_period=2,
+            hp_label="",
+            int4_side_root=None,
+        )
+
+    def _run_with_digests(self, before: str, after: str):
+        events: list[str] = []
+        h_ref = np.ones((2, 3), dtype=np.float32)
+        h_pilot = h_ref.copy()
+        ref_out = h_ref + 1.0
+        pilot_out = h_pilot + 1.0
+        reference = object()
+        pack = object()
+        mixed = argparse.Namespace(
+            label="research_int4_side",
+            applied_scale_sources={"gate": "research_int4_side"},
+        )
+        traces = [
+            argparse.Namespace(
+                seconds=0.01,
+                experts_touched=[0],
+                block_out=ref_out,
+            ),
+            argparse.Namespace(
+                seconds=0.02,
+                experts_touched=[0],
+                block_out=pilot_out,
+            ),
+        ]
+        comparison = {
+            "block_output_cosine": 1.0,
+            "router_top1_agreement": 1.0,
+        }
+        provenance = {"block": 0, "npy_sha256": after}
+
+        def record_fingerprint(_path: Path) -> str:
+            events.append("fingerprint")
+            return before if events.count("fingerprint") == 1 else after
+
+        def forward(*_args, **_kwargs):
+            events.append("forward")
+            return traces.pop(0)
+
+        def record_provenance(*_args, **_kwargs):
+            events.append("provenance")
+            return provenance
+
+        with (
+            mock.patch.object(
+                multiblock,
+                "_block_paths",
+                return_value=(Path("npy"), Path("block.goz1")),
+            ),
+            mock.patch.object(
+                multiblock,
+                "npy_dir_fingerprint",
+                side_effect=record_fingerprint,
+            ) as fingerprint,
+            mock.patch.object(
+                multiblock,
+                "load_block_sources",
+                return_value=(reference, pack, mixed, None),
+            ),
+            mock.patch.object(multiblock, "forward_block", side_effect=forward),
+            mock.patch.object(multiblock, "compare", return_value=comparison),
+            mock.patch.object(
+                multiblock,
+                "pack_provenance_row",
+                side_effect=record_provenance,
+            ) as provenance_row,
+        ):
+            result = multiblock._run_block(
+                0,
+                object(),
+                (h_ref, h_pilot, None),
+                self._cfg(),
+            )
+        self.assertEqual(
+            fingerprint.call_args_list,
+            [mock.call(Path("npy")), mock.call(Path("npy"))],
+        )
+        self.assertEqual(
+            events,
+            ["fingerprint", "forward", "forward", "fingerprint", "provenance"],
+        )
+        provenance_row.assert_called_once_with(
+            0,
+            Path("block.goz1"),
+            Path("npy"),
+            pack,
+            applied_scale_sources={"gate": "research_int4_side"},
+            npy_sha256=after,
+        )
+        return result
+
+    def test_accepts_equal_pre_and_post_npy_fingerprints(self) -> None:
+        digest = "a" * 64
+        row, streams, provenance = self._run_with_digests(digest, digest)
+        self.assertEqual(row["block"], 0)
+        np.testing.assert_array_equal(streams[0], np.full((2, 3), 2.0))
+        self.assertEqual(provenance["npy_sha256"], digest)
+
+    def test_rejects_changed_npy_fingerprint(self) -> None:
+        with self.assertRaisesRegex(
+            ForwardError,
+            "NPY inputs changed while the forward was being measured",
+        ):
+            self._run_with_digests("a" * 64, "b" * 64)
+
+
 class _FakePack:
     """Minimal PackWeights stand-in with the public accessors the harness uses."""
 
@@ -456,6 +576,85 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
                 {"status": "running"},
+            )
+
+    def test_atomic_json_replace_failure_preserves_old_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "metrics.json"
+            original = {"status": "complete", "decision": {"decision": 2}}
+            path.write_text(json.dumps(original) + "\n", encoding="utf-8")
+            with mock.patch.object(
+                multiblock.os,
+                "replace",
+                side_effect=OSError("replace failed"),
+            ), self.assertRaisesRegex(OSError, "replace failed"):
+                multiblock._atomic_write_json(path, {"status": "partial"})
+            self.assertEqual(
+                json.loads(path.read_text(encoding="utf-8")),
+                original,
+            )
+            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+
+    def test_canonical_v4_run_publishes_metrics_with_atomic_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            out = root / "canonical"
+            args = argparse.Namespace(
+                tokens=int(BASELINE_85["tokens"]),
+                hp_period=2,
+                blocks="0,1,2,3",
+                npy_root=root / "npy",
+                npy_pattern="block_{block:03d}",
+                pack_root=root / "packs",
+                pack_pattern="block_{block:03d}.goz1",
+                embedding_shard=root / "embedding.npy",
+                embedding_sha256="e" * 64,
+                out=out,
+                progress_json=None,
+                arm="int4_channel_alpha",
+                hp_blocks=None,
+                skip_fp16_control=False,
+                seed=int(BASELINE_85["token_seed"]),
+                top_k=int(BASELINE_85["top_k"]),
+                write_report_md=False,
+                evidence_only=False,
+                comparison_metrics=[],
+                int4_side_root=root / "int4-side",
+            )
+            provenance = {
+                "implementation": dict(_V4_IMPL),
+                "embedding_sha256": args.embedding_sha256,
+            }
+            with (
+                mock.patch.object(
+                    multiblock,
+                    "run_chain",
+                    return_value=_v4_chain(V4_PRIMARY_ARM),
+                ),
+                mock.patch.object(
+                    multiblock,
+                    "_provenance",
+                    return_value=provenance,
+                ),
+                mock.patch.object(multiblock, "_write_v3_report"),
+                mock.patch.object(
+                    multiblock,
+                    "_atomic_write_json",
+                    wraps=multiblock._atomic_write_json,
+                ) as atomic_write,
+            ):
+                self.assertEqual(multiblock.run(args), 0)
+
+            atomic_write.assert_called_once()
+            published_path, published_payload = atomic_write.call_args.args
+            self.assertEqual(published_path, out / "metrics.json")
+            self.assertEqual(
+                json.loads(published_path.read_text(encoding="utf-8")),
+                published_payload,
+            )
+            self.assertEqual(
+                published_payload["provenance"]["evidence_role"],
+                "primary; sole canonical #85 decision",
             )
 
     def test_atomic_report_replace_failure_preserves_old_file(self) -> None:

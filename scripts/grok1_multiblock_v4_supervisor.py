@@ -54,7 +54,9 @@ PROTOCOL = {
     "fallback_tokens": None,
 }
 
-AGENT_LINE = "Grok Build: Grok 4.5 (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
+AGENT_LINE = (
+    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
+)
 ISSUE = "GH #85 / Linear RM-608 / beads goz-3h3"
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -82,7 +84,7 @@ class ArtifactError(RuntimeError):
 class SupervisorSignal(KeyboardInterrupt):
     """A terminating operator signal converted into a fail-closed interrupt."""
 
-    def __init__(self, signal_number: int):
+    def __init__(self, signal_number: int) -> None:
         super().__init__(signal.Signals(signal_number).name)
         self.signal_number = signal_number
 
@@ -201,6 +203,25 @@ def _atomic_write_json(path: Path, payload: object) -> None:
     _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def _fsync_directory_strict(path: Path) -> None:
+    """Fsync a directory, propagating every durability failure."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_fd = os.open(path, flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _durably_unlink(path: Path) -> None:
+    """Atomically remove a name, then durably commit its absence."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    _fsync_directory_strict(path.parent)
+
+
 def _best_effort_write_json(path: Path, payload: object) -> None:
     """Write a supplemental diagnostic without masking canonical publication."""
     try:
@@ -276,9 +297,11 @@ def _embedding_identity_errors(path: Path, fingerprint: dict[str, Any]) -> list[
     expected = {key: fingerprint.get(key) for key in ("path", "target")}
     if current != expected:
         return [
-            "embedding input identity changed after its pinned SHA-256 was computed: "
-            f"expected={json.dumps(expected, sort_keys=True)} "
-            f"observed={json.dumps(current, sort_keys=True)}"
+            (
+                "embedding input identity changed after its pinned SHA-256 was computed: "
+                f"expected={json.dumps(expected, sort_keys=True)} "
+                f"observed={json.dumps(current, sort_keys=True)}"
+            )
         ]
     return []
 
@@ -511,6 +534,14 @@ def _provenance_errors(
             errors.append("implementation provenance is dirty or unavailable")
     if not isinstance(provenance.get("model"), str) or not provenance.get("model"):
         errors.append("missing model provenance")
+    for field, description in (
+        ("architecture_source", "architecture source"),
+        ("numpy", "NumPy runtime version"),
+        ("python", "Python runtime version"),
+    ):
+        value = provenance.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"missing {description} provenance")
     if not isinstance(provenance.get("embedding_shard"), str) or not provenance.get(
         "embedding_shard"
     ):
@@ -1004,6 +1035,8 @@ def _identity(payload: dict[str, Any]) -> dict[str, Any]:
         "implementation": provenance.get("implementation"),
         "model": provenance.get("model"),
         "architecture_source": provenance.get("architecture_source"),
+        "numpy": provenance.get("numpy"),
+        "python": provenance.get("python"),
         "embedding_shard": provenance.get("embedding_shard"),
         "embedding_sha256": provenance.get("embedding_sha256"),
         "pack_sha256": pack_sha,
@@ -1019,6 +1052,8 @@ def _identity_mismatches(
         "implementation",
         "model",
         "architecture_source",
+        "numpy",
+        "python",
         "embedding_shard",
         "embedding_sha256",
         "pack_sha256",
@@ -1111,6 +1146,37 @@ def _as_text(value: object) -> str:
     return str(value)
 
 
+_CHILD_LOG_PATH_PLACEHOLDERS = {
+    "--npy-root": "<NPY_ROOT>",
+    "--pack-root": "<PACK_ROOT>",
+    "--embedding-shard": "<EMBEDDING_SHARD>",
+    "--int4-side-root": "<INT4_SIDE_ROOT>",
+}
+
+
+def _portable_child_command(command: Sequence[str]) -> list[str]:
+    """Return a reviewable command without host-specific absolute paths."""
+    portable = list(command)
+    if portable:
+        portable[0] = "python3"
+
+    for index, argument in enumerate(portable[:-1]):
+        placeholder = _CHILD_LOG_PATH_PLACEHOLDERS.get(argument)
+        if placeholder is not None:
+            portable[index + 1] = placeholder
+
+    for index in range(1, len(portable)):
+        argument = portable[index]
+        path = Path(argument)
+        if not path.is_absolute():
+            continue
+        try:
+            portable[index] = path.relative_to(REPO_ROOT).as_posix()
+        except ValueError:
+            portable[index] = f"<HOST_PATH>/{path.name}"
+    return portable
+
+
 def _write_child_log(
     path: Path,
     command: Sequence[str],
@@ -1126,7 +1192,7 @@ def _write_child_log(
         [
             f"started_at: {started_at}",
             f"ended_at: {ended_at}",
-            f"command: {shlex.join(list(command))}",
+            f"command: {shlex.join(_portable_child_command(command))}",
             f"returncode: {returncode}",
             f"timeout: {str(timeout).lower()}",
             "",
@@ -1482,9 +1548,11 @@ def _render_failure_report(payload: dict[str, Any]) -> str:
 def _publish_failure(out: Path, payload: dict[str, Any]) -> None:
     """Atomically publish each canonical Option-4 artifact.
 
-    ``metrics.json`` is the machine source of truth and is replaced last, after
-    the Markdown report is already durable.
+    ``metrics.json`` is the machine source of truth.  Any prior canonical
+    machine artifact is durably unlinked before the Markdown report changes,
+    then the Option-4 metrics are replaced last.
     """
+    _durably_unlink(out / "metrics.json")
     _atomic_write_text(out / "results.md", _render_failure_report(payload))
     _atomic_write_json(out / "metrics.json", payload)
 

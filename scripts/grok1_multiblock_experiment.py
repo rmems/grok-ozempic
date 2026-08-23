@@ -52,6 +52,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     decide_remedy_v3,
     decide_remedy_v4,
     load_block_sources,
+    npy_dir_fingerprint,
     pack_provenance_row,
     parse_blocks,
     parse_hp_blocks,
@@ -230,6 +231,7 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
     """Forward one block; streams is (h_ref, h_pilot, h_fp16)."""
     h_ref, h_pilot, h_fp16 = streams
     npy_dir, pack_path = _block_paths(paths, b)
+    npy_sha256_before = npy_dir_fingerprint(npy_dir)
     print(f"== block {b:03d}  residual_in shape={h_ref.shape}", flush=True)
     reference, pack, mixed, control = load_block_sources(
         b,
@@ -271,7 +273,19 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         "pilot_label": mixed.label,
     }
     applied = getattr(mixed, "applied_scale_sources", None)
-    prov = pack_provenance_row(b, pack_path, npy_dir, pack, applied_scale_sources=applied)
+    npy_sha256_after = npy_dir_fingerprint(npy_dir)
+    if npy_sha256_after != npy_sha256_before:
+        raise ForwardError(
+            f"block {b}: NPY inputs changed while the forward was being measured"
+        )
+    prov = pack_provenance_row(
+        b,
+        pack_path,
+        npy_dir,
+        pack,
+        applied_scale_sources=applied,
+        npy_sha256=npy_sha256_after,
+    )
     return row, (ref_trace.block_out, pilot_trace.block_out, next_fp16), prov
 
 
@@ -631,6 +645,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Root for persisted INT4 research side-tables (block_BBB/ q+scale npy). "
+            "Requires local POSIX advisory locking and directory fsync. "
             "Default for --arm int4: <out>/int4-side/"
         ),
     )
@@ -1162,7 +1177,7 @@ def run(args: argparse.Namespace) -> int:
         decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
         payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
+    _atomic_write_json(args.out / "metrics.json", payload)
     print(f"wrote {args.out / 'metrics.json'}")
     if evidence_only:
         print("EVIDENCE ONLY: no decision emitted")

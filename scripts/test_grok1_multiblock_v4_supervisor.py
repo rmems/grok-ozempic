@@ -247,6 +247,8 @@ def _payload(
         ),
         "embedding_shard": "embedding.npy",
         "embedding_sha256": embedding_sha256,
+        "numpy": "2.5.1",
+        "python": "3.14.6",
         "skip_fp16_control": False,
         "arm": cli_arm,
         "evidence_role": (
@@ -614,8 +616,8 @@ class SupervisorTests(unittest.TestCase):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
                 args = self._args(Path(td))
 
-                def child(command, **_kwargs):
-                    _write_success(list(command), implementation=implementation)
+                def child(command, current_implementation=implementation, **_kwargs):
+                    _write_success(list(command), implementation=current_implementation)
                     return subprocess.CompletedProcess(command, 0, "", "")
 
                 result, run = self._run(args, child)
@@ -626,6 +628,35 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(payload["completed_arms"], [])
                 self.assertEqual(payload["invalid_arms"], ["expert_int4"])
                 self.assertNotIn("ranking", payload["comparison"])
+
+    def test_missing_or_blank_runtime_provenance_fails_before_acceptance(
+        self,
+    ) -> None:
+        corruptions = {
+            "missing_numpy": lambda payload: payload["provenance"].pop("numpy"),
+            "blank_numpy": lambda payload: payload["provenance"].__setitem__(
+                "numpy", " "
+            ),
+            "missing_python": lambda payload: payload["provenance"].pop("python"),
+            "blank_python": lambda payload: payload["provenance"].__setitem__(
+                "python", " "
+            ),
+        }
+        for case, corrupt in corruptions.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, current_corrupt=corrupt, **_kwargs):
+                    _write_success(list(command), mutate=current_corrupt)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 1)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "invalid_evidence")
+                self.assertEqual(payload["completed_arms"], [])
+                self.assertEqual(payload["invalid_arms"], ["expert_int4"])
 
     def test_missing_malformed_or_wrong_embedding_digest_fails_closed(self) -> None:
         corruptions = {
@@ -641,8 +672,8 @@ class SupervisorTests(unittest.TestCase):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
                 args = self._args(Path(td))
 
-                def child(command, **_kwargs):
-                    _write_success(list(command), mutate=corrupt)
+                def child(command, current_corrupt=corrupt, **_kwargs):
+                    _write_success(list(command), mutate=current_corrupt)
                     return subprocess.CompletedProcess(command, 0, "", "")
 
                 result, run = self._run(args, child)
@@ -665,14 +696,20 @@ class SupervisorTests(unittest.TestCase):
                 root = Path(td)
                 args = self._args(root)
 
-                def child(command, **_kwargs):
+                def child(
+                    command,
+                    current_stage=replaced_stage,
+                    current_root=root,
+                    current_args=args,
+                    **_kwargs,
+                ):
                     command = list(command)
                     spec = _spec_for_command(command)
                     _write_success(command)
-                    if spec.stage == replaced_stage:
-                        replacement = root / f"replacement-{spec.stage}.npy"
+                    if spec.stage == current_stage:
+                        replacement = current_root / f"replacement-{spec.stage}.npy"
                         replacement.write_bytes(b"x" * len(_EMBEDDING_BYTES))
-                        replacement.replace(args.embedding_shard)
+                        replacement.replace(current_args.embedding_shard)
                     return subprocess.CompletedProcess(command, 0, "", "")
 
                 result, run = self._run(args, child)
@@ -839,6 +876,35 @@ class SupervisorTests(unittest.TestCase):
                 ["metrics.json", "results.md"],
             )
 
+    def test_failure_publication_stops_after_failed_metrics_invalidation_fsync(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            metrics_path = out / "metrics.json"
+            report_path = out / "results.md"
+            metrics_path.write_text("stale option 2\n", encoding="utf-8")
+            report_path.write_text("stale report\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "_fsync_directory_strict",
+                    side_effect=OSError("synthetic directory fsync failure"),
+                ) as fsync_directory,
+            ):
+                for attempt in ("initial", "supervisor-exception retry"):
+                    with self.subTest(attempt=attempt), self.assertRaisesRegex(
+                        OSError, "synthetic directory fsync failure"
+                    ):
+                        supervisor._publish_failure(out, {})
+
+            self.assertEqual(fsync_directory.call_args_list, [mock.call(out)] * 2)
+            self.assertFalse(metrics_path.exists())
+            self.assertEqual(
+                report_path.read_text(encoding="utf-8"), "stale report\n"
+            )
+
     def test_p0_container_memory_error_preserves_validated_canonical_evidence(
         self,
     ) -> None:
@@ -946,6 +1012,50 @@ class SupervisorTests(unittest.TestCase):
             log = (args.out / "run-01-baseline.log").read_text(encoding="utf-8")
             self.assertIn("timeout: true", log)
             self.assertIn("partial", log)
+
+    def test_child_log_command_uses_portable_paths_without_mutating_argv(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            args = self._args(root)
+            command = supervisor._child_command(
+                args,
+                supervisor.ARMS[-1],
+                embedding_sha256=_EMBEDDING_SHA,
+            )
+            original_command = list(command)
+            log_path = root / "child.log"
+
+            supervisor._write_child_log(
+                log_path,
+                command,
+                started_at="2026-08-23T00:00:00Z",
+                ended_at="2026-08-23T00:01:00Z",
+                returncode=0,
+                stdout="complete",
+                stderr="",
+            )
+
+            self.assertEqual(command, original_command)
+            log = log_path.read_text(encoding="utf-8")
+            command_line = next(
+                line for line in log.splitlines() if line.startswith("command: ")
+            )
+            self.assertIn(
+                "python3 scripts/grok1_multiblock_experiment.py", command_line
+            )
+            for placeholder in (
+                "<NPY_ROOT>",
+                "<PACK_ROOT>",
+                "<EMBEDDING_SHARD>",
+                "<INT4_SIDE_ROOT>",
+                "<HOST_PATH>/report",
+            ):
+                self.assertIn(placeholder, command_line)
+            self.assertNotIn(str(root), command_line)
+            self.assertNotIn(str(supervisor.REPO_ROOT), command_line)
+            self.assertNotIn(sys.executable, command_line)
 
     def test_launch_error_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -1262,6 +1372,37 @@ class SupervisorTests(unittest.TestCase):
                 "d" * 64,
             )
             self.assertNotIn("ordered_candidates", payload["comparison"])
+
+    def test_cross_arm_runtime_version_mismatch_is_distinct(self) -> None:
+        for field in ("numpy", "python"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+                calls = 0
+
+                def child(command, current_field=field, **_kwargs):
+                    nonlocal calls
+                    calls += 1
+                    command = list(command)
+
+                    def change_runtime(payload, runtime_field=current_field):
+                        payload["provenance"][runtime_field] = "different-version"
+
+                    _write_success(
+                        command,
+                        mutate=change_runtime if calls == 2 else None,
+                    )
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 2)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "provenance_mismatch")
+                self.assertEqual(payload["completed_arms"], ["expert_int4"])
+                self.assertIn(
+                    f"expert_int4_channel_alpha_123:{field}_mismatch",
+                    payload["failure"]["errors"],
+                )
 
     def test_self_consistent_forged_ranking_decision_and_summaries_fail_closed(
         self,
