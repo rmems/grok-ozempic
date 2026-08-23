@@ -285,7 +285,9 @@ def _payload(
                 },
                 "fp16_control": {"block_output_cosine": 1.0},
             }
-            for block, metrics in zip(supervisor.BLOCKS, stage_metrics["rows"])
+            for block, metrics in zip(
+                supervisor.BLOCKS, stage_metrics["rows"], strict=True
+            )
         ],
         "end_of_chain": {
             "expert_only_chain_exit": {
@@ -615,38 +617,62 @@ class SupervisorTests(unittest.TestCase):
                     real_mkdir = Path.mkdir
                     real_atomic_write_json = supervisor._atomic_write_json
 
-                    def interrupt_expanduser(path):
+                    def interrupt_expanduser(
+                        path,
+                        current_args=args,
+                        current_exception=exception,
+                        current_phase=phase,
+                        real=real_expanduser,
+                    ):
                         nonlocal tripped
                         target = (
-                            args.npy_root if phase == "npy_expanduser" else args.out
+                            current_args.npy_root
+                            if current_phase == "npy_expanduser"
+                            else current_args.out
                         )
                         if not tripped and path == target:
                             tripped = True
-                            raise exception
-                        return real_expanduser(path)
+                            raise current_exception
+                        return real(path)
 
-                    def interrupt_mkdir(path, *call_args, **call_kwargs):
+                    def interrupt_mkdir(
+                        path,
+                        *call_args,
+                        current_args=args,
+                        current_exception=exception,
+                        real=real_mkdir,
+                        **call_kwargs,
+                    ):
                         nonlocal tripped
-                        if not tripped and path == args.out:
+                        if not tripped and path == current_args.out:
                             tripped = True
-                            raise exception
-                        return real_mkdir(path, *call_args, **call_kwargs)
+                            raise current_exception
+                        return real(path, *call_args, **call_kwargs)
 
-                    def interrupt_meminfo():
+                    def interrupt_meminfo(
+                        current_exception=exception,
+                        current_memory=memory,
+                    ):
                         nonlocal tripped
                         if not tripped:
                             tripped = True
-                            raise exception
-                        return memory
+                            raise current_exception
+                        return current_memory
 
-                    def interrupt_prelaunch_write(path, payload):
+                    def interrupt_prelaunch_write(
+                        path,
+                        payload,
+                        current_args=args,
+                        current_exception=exception,
+                        real=real_atomic_write_json,
+                    ):
                         nonlocal tripped
                         if not tripped and path == supervisor._arm_progress(
-                            args.out, supervisor.ARMS[0]
+                            current_args.out, supervisor.ARMS[0]
                         ):
                             tripped = True
-                            raise exception
-                        return real_atomic_write_json(path, payload)
+                            raise current_exception
+                        return real(path, payload)
 
                     phase_patch = {
                         "out_expanduser": mock.patch.object(
@@ -774,36 +800,53 @@ class SupervisorTests(unittest.TestCase):
                         _write_success(list(command))
                         return subprocess.CompletedProcess(command, 0, "", "")
 
-                    def interrupt_prelaunch(*call_args, **call_kwargs):
+                    def interrupt_prelaunch(
+                        *call_args,
+                        current_phase=phase,
+                        current_stage=target_stage,
+                        real=real_prelaunch,
+                        **call_kwargs,
+                    ):
                         nonlocal tripped
                         arm = call_args[1]
                         if (
                             not tripped
-                            and phase == "prelaunch"
-                            and arm.stage == target_stage
+                            and current_phase == "prelaunch"
+                            and arm.stage == current_stage
                         ):
                             tripped = True
                             raise supervisor.SupervisorSignal(signal.SIGTERM)
-                        return real_prelaunch(*call_args, **call_kwargs)
+                        return real(*call_args, **call_kwargs)
 
-                    def interrupt_progress_write(path, payload):
+                    def interrupt_progress_write(
+                        path,
+                        payload,
+                        current_args=args,
+                        current_phase=phase,
+                        current_stage=target_stage,
+                        current_target=target,
+                        real=real_atomic_write_json,
+                    ):
                         nonlocal tripped
                         is_target_prelaunch = (
                             isinstance(payload, dict)
                             and payload.get("status") == "prelaunch"
-                            and payload.get("stage") == target_stage
+                            and payload.get("stage") == current_stage
                         )
                         should_interrupt = (
-                            phase == "arm_progress"
-                            and path == supervisor._arm_progress(args.out, target)
+                            current_phase == "arm_progress"
+                            and path
+                            == supervisor._arm_progress(
+                                current_args.out, current_target
+                            )
                         ) or (
-                            phase == "supervisor_progress"
-                            and path == args.out / "supervisor-progress.json"
+                            current_phase == "supervisor_progress"
+                            and path == current_args.out / "supervisor-progress.json"
                         )
                         if not tripped and is_target_prelaunch and should_interrupt:
                             tripped = True
                             raise supervisor.SupervisorSignal(signal.SIGTERM)
-                        return real_atomic_write_json(path, payload)
+                        return real(path, payload)
 
                     with (
                         mock.patch.object(
@@ -945,6 +988,26 @@ class SupervisorTests(unittest.TestCase):
             self.assertNotIn(str(root), serialized)
             self.assertNotIn("/home/", serialized)
             self.assertNotIn("/tmp/", serialized)
+
+    def test_relative_paths_do_not_corrupt_failure_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out = Path(".")
+            args.npy_root = Path("npy")
+            detail = "metrics.json: cosine=0.95 ratio=1/8192"
+            recovered = {
+                "metrics.json": detail,
+                "measurements": ["drift=0.141994", "throughput=64 MiB/s"],
+            }
+
+            self.assertEqual(
+                supervisor._portable_failure_detail(args, detail),
+                detail,
+            )
+            self.assertEqual(
+                supervisor._portable_failure_value(args, recovered),
+                recovered,
+            )
 
     def test_staging_cleanup_failure_uses_current_prelaunch_progress(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -2114,8 +2177,10 @@ class SupervisorTests(unittest.TestCase):
                     calls += 1
                     command = list(command)
 
-                    def change_runtime(payload, runtime_field=current_field):
-                        payload["provenance"][runtime_field] = "different-version"
+                    def change_runtime(current_payload, runtime_field=current_field):
+                        current_payload["provenance"][runtime_field] = (
+                            "different-version"
+                        )
 
                     _write_success(
                         command,

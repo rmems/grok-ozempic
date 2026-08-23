@@ -240,7 +240,9 @@ def _exact_int(value: object, expected: int) -> bool:
 def _exact_int_list(value: object, expected: Sequence[int]) -> bool:
     if not isinstance(value, list) or len(value) != len(expected):
         return False
-    return all(_exact_int(item, want) for item, want in zip(value, expected))
+    return all(
+        _exact_int(item, want) for item, want in zip(value, expected, strict=True)
+    )
 
 
 def _sha256(value: object) -> bool:
@@ -957,8 +959,10 @@ def _validate_report(
     if decision_option is not None and report_option != decision_option:
         return (
             [
-                f"results.md option={report_option!r} does not match "
-                f"metrics option={decision_option}"
+                (
+                    f"results.md option={report_option!r} does not match "
+                    f"metrics option={decision_option}"
+                )
             ],
             None,
         )
@@ -1202,7 +1206,10 @@ def _portable_failure_detail(args: argparse.Namespace, detail: object) -> str:
     for raw, placeholder in sorted(
         replacements.items(), key=lambda item: len(item[0]), reverse=True
     ):
-        if raw:
+        # Relative CLI values are already portable and may be ordinary text
+        # tokens such as ``.``.  Replacing them as arbitrary substrings would
+        # corrupt filenames, decimal measurements, and recovered JSON keys.
+        if raw and Path(raw).is_absolute() and raw != os.sep:
             portable = portable.replace(raw, placeholder)
     return portable
 
@@ -1249,7 +1256,7 @@ def _portable_child_output(command: Sequence[str], value: object) -> str:
     portable_command = _portable_child_command(command)
     replacements = [
         (raw, portable)
-        for raw, portable in zip(command, portable_command)
+        for raw, portable in zip(command, portable_command, strict=True)
         if raw != portable and Path(raw).is_absolute()
     ]
     replacements.append((str(REPO_ROOT), "<REPO_ROOT>"))
@@ -1804,6 +1811,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     args.out = args.out.expanduser()
     args.out.mkdir(parents=True, exist_ok=True)
     _durably_unlink(args.out / "metrics.json")
+    # Write-ahead intent: supersede stale progress before interruptible input
+    # expansion and host capture, including failures Python cannot recover from.
     fingerprint_started_at = _utc_now()
     fingerprint_prelaunch = _prelaunch_progress(
         args,
@@ -1831,6 +1840,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     reference_identity: dict[str, Any] | None = None
     state.start_memory = start_memory
 
+    # Enrich the durable write-ahead record with the captured host snapshot.
     fingerprint_started_at = _utc_now()
     fingerprint_prelaunch = _prelaunch_progress(
         args,
