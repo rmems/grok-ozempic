@@ -1443,6 +1443,59 @@ class SupervisorTests(unittest.TestCase):
             payload = self._failure(args)
             self.assertEqual(payload["provenance"]["implementation"], _IMPLEMENTATION)
 
+    def test_relative_cli_paths_are_anchored_before_repo_root_child_launch(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            caller = root / "caller"
+            repo_root = root / "repo"
+            args = self._args(caller)
+            repo_root.mkdir()
+            (repo_root / "embedding.npy").write_bytes(b"decoy embedding")
+            args.npy_root = Path("npy")
+            args.pack_root = Path("packs")
+            args.embedding_shard = Path("embedding.npy")
+            args.int4_side_root = Path("cache")
+            args.out = Path("report")
+
+            expected_paths = {
+                "--npy-root": caller / "npy",
+                "--pack-root": caller / "packs",
+                "--embedding-shard": caller / "embedding.npy",
+                "--int4-side-root": caller / "cache",
+            }
+
+            def child(command, **kwargs):
+                command = list(command)
+                for option, expected in expected_paths.items():
+                    self.assertEqual(Path(_value(command, option)), expected.resolve())
+                self.assertEqual(_value(command, "--embedding-sha256"), _EMBEDDING_SHA)
+                self.assertEqual(kwargs["cwd"], str(repo_root.resolve()))
+                self.assertEqual(
+                    Path(_value(command, "--out")).parent,
+                    (caller / "report").resolve(),
+                )
+                self.assertEqual(
+                    Path(_value(command, "--progress-json")).parent,
+                    (caller / "report").resolve(),
+                )
+                _write_success(command, implementation=dict(_IMPLEMENTATION))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            previous_cwd = Path.cwd()
+            os.chdir(caller)
+            try:
+                with mock.patch.object(supervisor, "REPO_ROOT", repo_root.resolve()):
+                    result, run = self._run(args, child)
+            finally:
+                os.chdir(previous_cwd)
+
+            self.assertEqual(result, supervisor.EXIT_OK)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(args.out, (caller / "report").resolve())
+            self.assertFalse((repo_root / "report").exists())
+
     def test_baseline_implementation_must_match_parent_pinned_at_startup(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))

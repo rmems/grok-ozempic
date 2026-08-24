@@ -1940,6 +1940,16 @@ def _ensure_failure_state(
     return started_at, start_memory
 
 
+def _resolve_child_input_paths(args: argparse.Namespace) -> None:
+    """Anchor child inputs to one caller cwd before repo-root launches."""
+    caller_cwd = Path.cwd()
+    for field in ("npy_root", "pack_root", "embedding_shard", "int4_side_root"):
+        path = getattr(args, field).expanduser()
+        if not path.is_absolute():
+            path = caller_cwd / path
+        setattr(args, field, path.resolve())
+
+
 def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     if (
         state.supervisor_implementation is None
@@ -1982,10 +1992,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         stage_started_at=fingerprint_started_at,
     )
 
-    args.npy_root = args.npy_root.expanduser()
-    args.pack_root = args.pack_root.expanduser()
-    args.embedding_shard = args.embedding_shard.expanduser()
-    args.int4_side_root = args.int4_side_root.expanduser()
+    _resolve_child_input_paths(args)
     start_memory = _proc_meminfo()
     reference_identity: dict[str, Any] | None = None
     state.start_memory = start_memory
