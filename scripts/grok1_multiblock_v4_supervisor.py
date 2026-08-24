@@ -22,9 +22,10 @@ import os
 import re
 import resource
 import shlex
+import shutil
 import signal
 import traceback
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
 # Fixed interpreter/script argv; the call below always disables the shell.
@@ -34,13 +35,15 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 try:
     import fcntl as _fcntl
 except ImportError:  # pragma: no cover - this supervisor requires POSIX.
     _fcntl = None
 
+# Keep the code object Python actually loaded, not a later reread of this path.
+_LOADED_SUPERVISOR_CODE = sys._getframe().f_code
 
 EXIT_OK = 0
 # grok1_multiblock_experiment uses 1, 4, and 5; block0 also uses 3.
@@ -75,12 +78,15 @@ _SUPERVISOR_INTERRUPT_SIGNALS = frozenset((signal.SIGINT, signal.SIGTERM))
 _REPORT_OPTION_RE = re.compile(
     r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
 )
+_SUPERVISOR_GIT_PATH = "scripts/grok1_multiblock_v4_supervisor.py"
 
 
 class ArtifactError(RuntimeError):
     """A zero-exit child did not produce complete canonical evidence."""
 
-    def __init__(self, failure_class: str, errors: Sequence[str], payload: Any = None):
+    def __init__(
+        self, failure_class: str, errors: Sequence[str], payload: Any = None
+    ) -> None:
         super().__init__("; ".join(errors))
         self.failure_class = failure_class
         self.errors = list(errors)
@@ -103,6 +109,7 @@ class SupervisorSignal(KeyboardInterrupt):
 class _RunState:
     """Minimum live context needed to publish Option 4 on supervisor failure."""
 
+    supervisor_implementation: dict[str, str | bool] | None = None
     started_at: str | None = None
     start_memory: dict[str, Any] | None = None
     completed: list[ArmSpec] | None = None
@@ -321,6 +328,58 @@ def _exact_int_list(value: object, expected: Sequence[int]) -> bool:
 
 def _sha256(value: object) -> bool:
     return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
+
+
+def _clean_supervisor_implementation() -> dict[str, str | bool]:
+    """Pin the clean commit and bind it to the resident supervisor code."""
+    git = shutil.which("git")
+    if git is None:
+        raise ValueError("could not pin supervisor implementation: git unavailable")
+
+    def git_output(*arguments: str) -> bytes:
+        try:
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
+            return subprocess.run(  # nosec B603  # noqa: S603
+                [git, "-C", str(REPO_ROOT), *arguments],
+                capture_output=True,
+                timeout=30,
+                check=True,
+            ).stdout
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError(f"could not pin supervisor implementation: {exc}") from exc
+
+    commit_before = git_output("rev-parse", "HEAD").decode("ascii").strip()
+    status = git_output(
+        "status", "--porcelain", "--untracked-files=no", "--", "scripts", "src"
+    )
+    commit_after = git_output("rev-parse", "HEAD").decode("ascii").strip()
+    if commit_before != commit_after:
+        raise ValueError("supervisor implementation changed while being pinned")
+    if _GIT_OID_RE.fullmatch(commit_before) is None:
+        raise ValueError("supervisor implementation has no valid full commit hash")
+    if status:
+        raise ValueError("supervisor implementation is dirty")
+
+    # The validated hexadecimal commit and fixed repo path form one Git object
+    # name; no argument comes from CLI input and no shell is used.
+    source = git_output("show", f"{commit_before}:{_SUPERVISOR_GIT_PATH}")
+    try:
+        pinned_code = compile(
+            source,
+            _LOADED_SUPERVISOR_CODE.co_filename,
+            "exec",
+            dont_inherit=True,
+            optimize=sys.flags.optimize,
+        )
+    except (SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"could not compile pinned supervisor implementation: {exc}"
+        ) from exc
+    if pinned_code != _LOADED_SUPERVISOR_CODE:
+        raise ValueError(
+            "resident supervisor code does not match pinned implementation"
+        )
+    return {"commit": commit_before, "dirty": False}
 
 
 def _stat_identity(stat_result: os.stat_result) -> dict[str, int]:
@@ -1883,7 +1942,8 @@ def _ensure_failure_state(
 
 def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     if (
-        state.started_at is None
+        state.supervisor_implementation is None
+        or state.started_at is None
         or state.start_memory is None
         or state.completed is None
         or state.payloads is None
@@ -1894,9 +1954,10 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
     start_memory = state.start_memory
     completed = state.completed
     payloads = state.payloads
+    supervisor_implementation = state.supervisor_implementation
 
-    if args.timeout_seconds <= 0:
-        raise ValueError("--timeout-seconds must be > 0")
+    if not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0:
+        raise ValueError("--timeout-seconds must be finite and > 0")
     args.out = args.out.expanduser()
     args.out.mkdir(parents=True, exist_ok=True)
     _durably_unlink(args.out / "metrics.json")
@@ -2164,6 +2225,21 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             )
 
         current_identity = _identity(payload)
+        if current_identity.get("implementation") != supervisor_implementation:
+            return _fail(
+                args,
+                arm=arm,
+                failure_class="provenance_mismatch",
+                errors=[f"{arm.expected_label}:implementation_mismatch"],
+                returncode=result.returncode,
+                prelaunch=prelaunch,
+                completed=completed,
+                payloads=payloads,
+                failed_payload=payload,
+                started_at=started_at,
+                stage_started_at=stage_started_at,
+                start_memory=start_memory,
+            )
         if reference_identity is None:
             reference_identity = current_identity
         else:
@@ -2347,10 +2423,23 @@ def _record_post_validation_exception(
 
 def run(args: argparse.Namespace) -> int:
     try:
+        startup_implementation: dict[str, str | bool] | None = None
+        startup_error: Exception | None = None
+        try:
+            startup_implementation = _clean_supervisor_implementation()
+        except Exception as exc:
+            startup_error = exc
+
         with _supervisor_output_lock(args.out) as locked_out:
             args.out = locked_out
-            state = _RunState()
+            state = _RunState(supervisor_implementation=startup_implementation)
             try:
+                if startup_error is not None:
+                    raise startup_error
+                if _clean_supervisor_implementation() != startup_implementation:
+                    raise ValueError(
+                        "supervisor implementation changed while waiting for output lock"
+                    )
                 _bootstrap_run_state(args, state)
                 return _run_supervised(args, state)
             except KeyboardInterrupt as exc:

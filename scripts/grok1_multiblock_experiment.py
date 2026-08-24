@@ -897,9 +897,11 @@ def _remedy_issue_meta(*, v2: bool, v3: bool, v4: bool = False) -> tuple[str, st
             "GH #85 / Linear RM-608 / beads goz-3h3",
             REMEDY_V4_AGENT_LINE,
             "OpenAI Codex",
-            "Grok issue-planning lock: INT4 codes × LS channel-α stack at Grok-1 "
-            "max context (8192); re-measure INT4 baseline same-budget; #80@2048 "
-            "historical only; implementation and evidence by Codex (OpenAI)",
+            (
+                "Grok issue-planning lock: INT4 codes × LS channel-α stack at Grok-1 "
+                "max context (8192); re-measure INT4 baseline same-budget; #80@2048 "
+                "historical only; implementation and evidence by Codex (OpenAI)"
+            ),
         )
     if v3:
         return (

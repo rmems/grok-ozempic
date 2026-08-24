@@ -423,6 +423,15 @@ def _write_success(
 
 
 class SupervisorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._implementation_patch = mock.patch.object(
+            supervisor,
+            "_clean_supervisor_implementation",
+            return_value=dict(_IMPLEMENTATION),
+        )
+        self._implementation_patch.start()
+        self.addCleanup(self._implementation_patch.stop)
+
     def _args(self, root: Path):
         root.mkdir(parents=True, exist_ok=True)
         (root / "embedding.npy").write_bytes(_EMBEDDING_BYTES)
@@ -534,9 +543,31 @@ class SupervisorTests(unittest.TestCase):
             metrics.write_text("active metrics\n", encoding="utf-8")
             report.write_text("active report\n", encoding="utf-8")
 
+            with (
+                mock.patch.object(
+                    supervisor._fcntl,
+                    "flock",
+                    side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
+                ),
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
+            self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
+
+    def test_interrupted_startup_identity_pin_does_not_mutate_output(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            metrics = args.out / "metrics.json"
+            report = args.out / "results.md"
+            metrics.write_text("active metrics\n", encoding="utf-8")
+            report.write_text("active report\n", encoding="utf-8")
+
             with mock.patch.object(
-                supervisor._fcntl,
-                "flock",
+                supervisor,
+                "_clean_supervisor_implementation",
                 side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
             ):
                 result = supervisor.run(args)
@@ -544,6 +575,104 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
             self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
+
+    def test_implementation_change_while_waiting_for_lock_fails_before_child(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            changed = {"commit": "d" * 40, "dirty": False}
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "_clean_supervisor_implementation",
+                    side_effect=[dict(_IMPLEMENTATION), changed],
+                ) as identity,
+                mock.patch.object(supervisor.subprocess, "run") as child_run,
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(identity.call_count, 2)
+            self.assertEqual(child_run.call_count, 0)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "supervisor_error")
+            self.assertIn(
+                "ValueError: supervisor implementation changed while waiting "
+                "for output lock",
+                payload["failure"]["errors"],
+            )
+
+    def test_clean_implementation_blob_matches_resident_supervisor_code(self) -> None:
+        self._implementation_patch.stop()
+        commit = "c" * 40
+        responses = [
+            subprocess.CompletedProcess([], 0, f"{commit}\n".encode(), b""),
+            subprocess.CompletedProcess([], 0, b"", b""),
+            subprocess.CompletedProcess([], 0, f"{commit}\n".encode(), b""),
+            subprocess.CompletedProcess(
+                [], 0, Path(supervisor.__file__).read_bytes(), b""
+            ),
+        ]
+
+        with (
+            mock.patch.object(supervisor.shutil, "which", return_value="/usr/bin/git"),
+            mock.patch.object(
+                supervisor.subprocess, "run", side_effect=responses
+            ) as git_run,
+        ):
+            implementation = supervisor._clean_supervisor_implementation()
+
+        self.assertEqual(implementation, _IMPLEMENTATION)
+        self.assertEqual(git_run.call_count, 4)
+        self.assertEqual(
+            git_run.call_args_list[-1].args[0],
+            [
+                "/usr/bin/git",
+                "-C",
+                str(supervisor.REPO_ROOT),
+                "show",
+                f"{commit}:scripts/grok1_multiblock_v4_supervisor.py",
+            ],
+        )
+
+    def test_resident_supervisor_blob_mismatch_fails_before_child(self) -> None:
+        self._implementation_patch.stop()
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            commit = "c" * 40
+            responses = [
+                subprocess.CompletedProcess([], 0, f"{commit}\n".encode(), b""),
+                subprocess.CompletedProcess([], 0, b"", b""),
+                subprocess.CompletedProcess([], 0, f"{commit}\n".encode(), b""),
+                subprocess.CompletedProcess(
+                    [], 0, b'"""different supervisor"""\n', b""
+                ),
+            ]
+
+            with (
+                mock.patch.object(
+                    supervisor.shutil, "which", return_value="/usr/bin/git"
+                ),
+                mock.patch.object(
+                    supervisor.subprocess, "run", side_effect=responses
+                ) as process_run,
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(process_run.call_count, 4)
+            self.assertTrue(
+                all("--arm" not in call.args[0] for call in process_run.call_args_list)
+            )
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "supervisor_error")
+            self.assertIn(
+                "ValueError: resident supervisor code does not match pinned "
+                "implementation",
+                payload["failure"]["errors"],
+            )
 
     def test_arm_schedules_match_literal_evidence_fixtures(self) -> None:
         for arm in supervisor.ARMS:
@@ -1298,6 +1427,47 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(payload["invalid_arms"], ["expert_int4"])
                 self.assertNotIn("ranking", payload["comparison"])
 
+    def test_matching_parent_implementation_accepts_all_three_children(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **_kwargs):
+                command = list(command)
+                _write_success(command, implementation=dict(_IMPLEMENTATION))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_OK)
+            self.assertEqual(run.call_count, 3)
+            payload = self._failure(args)
+            self.assertEqual(payload["provenance"]["implementation"], _IMPLEMENTATION)
+
+    def test_baseline_implementation_must_match_parent_pinned_at_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+
+            def child(command, **_kwargs):
+                command = list(command)
+                _write_success(
+                    command,
+                    implementation={"commit": "d" * 40, "dirty": False},
+                )
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            result, run = self._run(args, child)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            self.assertEqual(run.call_count, 1)
+            payload = self._failure(args)
+            self.assertEqual(payload["failure_class"], "provenance_mismatch")
+            self.assertEqual(payload["completed_arms"], [])
+            self.assertEqual(payload["invalid_arms"], ["expert_int4"])
+            self.assertIn(
+                "expert_int4:implementation_mismatch",
+                payload["failure"]["errors"],
+            )
+
     def test_missing_or_blank_runtime_provenance_fails_before_acceptance(
         self,
     ) -> None:
@@ -1993,6 +2163,23 @@ class SupervisorTests(unittest.TestCase):
             self.assertNotIn(str(root), log)
             self.assertNotIn("/home/", log)
             self.assertNotIn("/tmp/", log)
+
+    def test_nonfinite_timeout_fails_before_any_child_launch(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+                args.timeout_seconds = value
+
+                result, run = self._run(args, lambda *_args, **_kwargs: None)
+
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 0)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "supervisor_error")
+                self.assertIn(
+                    "ValueError: --timeout-seconds must be finite and > 0",
+                    payload["failure"]["errors"],
+                )
 
     def test_child_log_command_uses_portable_paths_without_mutating_argv(
         self,
