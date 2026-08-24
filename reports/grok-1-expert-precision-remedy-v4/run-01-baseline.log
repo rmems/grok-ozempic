@@ -1,5 +1,5 @@
-started_at: 2026-08-23T20:21:51.116163Z
-ended_at: 2026-08-23T21:22:08.407908Z
+started_at: 2026-08-24T10:18:55.170292Z
+ended_at: 2026-08-24T11:13:05.311112Z
 command: python3 scripts/grok1_multiblock_experiment.py --npy-root '<NPY_ROOT>' --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root '<PACK_ROOT>' --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard '<EMBEDDING_SHARD>' --embedding-sha256 55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6 --int4-side-root '<INT4_SIDE_ROOT>' --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4/int4-baseline --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-baseline.json --arm int4 --evidence-only
 returncode: 0
 timeout: false
@@ -7,32 +7,32 @@ timeout: false
 ----- stdout -----
 == block 000  residual_in shape=(8192, 6144)
   reference forward ...
-    217.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    239.0s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    290.7s  cos=0.998637 top1=1.000000 drift=0.000000
+    309.2s  cos=0.998637 top1=1.000000 drift=0.000000
   fp16 control ...
-    244.7s  block_out_cos=0.999966
+    284.7s  block_out_cos=0.999966
 == block 001  residual_in shape=(8192, 6144)
   reference forward ...
-    231.0s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    233.1s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    276.9s  cos=0.997567 top1=0.982300 drift=0.052476
+    196.3s  cos=0.997567 top1=0.982300 drift=0.052476
   fp16 control ...
-    267.3s  block_out_cos=0.999966
+    216.5s  block_out_cos=0.999966
 == block 002  residual_in shape=(8192, 6144)
   reference forward ...
-    212.5s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    178.4s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    310.9s  cos=0.988657 top1=0.926270 drift=0.069880
+    246.1s  cos=0.988657 top1=0.926270 drift=0.069880
   fp16 control ...
-    254.3s  block_out_cos=0.999765
+    281.5s  block_out_cos=0.999765
 == block 003  residual_in shape=(8192, 6144)
   reference forward ...
-    226.1s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+    213.8s experts=[0, 1, 2, 3, 4, 5, 6, 7]
   pilot (research_int4_side) ...
-    301.1s  cos=0.980566 top1=0.823730 drift=0.150499
+    258.7s  cos=0.980566 top1=0.823730 drift=0.150499
   fp16 control ...
-    267.3s  block_out_cos=0.999437
+    279.0s  block_out_cos=0.999437
 wrote reports/grok-1-expert-precision-remedy-v4/int4-baseline/metrics.json
 EVIDENCE ONLY: no decision emitted
 

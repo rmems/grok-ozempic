@@ -4,13 +4,13 @@
 
 **Issue:** GH #85 / Linear RM-608 / beads `goz-3h3`
 
-**Implementation commit:** `7232973a0059497055104cd1a35072204535b2c2` (`implementation.dirty: false`)
+**Implementation commit:** `ce90d12dd9efabde79b99404fb2d602d8aa1f536` (`implementation.dirty: false`)
 
 **Runtime:** Python 3.14.6; NumPy 2.5.1
 
 **Embedding SHA-256:** `55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6`
 
-**Run status:** complete; the supervisor validated all three mandatory arms and the canonical P0 artifacts
+**Run status:** complete; the supervisor validated all three mandatory arms and the P0-produced canonical artifacts, which rank P1 first
 
 **Protocol:** blocks 0-3, tokens 8192, seed 20260806, `top_k=2`, FP16 control enabled
 
@@ -60,6 +60,7 @@ Historical issue #80 P0 all-INT4 reported block-3 top-1 **0.850586 at 2048 token
 ## Method
 
 - A standard-library-only out-of-process supervisor launched exactly one arm at a time in the locked order: baseline -> P1 -> P0.
+- Before touching an output tree, the supervisor acquired a blocking, persistent sibling POSIX `flock` and held it across the full three-arm transaction, validation, and final publication. Concurrent same-output supervisors therefore serialize; an interrupted waiter exits with status 6 without modifying the active output.
 - The supervisor hard-locked tokens 8192, seed 20260806, blocks `0,1,2,3`, `top_k=2`, and FP16 controls. `fallback_tokens` is `null`; no 2048-token command was launched.
 - The supervisor hashed the entire 3,221,225,600-byte embedding shard once in approximately 64 MiB chunks, pinned the digest into every child artifact, and verified both the path and opened target identity before and after the run.
 - Each child fingerprinted every NPY source directory before source loading and again after all forwards. The post-forward fingerprint had to equal the pre-forward fingerprint before provenance or canonical evidence could be accepted.
@@ -71,7 +72,7 @@ Historical issue #80 P0 all-INT4 reported block-3 top-1 **0.850586 at 2048 token
 - Plain INT4 uses persisted per-output-channel absmax codes/scales. The alpha arms reuse the shared INT4 codes with float64 least-squares per-output-channel alpha scales.
 - Expert tensors were traversed deterministically in approximately 64 MiB whole-row intra-expert chunks. Reference fingerprints streamed in C order; quantization used a two-pass absmax build and read-only memory-mapped code reuse.
 - Cache publication uses a persistent per-block POSIX advisory lock shared by absmax and LS-alpha modes, atomic replacement, file `fsync`, and strict parent-directory `fsync`; active-sidecar removal is also directory-synced. The cache therefore requires a local POSIX filesystem with working `flock` and directory `fsync` semantics.
-- The external side-table cache was fresh for this implementation identity. Directory `gh85-v4-8192-int4-side-7232973` finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
+- The external side-table cache was implementation-scoped and fingerprint-validated. The detached rerun reused entries produced by the interrupted `ce90d12` attempt; directory `gh85-v4-8192-int4-side-ce90d12` finished at 19,345,718,032 bytes and is intentionally outside the tracked report tree.
 
 ## Per-block evidence
 
@@ -127,7 +128,7 @@ The deterministic FP16 control trajectory is identical across the three arms and
 
 ## Provenance
 
-The supervisor ran from 2026-08-23 20:21:48Z through 23:21:47Z (2:59:58.267). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm.
+The supervisor ran from 2026-08-24 10:18:52.764662Z through 13:07:00.099394Z (2:48:07.334732). It recorded the clean implementation identity before launch, hashed and pinned the entire embedding shard, revalidated protocol and provenance after every child, and independently validated the P0/P1 ranking after the final arm. The exact-head rerun was hosted by the user service manager so a chat or terminal reset could not terminate the scientific process tree.
 
 | block | GOZ1 pack SHA-256 | NPY directory SHA-256 |
 |---:|---|---|
@@ -136,7 +137,7 @@ The supervisor ran from 2026-08-23 20:21:48Z through 23:21:47Z (2:59:58.267). It
 | 2 | `e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560` | `5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f` |
 | 3 | `9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302` | `39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7` |
 
-The launch snapshot recorded 64,906,240,000 bytes total RAM, 21,069,172,736 bytes available RAM, and 184,320 bytes free swap. No launch gate was applied. The end snapshot recorded 20,392,099,840 bytes available RAM and a maximum child RSS of 15,678,876 KiB. These are observational host snapshots, not proof of behavior on another host.
+The launch snapshot recorded 64,906,240,000 bytes total RAM, 17,190,961,152 bytes available RAM, and 113,340,416 bytes free swap. No launch gate was applied. The end snapshot recorded 29,668,573,184 bytes available RAM and a maximum child RSS of 15,709,920 KiB. The user service manager observed a 26 GiB process-tree memory peak and 78.7 MiB swap peak. These are observational host snapshots, not proof of behavior on another host.
 
 ## Reproduction
 
@@ -146,7 +147,7 @@ Implementation must be committed and clean before launch. Configure local input 
 GH85_NPY_ROOT=/path/to/export-npy
 GH85_PACK_ROOT=/path/to/multiblock-68
 GH85_EMBEDDING=/path/to/embedding__slot_00__token_embedding.npy
-GH85_SIDE_ROOT=/path/to/cache/gh85-v4-8192-int4-side-7232973
+GH85_SIDE_ROOT=/path/to/cache/gh85-v4-8192-int4-side-ce90d12
 
 python3 scripts/grok1_multiblock_v4_supervisor.py \
   --npy-root "$GH85_NPY_ROOT" \
@@ -158,7 +159,7 @@ python3 scripts/grok1_multiblock_v4_supervisor.py \
   --out reports/grok-1-expert-precision-remedy-v4
 ```
 
-The supervisor owns the baseline -> P1 -> P0 launch order and fails closed to Option 4 on a child failure, timeout, invalid/stale evidence, protocol mismatch, or provenance mismatch. Do not replace it with three direct experiment commands. Persistent child logs redact the interpreter and absolute input paths while preserving the actual executed argument order.
+The supervisor owns the baseline -> P1 -> P0 launch order and fails closed to Option 4 on a child failure, timeout, invalid/stale evidence, protocol mismatch, or provenance mismatch. Its persistent sibling output lock serializes concurrent invocations that target the same resolved output directory. Do not replace it with three direct experiment commands. Persistent child logs redact the interpreter and absolute input paths while preserving the actual executed argument order.
 
 ## Artifacts
 

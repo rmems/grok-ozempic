@@ -446,7 +446,7 @@
           "router_top1_agreement": 1.0,
           "router_top2_set_agreement": 1.0,
           "router_topk_set_agreement": 1.0,
-          "seconds": 268.4497618675232,
+          "seconds": 292.7965888977051,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -546,11 +546,11 @@
           "router_top1_agreement": 0.9991455078125,
           "router_top2_set_agreement": 0.99658203125,
           "router_topk_set_agreement": 0.99658203125,
-          "seconds": 259.7460250854492,
+          "seconds": 315.97720766067505,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 251.46078300476074
+        "reference_seconds": 151.565527677536
       },
       {
         "block": 1,
@@ -651,7 +651,7 @@
           "router_top1_agreement": 0.9820556640625,
           "router_top2_set_agreement": 0.932861328125,
           "router_topk_set_agreement": 0.932861328125,
-          "seconds": 306.767986536026,
+          "seconds": 337.6895294189453,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -751,11 +751,11 @@
           "router_top1_agreement": 0.9996337890625,
           "router_top2_set_agreement": 0.9981689453125,
           "router_topk_set_agreement": 0.9981689453125,
-          "seconds": 273.57390785217285,
+          "seconds": 342.03950691223145,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 225.00852060317993
+        "reference_seconds": 213.51879334449768
       },
       {
         "block": 2,
@@ -856,7 +856,7 @@
           "router_top1_agreement": 0.9110107421875,
           "router_top2_set_agreement": 0.8681640625,
           "router_topk_set_agreement": 0.8681640625,
-          "seconds": 307.5279264450073,
+          "seconds": 350.2537670135498,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -956,11 +956,11 @@
           "router_top1_agreement": 0.996826171875,
           "router_top2_set_agreement": 0.995361328125,
           "router_topk_set_agreement": 0.995361328125,
-          "seconds": 277.1455566883087,
+          "seconds": 335.70151019096375,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 223.96203327178955
+        "reference_seconds": 212.27473497390747
       },
       {
         "block": 3,
@@ -1061,7 +1061,7 @@
           "router_top1_agreement": 0.8017578125,
           "router_top2_set_agreement": 0.6864013671875,
           "router_topk_set_agreement": 0.6864013671875,
-          "seconds": 305.02965807914734,
+          "seconds": 239.10686492919922,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -1161,11 +1161,11 @@
           "router_top1_agreement": 0.9912109375,
           "router_top2_set_agreement": 0.987548828125,
           "router_topk_set_agreement": 0.987548828125,
-          "seconds": 273.60252261161804,
+          "seconds": 286.9547107219696,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 237.77907299995422
+        "reference_seconds": 221.281183719635
       }
     ],
     "pilot_labels_per_block": [
@@ -1214,7 +1214,7 @@
     "primary_arm": "expert_int4_channel_alpha",
     "primary_provenance": {
       "implementation": {
-        "commit": "7232973a0059497055104cd1a35072204535b2c2",
+        "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
         "dirty": false
       }
     },
@@ -1684,7 +1684,7 @@
                 "router_top1_agreement": 1.0,
                 "router_top2_set_agreement": 1.0,
                 "router_topk_set_agreement": 1.0,
-                "seconds": 290.7293257713318,
+                "seconds": 309.16027450561523,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -1784,11 +1784,11 @@
                 "router_top1_agreement": 0.9991455078125,
                 "router_top2_set_agreement": 0.99658203125,
                 "router_topk_set_agreement": 0.99658203125,
-                "seconds": 244.7439308166504,
+                "seconds": 284.69182801246643,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 217.34123945236206
+              "reference_seconds": 238.97658944129944
             },
             {
               "block": 1,
@@ -1889,7 +1889,7 @@
                 "router_top1_agreement": 0.9822998046875,
                 "router_top2_set_agreement": 0.9385986328125,
                 "router_topk_set_agreement": 0.9385986328125,
-                "seconds": 276.94167399406433,
+                "seconds": 196.34954357147217,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -1989,11 +1989,11 @@
                 "router_top1_agreement": 0.9996337890625,
                 "router_top2_set_agreement": 0.9981689453125,
                 "router_topk_set_agreement": 0.9981689453125,
-                "seconds": 267.28032970428467,
+                "seconds": 216.5490860939026,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 231.04224920272827
+              "reference_seconds": 233.11412382125854
             },
             {
               "block": 2,
@@ -2094,7 +2094,7 @@
                 "router_top1_agreement": 0.92626953125,
                 "router_top2_set_agreement": 0.8861083984375,
                 "router_topk_set_agreement": 0.8861083984375,
-                "seconds": 310.89858651161194,
+                "seconds": 246.09003281593323,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -2194,11 +2194,11 @@
                 "router_top1_agreement": 0.996826171875,
                 "router_top2_set_agreement": 0.995361328125,
                 "router_topk_set_agreement": 0.995361328125,
-                "seconds": 254.28374910354614,
+                "seconds": 281.5117938518524,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 212.5263648033142
+              "reference_seconds": 178.37757635116577
             },
             {
               "block": 3,
@@ -2299,7 +2299,7 @@
                 "router_top1_agreement": 0.82373046875,
                 "router_top2_set_agreement": 0.7210693359375,
                 "router_topk_set_agreement": 0.7210693359375,
-                "seconds": 301.0632884502411,
+                "seconds": 258.6500837802887,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -2399,11 +2399,11 @@
                 "router_top1_agreement": 0.9912109375,
                 "router_top2_set_agreement": 0.987548828125,
                 "router_topk_set_agreement": 0.987548828125,
-                "seconds": 267.33075284957886,
+                "seconds": 279.00134801864624,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 226.12947750091553
+              "reference_seconds": 213.8233666419983
             }
           ],
           "pilot_labels_per_block": [
@@ -2566,7 +2566,7 @@
           "embedding_shard": "embedding__slot_00__token_embedding.npy",
           "evidence_role": "secondary; no independent decision",
           "implementation": {
-            "commit": "7232973a0059497055104cd1a35072204535b2c2",
+            "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
             "dirty": false
           },
           "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
@@ -3026,7 +3026,7 @@
                 "router_top1_agreement": 1.0,
                 "router_top2_set_agreement": 1.0,
                 "router_topk_set_agreement": 1.0,
-                "seconds": 299.7458186149597,
+                "seconds": 289.2064609527588,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3126,11 +3126,11 @@
                 "router_top1_agreement": 0.9991455078125,
                 "router_top2_set_agreement": 0.99658203125,
                 "router_topk_set_agreement": 0.99658203125,
-                "seconds": 263.54393434524536,
+                "seconds": 315.9707987308502,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_channel_alpha_side",
-              "reference_seconds": 249.26280283927917
+              "reference_seconds": 157.56357407569885
             },
             {
               "block": 1,
@@ -3231,7 +3231,7 @@
                 "router_top1_agreement": 0.9820556640625,
                 "router_top2_set_agreement": 0.932861328125,
                 "router_topk_set_agreement": 0.932861328125,
-                "seconds": 253.93467950820923,
+                "seconds": 230.84059381484985,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3331,11 +3331,11 @@
                 "router_top1_agreement": 0.9996337890625,
                 "router_top2_set_agreement": 0.9981689453125,
                 "router_topk_set_agreement": 0.9981689453125,
-                "seconds": 243.44091272354126,
+                "seconds": 296.21696376800537,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 239.45898962020874
+              "reference_seconds": 167.67060899734497
             },
             {
               "block": 2,
@@ -3436,7 +3436,7 @@
                 "router_top1_agreement": 0.9351806640625,
                 "router_top2_set_agreement": 0.9066162109375,
                 "router_topk_set_agreement": 0.9066162109375,
-                "seconds": 246.92025661468506,
+                "seconds": 260.33888030052185,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3536,11 +3536,11 @@
                 "router_top1_agreement": 0.996826171875,
                 "router_top2_set_agreement": 0.995361328125,
                 "router_topk_set_agreement": 0.995361328125,
-                "seconds": 265.63067269325256,
+                "seconds": 322.32828736305237,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 241.34818720817566
+              "reference_seconds": 172.76675724983215
             },
             {
               "block": 3,
@@ -3641,7 +3641,7 @@
                 "router_top1_agreement": 0.8873291015625,
                 "router_top2_set_agreement": 0.8260498046875,
                 "router_topk_set_agreement": 0.8260498046875,
-                "seconds": 275.0554008483887,
+                "seconds": 243.0828080177307,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3741,11 +3741,11 @@
                 "router_top1_agreement": 0.9912109375,
                 "router_top2_set_agreement": 0.987548828125,
                 "router_topk_set_agreement": 0.987548828125,
-                "seconds": 278.88457202911377,
+                "seconds": 291.4015588760376,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 236.91579031944275
+              "reference_seconds": 176.63534998893738
             }
           ],
           "pilot_labels_per_block": [
@@ -3908,7 +3908,7 @@
           "embedding_shard": "embedding__slot_00__token_embedding.npy",
           "evidence_role": "secondary; no independent decision",
           "implementation": {
-            "commit": "7232973a0059497055104cd1a35072204535b2c2",
+            "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
             "dirty": false
           },
           "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
@@ -4265,7 +4265,7 @@
     "embedding_shard": "embedding__slot_00__token_embedding.npy",
     "evidence_role": "primary; sole canonical #85 decision",
     "implementation": {
-      "commit": "7232973a0059497055104cd1a35072204535b2c2",
+      "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
       "dirty": false
     },
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
