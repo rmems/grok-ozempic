@@ -1403,6 +1403,8 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             args = self._args(root)
+            args.npy_pattern = "/home/alice/private/block_{block:03d}/weights"
+            args.pack_pattern = "/srv/private/packs/block-{block:03d}.goz1"
             args.embedding_shard.unlink()
 
             result, run = self._run(args, lambda *_args, **_kwargs: None)
@@ -1411,9 +1413,31 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(run.call_count, 0)
             failure = self._failure(args)
             serialized = json.dumps(failure)
+            supervisor_identity = failure["provenance"]["supervisor_input_identity"]
+            self.assertEqual(
+                supervisor_identity["npy_pattern"],
+                "<ABSOLUTE_NPY_PATTERN>/block_{block:03d}/weights",
+            )
+            self.assertEqual(
+                supervisor_identity["pack_pattern"],
+                "<ABSOLUTE_PACK_PATTERN>/block-{block:03d}.goz1",
+            )
+            arm_progress = json.loads(
+                supervisor._arm_progress(args.out, supervisor.ARMS[0]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                arm_progress["input_identity"]["npy_pattern"],
+                supervisor_identity["npy_pattern"],
+            )
+            report = (args.out / "results.md").read_text(encoding="utf-8")
             self.assertIn("<EMBEDDING_SHARD>", serialized)
             self.assertNotIn(str(root), serialized)
             self.assertNotIn("/home/", serialized)
+            self.assertNotIn("/srv/private", serialized)
+            self.assertNotIn("/home/", report)
+            self.assertNotIn("/srv/private", report)
             self.assertNotIn(_JSON_TEMP_DIR_PREFIX, serialized)
 
     def test_relative_paths_do_not_corrupt_failure_evidence(self) -> None:
@@ -1529,6 +1553,8 @@ class SupervisorTests(unittest.TestCase):
     def test_failure_payload_recursively_redacts_recovered_progress(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
+            args.npy_pattern = "/home/alice/private/block_{block:03d}/weights"
+            args.pack_pattern = "/srv/private/packs/block-{block:03d}.goz1"
 
             def child(command, **_kwargs):
                 progress_path = Path(_value(list(command), "--progress-json"))
@@ -1540,7 +1566,15 @@ class SupervisorTests(unittest.TestCase):
                             str(args.npy_root): [
                                 str(args.pack_root),
                                 {"embedding": str(args.embedding_shard)},
-                            ]
+                            ],
+                            "expanded_patterns": [
+                                f"{args.npy_pattern.format(block=0)}/tensor.npy",
+                                args.pack_pattern.format(block=3),
+                            ],
+                        },
+                        "input_identity": {
+                            "npy_pattern": args.npy_pattern,
+                            "pack_pattern": args.pack_pattern,
                         },
                     },
                 )
@@ -1553,16 +1587,46 @@ class SupervisorTests(unittest.TestCase):
             failure = self._failure(args)
             recovered = failure["progress"]["child"]["nested"]
             self.assertEqual(
-                recovered,
-                {
-                    "<NPY_ROOT>": [
-                        "<PACK_ROOT>",
-                        {"embedding": "<EMBEDDING_SHARD>"},
-                    ]
-                },
+                recovered["<NPY_ROOT>"],
+                [
+                    "<PACK_ROOT>",
+                    {"embedding": "<EMBEDDING_SHARD>"},
+                ],
+            )
+            portable_identity = {
+                "npy_pattern": "<ABSOLUTE_NPY_PATTERN>/block_{block:03d}/weights",
+                "pack_pattern": (
+                    "<ABSOLUTE_PACK_PATTERN>/block-{block:03d}.goz1"
+                ),
+            }
+            self.assertEqual(
+                failure["progress"]["child"]["input_identity"],
+                portable_identity,
+            )
+            self.assertEqual(
+                failure["provenance"]["failed_arm_progress_provenance"][
+                    "input_identity"
+                ],
+                portable_identity,
+            )
+            self.assertEqual(
+                failure["provenance"]["supervisor_input_identity"]["npy_pattern"],
+                portable_identity["npy_pattern"],
+            )
+            self.assertEqual(
+                recovered["expanded_patterns"],
+                [
+                    "<ABSOLUTE_NPY_PATTERN>/block_000/weights/tensor.npy",
+                    "<ABSOLUTE_PACK_PATTERN>/block-003.goz1",
+                ],
             )
             serialized = json.dumps(failure)
             self.assertNotIn(str(Path(td)), serialized)
+            self.assertNotIn("/home/alice", serialized)
+            self.assertNotIn("/srv/private", serialized)
+            report = (args.out / "results.md").read_text(encoding="utf-8")
+            self.assertNotIn("/home/alice", report)
+            self.assertNotIn("/srv/private", report)
 
     def test_embedding_digest_is_hashed_once_passed_and_echoed_by_all_arms(
         self,
@@ -2446,6 +2510,8 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             args = self._args(root)
+            args.npy_pattern = "/home/alice/private/block_{block:03d}/weights"
+            args.pack_pattern = "/srv/private/packs/block-{block:03d}.goz1"
             command = supervisor._child_command(
                 args,
                 supervisor.ARMS[-1],
@@ -2470,12 +2536,16 @@ class SupervisorTests(unittest.TestCase):
                     f"pack={args.pack_root / 'pack.goz1'}\n"
                     f"embedding={args.embedding_shard}\n"
                     f"cache={args.int4_side_root / 'codes.npy'}\n"
+                    f"npy_pattern={args.npy_pattern.format(block=0)}/tensor.npy\n"
+                    f"pack_pattern={args.pack_pattern.format(block=3)}\n"
                     f"script={supervisor.EXPERIMENT_SCRIPT}\n"
                     f"python={sys.executable}"
                 ),
             )
 
             self.assertEqual(command, original_command)
+            self.assertEqual(_value(command, "--npy-pattern"), args.npy_pattern)
+            self.assertEqual(_value(command, "--pack-pattern"), args.pack_pattern)
             log = log_path.read_text(encoding="utf-8")
             command_line = next(
                 line for line in log.splitlines() if line.startswith("command: ")
@@ -2489,6 +2559,8 @@ class SupervisorTests(unittest.TestCase):
                 "<EMBEDDING_SHARD>",
                 "<INT4_SIDE_ROOT>",
                 "<HOST_PATH>/.p0-staging",
+                "<ABSOLUTE_NPY_PATTERN>/block_{block:03d}/weights",
+                "<ABSOLUTE_PACK_PATTERN>/block-{block:03d}.goz1",
             ):
                 self.assertIn(placeholder, command_line)
             self.assertNotIn(str(root), command_line)
@@ -2502,6 +2574,16 @@ class SupervisorTests(unittest.TestCase):
             self.assertIn("pack=<PACK_ROOT>/pack.goz1", log)
             self.assertIn("embedding=<EMBEDDING_SHARD>", log)
             self.assertIn("cache=<INT4_SIDE_ROOT>/codes.npy", log)
+            self.assertIn(
+                "npy_pattern=<ABSOLUTE_NPY_PATTERN>/block_000/weights/tensor.npy",
+                log,
+            )
+            self.assertIn(
+                "pack_pattern=<ABSOLUTE_PACK_PATTERN>/block-003.goz1",
+                log,
+            )
+            self.assertNotIn("/home/alice", log)
+            self.assertNotIn("/srv/private", log)
             self.assertIn("script=scripts/grok1_multiblock_experiment.py", log)
             self.assertIn("python=python3", log)
             self.assertIn(

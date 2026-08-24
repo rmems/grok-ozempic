@@ -75,6 +75,8 @@ _EMBEDDING_HASH_CHUNK = 64 * 1024 * 1024
 _IMPROVEMENT_EPS = 1e-3
 _P0_STAGING_NAME = ".p0-staging"
 _SUPERVISOR_INTERRUPT_SIGNALS = frozenset((signal.SIGINT, signal.SIGTERM))
+_ABSOLUTE_NPY_PATTERN = "<ABSOLUTE_NPY_PATTERN>"
+_ABSOLUTE_PACK_PATTERN = "<ABSOLUTE_PACK_PATTERN>"
 _REPORT_OPTION_RE = re.compile(
     r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
 )
@@ -1335,6 +1337,40 @@ _CHILD_LOG_PATH_PLACEHOLDERS = {
     "--embedding-shard": "<EMBEDDING_SHARD>",
     "--int4-side-root": "<INT4_SIDE_ROOT>",
 }
+_CHILD_LOG_PATTERN_PLACEHOLDERS = {
+    "--npy-pattern": _ABSOLUTE_NPY_PATTERN,
+    "--pack-pattern": _ABSOLUTE_PACK_PATTERN,
+}
+
+
+def _portable_input_pattern(pattern: str, placeholder: str) -> str:
+    """Preserve a pattern's block suffix without persisting its host prefix."""
+    path = Path(pattern)
+    if not path.is_absolute():
+        return pattern
+    parts = path.parts[1:]
+    start = next(
+        (index for index, part in enumerate(parts) if "{block" in part),
+        None,
+    )
+    suffix = path.name if start is None else Path(*parts[start:]).as_posix()
+    return f"{placeholder}/{suffix}" if suffix else placeholder
+
+
+def _absolute_pattern_replacements(
+    pattern: str, placeholder: str
+) -> dict[str, str]:
+    """Map an absolute template and its locked block expansions to portable text."""
+    if not Path(pattern).is_absolute():
+        return {}
+    portable = _portable_input_pattern(pattern, placeholder)
+    replacements = {pattern: portable}
+    for block in BLOCKS:
+        try:
+            replacements[pattern.format(block=block)] = portable.format(block=block)
+        except (AttributeError, IndexError, KeyError, ValueError):
+            break
+    return replacements
 
 
 def _portable_failure_detail(args: argparse.Namespace, detail: object) -> str:
@@ -1347,6 +1383,12 @@ def _portable_failure_detail(args: argparse.Namespace, detail: object) -> str:
         str(args.out): "<OUTPUT_ROOT>",
         str(REPO_ROOT): "<REPO_ROOT>",
     }
+    replacements.update(
+        _absolute_pattern_replacements(args.npy_pattern, _ABSOLUTE_NPY_PATTERN)
+    )
+    replacements.update(
+        _absolute_pattern_replacements(args.pack_pattern, _ABSOLUTE_PACK_PATTERN)
+    )
     portable = str(detail)
     for raw, placeholder in sorted(
         replacements.items(), key=lambda item: len(item[0]), reverse=True
@@ -1383,6 +1425,11 @@ def _portable_child_command(command: Sequence[str]) -> list[str]:
         placeholder = _CHILD_LOG_PATH_PLACEHOLDERS.get(argument)
         if placeholder is not None:
             portable[index + 1] = placeholder
+        pattern_placeholder = _CHILD_LOG_PATTERN_PLACEHOLDERS.get(argument)
+        if pattern_placeholder is not None:
+            portable[index + 1] = _portable_input_pattern(
+                portable[index + 1], pattern_placeholder
+            )
 
     for index in range(1, len(portable)):
         argument = portable[index]
@@ -1405,6 +1452,12 @@ def _portable_child_output(command: Sequence[str], value: object) -> str:
         if raw != portable and Path(raw).is_absolute()
     ]
     replacements.append((str(REPO_ROOT), "<REPO_ROOT>"))
+    for index, argument in enumerate(command[:-1]):
+        placeholder = _CHILD_LOG_PATTERN_PLACEHOLDERS.get(argument)
+        if placeholder is not None:
+            replacements.extend(
+                _absolute_pattern_replacements(command[index + 1], placeholder).items()
+            )
     body = _as_text(value)
     for raw, portable in sorted(
         replacements, key=lambda item: len(item[0]), reverse=True
@@ -1526,9 +1579,13 @@ def _prelaunch_progress(
         "host_memory_at_start": start_memory,
         "input_identity": {
             "npy_root": "<NPY_ROOT>",
-            "npy_pattern": args.npy_pattern,
+            "npy_pattern": _portable_input_pattern(
+                args.npy_pattern, _ABSOLUTE_NPY_PATTERN
+            ),
             "pack_root": "<PACK_ROOT>",
-            "pack_pattern": args.pack_pattern,
+            "pack_pattern": _portable_input_pattern(
+                args.pack_pattern, _ABSOLUTE_PACK_PATTERN
+            ),
             "embedding_shard": Path(args.embedding_shard).name,
             "embedding_sha256": (
                 embedding_fingerprint.get("sha256")

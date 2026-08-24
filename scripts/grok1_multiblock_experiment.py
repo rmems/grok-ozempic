@@ -97,6 +97,8 @@ _V3_ARMS = frozenset({"int4"})
 _V4_ARMS = frozenset({"int4_channel_alpha"})
 _INT4_FAMILY_ARMS = _V3_ARMS | _V4_ARMS
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_ABSOLUTE_NPY_PATTERN = "<ABSOLUTE_NPY_PATTERN>"
+_ABSOLUTE_PACK_PATTERN = "<ABSOLUTE_PACK_PATTERN>"
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -110,6 +112,20 @@ class ChainPaths:
     pack_root: Path
     pack_pattern: str
     embedding_shard: Path
+
+
+def _portable_input_pattern(pattern: str, placeholder: str) -> str:
+    """Preserve a pattern's block suffix without persisting its host prefix."""
+    path = Path(pattern)
+    if not path.is_absolute():
+        return pattern
+    parts = path.parts[1:]
+    start = next(
+        (index for index, part in enumerate(parts) if "{block" in part),
+        None,
+    )
+    suffix = path.name if start is None else Path(*parts[start:]).as_posix()
+    return f"{placeholder}/{suffix}" if suffix else placeholder
 
 
 def _validate_embedding_shard(shard: Path) -> None:
@@ -1016,9 +1032,13 @@ def _progress_record_base(
         "implementation": provenance.get("implementation"),
         "input_identity": {
             "npy_root": "<NPY_ROOT>",
-            "npy_pattern": paths.npy_pattern,
+            "npy_pattern": _portable_input_pattern(
+                paths.npy_pattern, _ABSOLUTE_NPY_PATTERN
+            ),
             "pack_root": "<PACK_ROOT>",
-            "pack_pattern": paths.pack_pattern,
+            "pack_pattern": _portable_input_pattern(
+                paths.pack_pattern, _ABSOLUTE_PACK_PATTERN
+            ),
             "embedding_shard": Path(paths.embedding_shard).name,
             "embedding_sha256": provenance.get("embedding_sha256"),
             "int4_side_root": (

@@ -107,6 +107,7 @@ class ProgressParserTests(unittest.TestCase):
         )
         self.assertEqual(record["implementation"], provenance["implementation"])
         self.assertEqual(record["input_identity"]["npy_root"], "<NPY_ROOT>")
+        self.assertEqual(record["input_identity"]["npy_pattern"], "npy-{block}")
         self.assertEqual(record["input_identity"]["pack_pattern"], "pack-{block}.goz1")
         self.assertEqual(record["input_identity"]["pack_root"], "<PACK_ROOT>")
         self.assertEqual(
@@ -122,6 +123,42 @@ class ProgressParserTests(unittest.TestCase):
         serialized = json.dumps(record)
         self.assertNotIn("/weights/", serialized)
         self.assertNotIn("/resolved/", serialized)
+
+    def test_record_base_redacts_disjoint_absolute_pattern_prefixes(self) -> None:
+        args = argparse.Namespace(
+            arm="int4_channel_alpha",
+            tokens=8192,
+            seed=2026 * 10_000 + 806,
+            top_k=2,
+        )
+        paths = multiblock.ChainPaths(
+            npy_root=Path("/weights/npy"),
+            npy_pattern="/home/alice/private/block_{block:03d}/weights",
+            pack_root=Path("/weights/packs"),
+            pack_pattern="/srv/private/packs/block-{block:03d}.goz1",
+            embedding_shard=Path("/weights/embedding.npy"),
+        )
+
+        record = multiblock._progress_record_base(
+            args,
+            [0, 1, 2, 3],
+            paths,
+            {"implementation": {}, "embedding_sha256": "d" * 64},
+            int4_side_root=Path("/resolved/int4-side"),
+        )
+
+        identity = record["input_identity"]
+        self.assertEqual(
+            identity["npy_pattern"],
+            "<ABSOLUTE_NPY_PATTERN>/block_{block:03d}/weights",
+        )
+        self.assertEqual(
+            identity["pack_pattern"],
+            "<ABSOLUTE_PACK_PATTERN>/block-{block:03d}.goz1",
+        )
+        serialized = json.dumps(record)
+        self.assertNotIn("/home/alice", serialized)
+        self.assertNotIn("/srv/private", serialized)
 
 
 class ProgressRunChainTests(unittest.TestCase):
