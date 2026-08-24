@@ -1,0 +1,19 @@
+reports/grok-1-expert-precision-remedy-v4/results.md
+  s_3337e6410e76f0::t_06e50804e46100 7-9,46,64-66,68,73-74,130,139,143,146-150,152,154,156-157,161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "29f03adb312ec75cf391f4efab81f1d350d3e0f9",
+  "prompts": {},
+  "sessions": {
+    "s_3337e6410e76f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02d44-1355-76a0-955c-d1b12c39ec4b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}

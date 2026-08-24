@@ -1,0 +1,30 @@
+scripts/test_grok1_multiblock_progress.py
+  s_3337e6410e76f0::t_eb74746cebbf3d 46,109,111,113-116,122-124
+scripts/grok1_multiblock_experiment.py
+  s_3337e6410e76f0::t_e0a8534dcad23a 1015,1017,1019,1022
+scripts/test_grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_81613b181136d3 663-750
+  s_3337e6410e76f0::t_2b569d9450c409 607-662
+  s_3337e6410e76f0::t_8d0fc74dbf3f14 566-606
+scripts/grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_81613b181136d3 1195-1208,1660,1808-1809
+  s_3337e6410e76f0::t_3fdae4d982c2c8 1176-1194,1661-1663,1668
+  s_3337e6410e76f0::t_b2953bfacdd56f 332-333
+  s_3337e6410e76f0::t_e0a8534dcad23a 1343,1345,1347,1354,1764-1765
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "755d6362f9573b066e5ed7b8af28c6174272e8e2",
+  "prompts": {},
+  "sessions": {
+    "s_3337e6410e76f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02d44-1355-76a0-955c-d1b12c39ec4b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
