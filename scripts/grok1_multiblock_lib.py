@@ -90,6 +90,7 @@ V4_IMPROVEMENT_EPS = 1e-3  # above 1/8192 token-level granularity
 INT4_SCALE_ABSMAX = "absmax"
 INT4_SCALE_LS_CHANNEL_ALPHA = "ls_channel_alpha"
 INT4_CHUNK_BYTES = 64 * 1024 * 1024
+INT4_SIDECAR_SCHEMA_VERSION = 2
 
 # Cited from reports/grok-1-expert-precision-remedy-v2/ (PR #76 option 2).
 BASELINE_76_DENSER = {
@@ -430,21 +431,72 @@ def _iter_intra_expert_chunks(
             yield expert, chunk
 
 
+def _array_fingerprint(
+    array: np.ndarray, *, dtype: np.dtype | type
+) -> dict[str, object]:
+    """Bounded content identity for one logical C-order array."""
+    source = np.asarray(array)
+    target = np.dtype(dtype)
+    digest = hashlib.sha256()
+    for chunk in _iter_c_order_chunks(source, dtype=target):
+        digest.update(np.asarray(chunk, dtype=target).tobytes(order="C"))
+    return {
+        "sha256": digest.hexdigest(),
+        "dtype": str(target),
+        "shape": [int(d) for d in source.shape],
+    }
+
+
 def _reference_fingerprint(ref: np.ndarray) -> dict[str, object]:
     """Content identity of the FP32 reference a side table was built from.
 
     Shape and dtype alone do not identify an export -- two different runs of the
     same tensor agree on both -- so hash the bytes as well.
     """
-    source = np.asarray(ref)
-    digest = hashlib.sha256()
-    for chunk in _iter_c_order_chunks(source, dtype=np.float32):
-        digest.update(np.asarray(chunk, dtype=np.float32).tobytes(order="C"))
+    return _array_fingerprint(ref, dtype=np.float32)
+
+
+def _sidecar_generation(
+    reference: dict[str, object],
+    q_codes: dict[str, object],
+    scale: dict[str, object],
+) -> str:
+    """Bind one certifying sidecar generation to all three content identities."""
+    payload = {"reference": reference, "q_codes": q_codes, "scale": scale}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _sidecar_binding(
+    reference: dict[str, object],
+    q_codes: dict[str, object],
+    scale: dict[str, object],
+) -> dict[str, object]:
+    """Return the version-2 content binding stored for one tensor."""
     return {
-        "sha256": digest.hexdigest(),
-        "dtype": str(np.dtype(np.float32)),
-        "shape": [int(d) for d in source.shape],
+        "reference": reference,
+        "q_codes": q_codes,
+        "scale": scale,
+        "generation": _sidecar_generation(reference, q_codes, scale),
     }
+
+
+def _binding_certifies_codes(
+    binding: object,
+    reference: dict[str, object],
+    q_codes: dict[str, object],
+) -> bool:
+    """Whether a complete current binding certifies these shared q codes."""
+    if not isinstance(binding, dict):
+        return False
+    scale = binding.get("scale")
+    if not isinstance(scale, dict):
+        return False
+    return (
+        binding.get("reference") == reference
+        and binding.get("q_codes") == q_codes
+        and binding.get("generation") == _sidecar_generation(reference, q_codes, scale)
+    )
 
 
 def _fingerprint_matches(path: Path, fingerprint: dict[str, object]) -> bool:
@@ -820,6 +872,7 @@ class Int4SideExperts:
         self._block = int(block)
         self._set_paths(Path(side_root).expanduser())
         self._cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        self._bindings: dict[str, dict[str, object]] = {}
         lock_path = self._absmax_dir / ".int4-side.lock"
         with _int4_cache_lock(lock_path):
             self._write_sidecar(self._build_sidecar(codec))
@@ -856,6 +909,7 @@ class Int4SideExperts:
     def _build_sidecar(self, codec: str) -> dict[str, object]:
         """Assemble the sidecar metadata after all side tables are loaded."""
         sidecar: dict[str, object] = {
+            "schema_version": INT4_SIDECAR_SCHEMA_VERSION,
             "block": self._block,
             "codec": codec,
             "scale_mode": self._scale_mode,
@@ -874,6 +928,7 @@ class Int4SideExperts:
                 "scale_file": os.path.relpath(str(s_path), str(self._side_dir)),
                 "shape": list(q.shape),
                 "scale_shape": list(scale.shape),
+                "binding": self._bindings[name],
             }
         return sidecar
 
@@ -985,7 +1040,11 @@ class Int4SideExperts:
     def _validate_side_scale(
         self, name: str, scale: np.ndarray, ref_shape: tuple[int, ...]
     ) -> np.ndarray:
-        scale_f = np.asarray(scale, dtype=np.float32)
+        scale_f = np.asarray(scale)
+        if scale_f.dtype != np.dtype(np.float32):
+            raise ForwardError(
+                f"int4 side-table {name}: scale dtype {scale_f.dtype} != float32"
+            )
         _require_finite_array(scale_f, "loaded scales")
         expected = self._expected_side_scale_shape(ref_shape)
         if tuple(int(d) for d in scale_f.shape) != expected:
@@ -1002,32 +1061,87 @@ class Int4SideExperts:
         scale_f = self._validate_side_scale(name, scale, ref_shape)
         return q_i, scale_f
 
-    def _sidecar_certifies(self, name: str, ref_shape: tuple[int, ...]) -> bool:
-        """Whether the active mode's final sidecar certifies this q/scale pair."""
-        path = self._side_dir / "sidecar.json"
+    def _sidecar_mode_contract(
+        self, path: Path, name: str
+    ) -> tuple[str, str, Path] | None:
+        """Expected scale mode, codec, and scale path for one sidecar path."""
+        abs_path, ls_path = self._sidecar_paths()
+        abs_scale, ls_scale = self._scale_paths(name)
+        if path == abs_path:
+            return INT4_SCALE_ABSMAX, "int4_absmax_per_output_channel", abs_scale
+        if path == ls_path:
+            return (
+                INT4_SCALE_LS_CHANNEL_ALPHA,
+                "int4_ls_channel_alpha_per_output_channel",
+                ls_scale,
+            )
+        return None
+
+    def _certifying_sidecar_entry(
+        self, path: Path, name: str, ref_shape: tuple[int, ...]
+    ) -> dict[str, object] | None:
+        """Return an entry only when its versioned sidecar metadata is exact."""
         try:
             sidecar = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return False
+            return None
         if not isinstance(sidecar, dict):
-            return False
+            return None
         tensors = sidecar.get("tensors")
         entry = tensors.get(name) if isinstance(tensors, dict) else None
         if not isinstance(entry, dict):
-            return False
-        q_path, scale_path = self._paths(name)
-        return (
-            sidecar.get("block") == self._block
-            and sidecar.get("codec") == self._codec
-            and sidecar.get("scale_mode") == self._scale_mode
-            and sidecar.get("qmax") == INT4_QMAX
-            and entry.get("q_file") == os.path.relpath(str(q_path), str(self._side_dir))
-            and entry.get("scale_file")
-            == os.path.relpath(str(scale_path), str(self._side_dir))
-            and entry.get("shape") == list(ref_shape)
-            and entry.get("scale_shape")
-            == list(self._expected_side_scale_shape(ref_shape))
+            return None
+        contract = self._sidecar_mode_contract(path, name)
+        if contract is None:
+            return None
+        scale_mode, codec, scale_path = contract
+        q_path, _ = self._paths(name)
+        expected_sidecar = {
+            "schema_version": INT4_SIDECAR_SCHEMA_VERSION,
+            "block": self._block,
+            "codec": codec,
+            "scale_mode": scale_mode,
+            "qmax": INT4_QMAX,
+        }
+        sidecar_metadata = {key: sidecar.get(key) for key in expected_sidecar}
+        expected_entry = {
+            "q_file": os.path.relpath(str(q_path), str(path.parent)),
+            "scale_file": os.path.relpath(str(scale_path), str(path.parent)),
+            "shape": list(ref_shape),
+            "scale_shape": list(self._expected_side_scale_shape(ref_shape)),
+        }
+        entry_metadata = {key: entry.get(key) for key in expected_entry}
+        if sidecar_metadata != expected_sidecar or entry_metadata != expected_entry:
+            return None
+        return entry
+
+    def _sidecar_certifies_codes(
+        self,
+        name: str,
+        ref_shape: tuple[int, ...],
+        reference: dict[str, object],
+        q_codes: dict[str, object],
+    ) -> bool:
+        """Require some complete current sidecar before reusing shared q."""
+        for path in self._sidecar_paths():
+            entry = self._certifying_sidecar_entry(path, name, ref_shape)
+            if entry is not None and _binding_certifies_codes(
+                entry.get("binding"), reference, q_codes
+            ):
+                return True
+        return False
+
+    def _sidecar_certifies(
+        self,
+        name: str,
+        ref_shape: tuple[int, ...],
+        binding: dict[str, object],
+    ) -> bool:
+        """Whether the active sidecar binds this exact reference/q/scale trio."""
+        entry = self._certifying_sidecar_entry(
+            self._side_dir / "sidecar.json", name, ref_shape
         )
+        return entry is not None and entry.get("binding") == binding
 
     def _load_codes(self, name: str, q_path: Path, ref_shape: tuple[int, ...]):
         """Load and incrementally validate q, returning a read-only memmap."""
@@ -1067,7 +1181,12 @@ class Int4SideExperts:
 
     def _codes_for(
         self, name: str, ref: np.ndarray, ref_shape: tuple[int, ...]
-    ) -> tuple[np.ndarray, np.ndarray | None]:
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray | None,
+        dict[str, object],
+        dict[str, object],
+    ]:
         """Reuse persisted INT4 codes only when they came from this reference.
 
         The codes live in the absmax directory so absmax and LS-α never
@@ -1077,8 +1196,8 @@ class Int4SideExperts:
         claims ``research_int4_channel_alpha_side``. So gate reuse on a
         fingerprint of the reference bytes.
 
-        Returns ``(codes, absmax_scale_or_None)``; the scale is a by-product of
-        quantizing, present only when the codes were just rebuilt.
+        Returns codes, an optional newly computed absmax scale, and the
+        reference/q content identities used by the certifying sidecar.
         """
         q_path, s_path = self._paths(name)
         fp_path = self._fingerprint_path(name)
@@ -1087,20 +1206,38 @@ class Int4SideExperts:
         if q_path.is_file() and _fingerprint_matches(fp_path, fingerprint):
             q = self._load_codes(name, q_path, ref_shape)
             if q is not None:
-                return q, None
+                q_fingerprint = _array_fingerprint(q, dtype=np.int8)
+                if self._sidecar_certifies_codes(
+                    name, ref_shape, fingerprint, q_fingerprint
+                ):
+                    return q, None, fingerprint, q_fingerprint
         del s_path
-        return self._build_shared_codes(name, ref, ref_shape, fingerprint)
+        q, scale_abs = self._build_shared_codes(name, ref, ref_shape, fingerprint)
+        return q, scale_abs, fingerprint, _array_fingerprint(q, dtype=np.int8)
 
     def _load_certified_scale(
-        self, name: str, scale_path: Path, ref_shape: tuple[int, ...]
-    ) -> np.ndarray | None:
-        if not self._sidecar_certifies(name, ref_shape) or not scale_path.is_file():
+        self,
+        name: str,
+        scale_path: Path,
+        ref_shape: tuple[int, ...],
+        reference_fingerprint: dict[str, object],
+        q_fingerprint: dict[str, object],
+    ) -> tuple[np.ndarray, dict[str, object]] | None:
+        if not scale_path.is_file():
             return None
         try:
             scale = np.load(scale_path, mmap_mode="r", allow_pickle=False)
-            return self._validate_side_scale(name, scale, ref_shape)
+            scale = self._validate_side_scale(name, scale, ref_shape)
         except (OSError, ValueError, ForwardError):
             return None
+        binding = _sidecar_binding(
+            reference_fingerprint,
+            q_fingerprint,
+            _array_fingerprint(scale, dtype=np.float32),
+        )
+        if not self._sidecar_certifies(name, ref_shape, binding):
+            return None
+        return scale, binding
 
     def _compute_scale(
         self, ref: np.ndarray, q: np.ndarray, scale_abs: np.ndarray | None
@@ -1115,15 +1252,28 @@ class Int4SideExperts:
         ref_shape = tuple(int(d) for d in ref.shape)
         _, s_path = self._paths(name)
 
-        q, scale_abs = self._codes_for(name, ref, ref_shape)
-        scale = self._load_certified_scale(name, s_path, ref_shape)
-        if scale is not None:
-            return self._validate_side_pair(name, q, scale, ref_shape)
-        self._invalidate_active_sidecar()
-        scale = self._compute_scale(ref, q, scale_abs)
-        _atomic_save_npy(s_path, scale)
-        self._publish_hook("scale_published", s_path)
-        return self._validate_side_pair(name, q, scale, ref_shape)
+        q, scale_abs, ref_fingerprint, q_fingerprint = self._codes_for(
+            name, ref, ref_shape
+        )
+        certified = self._load_certified_scale(
+            name, s_path, ref_shape, ref_fingerprint, q_fingerprint
+        )
+        if certified is None:
+            self._invalidate_active_sidecar()
+            scale = self._compute_scale(ref, q, scale_abs)
+            _atomic_save_npy(s_path, scale)
+            self._publish_hook("scale_published", s_path)
+            pair = self._validate_side_pair(name, q, scale, ref_shape)
+            binding = _sidecar_binding(
+                ref_fingerprint,
+                q_fingerprint,
+                _array_fingerprint(pair[1], dtype=np.float32),
+            )
+        else:
+            scale, binding = certified
+            pair = self._validate_side_pair(name, q, scale, ref_shape)
+        self._bindings[name] = binding
+        return pair
 
     def vector(self, role: str) -> np.ndarray:
         q, scale = self._cache[role]

@@ -141,6 +141,12 @@ The supervisor ran from 2026-08-24 14:05:32.377964Z through 17:13:18.488727Z (3:
 
 The launch snapshot recorded 64,906,240,000 bytes total RAM, 27,845,763,072 bytes available RAM, and 106,196,992 bytes free swap. No launch gate was applied. The end snapshot recorded 23,424,364,544 bytes available RAM and a maximum child RSS of 15,706,260 KiB. The user service manager observed a 23.2 GiB process-tree memory peak and 10.1 MiB swap peak. These are observational host snapshots, not proof of behavior on another host.
 
+## Post-publication cache-binding audit
+
+A current-head review found that the legacy sidecars used during the canonical run did not bind actual q-code and scale contents into one generation. Codex (OpenAI) therefore audited the concrete external cache before changing it: all 12 q tensors, 12 absmax scales, and 12 LS scales matched deterministic recomputation from the FP32 references bit-for-bit. The schema-2 migration then rebuilt the legacy metadata under the per-block lock, and all 36 q/scale SHA-256 digests remained identical before and after migration. A final pass through the reviewed strict-dtype source accepted all eight block/mode combinations as content-bound reuse.
+
+This post-publication audit supports the existing canonical metrics without a three-hour rerun because the exact scientific q/scale payloads consumed by the run were proven internally consistent and unchanged. It does not grandfather other legacy caches: the implementation now rejects and rebuilds all legacy, incomplete, or content-mismatched entries. The canonical JSON metrics were not edited. Full procedure and the 36-entry relative-path manifest are in `cache-binding-audit.md` and `cache-binding-audit.sha256`.
+
 ## Reproduction
 
 Implementation must be committed and clean before launch. Configure local input paths, then run only the supervisor:
@@ -180,6 +186,8 @@ reports/grok-1-expert-precision-remedy-v4/
 |-- run-03-p0.log
 |-- int4-baseline/metrics.json
 |-- int4-channel-alpha-123/metrics.json
+|-- cache-binding-audit.md
+|-- cache-binding-audit.sha256
 |-- metrics.json
 `-- results.md
 ```

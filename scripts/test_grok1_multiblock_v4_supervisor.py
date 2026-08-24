@@ -496,6 +496,51 @@ class SupervisorTests(unittest.TestCase):
         finally:
             os.close(fd)
 
+    def _prelock_interrupt_patch(self, phase: str, exception: BaseException):
+        """Raise once at a selected point before the output transaction starts."""
+        targets = {
+            "lock_factory": (
+                supervisor,
+                "_supervisor_output_lock",
+                supervisor._supervisor_output_lock,
+                True,
+            ),
+            "expanduser": (
+                supervisor.os.path,
+                "expanduser",
+                supervisor.os.path.expanduser,
+                True,
+            ),
+            "resolve": (Path, "resolve", Path.resolve, True),
+            "lock_path": (
+                supervisor,
+                "_output_lock_path",
+                supervisor._output_lock_path,
+                True,
+            ),
+            "lock_parent_mkdir": (Path, "mkdir", Path.mkdir, True),
+            "open": (supervisor.os, "open", supervisor.os.open, True),
+            "flock": (
+                supervisor._fcntl,
+                "flock",
+                supervisor._fcntl.flock,
+                False,
+            ),
+        }
+        owner, name, original, autospec = targets[phase]
+        state = {"tripped": False}
+
+        def interrupt_once(*args, **kwargs):
+            if not state["tripped"]:
+                state["tripped"] = True
+                raise exception
+            return original(*args, **kwargs)
+
+        patch_kwargs = {"side_effect": interrupt_once}
+        if autospec:
+            patch_kwargs["autospec"] = True
+        return mock.patch.object(owner, name, **patch_kwargs), state
+
     def test_output_lock_is_persistent_and_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "report"
@@ -557,15 +602,14 @@ class SupervisorTests(unittest.TestCase):
             metrics.write_text("active metrics\n", encoding="utf-8")
             report.write_text("active report\n", encoding="utf-8")
 
-            with (
-                mock.patch.object(
-                    supervisor._fcntl,
-                    "flock",
-                    side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
-                ),
-            ):
-                result = supervisor.run(args)
+            with supervisor._supervisor_output_lock(args.out):
+                interrupt_patch, tripped = self._prelock_interrupt_patch(
+                    "flock", supervisor.SupervisorSignal(signal.SIGTERM)
+                )
+                with interrupt_patch:
+                    result = supervisor.run(args)
 
+            self.assertTrue(tripped["tripped"])
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
             self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
@@ -621,6 +665,118 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
             self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
+
+    def test_prelock_interrupts_supersede_stale_success_when_output_idle(
+        self,
+    ) -> None:
+        phases = (
+            "lock_factory",
+            "expanduser",
+            "resolve",
+            "lock_path",
+            "lock_parent_mkdir",
+            "open",
+            "flock",
+        )
+        signals = (
+            ("sigterm", lambda: supervisor.SupervisorSignal(signal.SIGTERM), "SIGTERM"),
+            ("keyboard", KeyboardInterrupt, "SIGINT"),
+        )
+
+        for phase in phases:
+            for signal_name, make_exception, expected_signal in signals:
+                with (
+                    self.subTest(phase=phase, signal=signal_name),
+                    tempfile.TemporaryDirectory() as td,
+                ):
+                    args = self._args(Path(td))
+                    args.out.mkdir(parents=True, exist_ok=True)
+                    metrics = args.out / "metrics.json"
+                    report = args.out / "results.md"
+                    metrics.write_text(
+                        json.dumps({"decision": {"decision": 2}}), encoding="utf-8"
+                    )
+                    report.write_text(
+                        "# stale success\n\n**Option 2 — stale**\n", encoding="utf-8"
+                    )
+                    interrupt_patch, tripped = self._prelock_interrupt_patch(
+                        phase, make_exception()
+                    )
+
+                    with (
+                        interrupt_patch,
+                        mock.patch.object(
+                            supervisor,
+                            "_clean_supervisor_implementation",
+                            return_value=dict(_IMPLEMENTATION),
+                        ) as pin,
+                        mock.patch.object(supervisor.subprocess, "run") as child_run,
+                    ):
+                        result = supervisor.run(args)
+
+                    self.assertTrue(tripped["tripped"])
+                    self.assertEqual(pin.call_count, 1)
+                    self.assertEqual(child_run.call_count, 0)
+                    self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                    payload = self._failure(args)
+                    self.assertEqual(payload["decision"]["decision"], 4)
+                    self.assertEqual(payload["failure_class"], "interrupted")
+                    self.assertEqual(payload["signal"], expected_signal)
+                    report_body = report.read_text(encoding="utf-8")
+                    self.assertIn("Option 4", report_body)
+                    self.assertNotIn("stale success", report_body)
+
+    def test_prelock_interrupts_preserve_active_lock_owner(self) -> None:
+        phases = (
+            "lock_factory",
+            "expanduser",
+            "resolve",
+            "lock_path",
+            "lock_parent_mkdir",
+            "open",
+            "flock",
+        )
+        signals = (
+            ("sigterm", lambda: supervisor.SupervisorSignal(signal.SIGTERM)),
+            ("keyboard", KeyboardInterrupt),
+        )
+
+        for phase in phases:
+            for signal_name, make_exception in signals:
+                with (
+                    self.subTest(phase=phase, signal=signal_name),
+                    tempfile.TemporaryDirectory() as td,
+                ):
+                    args = self._args(Path(td))
+                    args.out.mkdir(parents=True, exist_ok=True)
+                    metrics = args.out / "metrics.json"
+                    report = args.out / "results.md"
+                    metrics.write_text("active metrics\n", encoding="utf-8")
+                    report.write_text("active report\n", encoding="utf-8")
+
+                    with supervisor._supervisor_output_lock(args.out):
+                        interrupt_patch, tripped = self._prelock_interrupt_patch(
+                            phase, make_exception()
+                        )
+                        with (
+                            interrupt_patch,
+                            mock.patch.object(
+                                supervisor,
+                                "_clean_supervisor_implementation",
+                                return_value=dict(_IMPLEMENTATION),
+                            ) as pin,
+                        ):
+                            result = supervisor.run(args)
+
+                    self.assertTrue(tripped["tripped"])
+                    self.assertEqual(pin.call_count, 1)
+                    self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                    self.assertEqual(
+                        metrics.read_text(encoding="utf-8"), "active metrics\n"
+                    )
+                    self.assertEqual(
+                        report.read_text(encoding="utf-8"), "active report\n"
+                    )
 
     def test_implementation_change_while_waiting_for_lock_fails_before_child(
         self,

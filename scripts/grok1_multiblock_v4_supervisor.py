@@ -2445,6 +2445,17 @@ def _recover_startup_interrupt(args: argparse.Namespace, exc: KeyboardInterrupt)
         return EXIT_SUPERVISOR_FAILCLOSED
 
 
+def _handle_pretransaction_failure(
+    args: argparse.Namespace, exc: KeyboardInterrupt | OutputLockError
+) -> int:
+    """Recover interrupts, but never mutate output after an ordinary lock error."""
+    if isinstance(exc, KeyboardInterrupt):
+        return _recover_startup_interrupt(args, exc)
+    # No output lock means another supervisor may own the canonical tree.
+    print(f"ERROR before supervisor output transaction: {exc}", file=sys.stderr)
+    return EXIT_SUPERVISOR_FAILCLOSED
+
+
 def run(args: argparse.Namespace) -> int:
     try:
         startup_implementation: dict[str, str | bool] | None = None
@@ -2479,10 +2490,7 @@ def run(args: argparse.Namespace) -> int:
                     return _record_post_validation_exception(args, state, exc)
                 return _publish_supervisor_exception(args, state, exc)
     except (KeyboardInterrupt, OutputLockError) as exc:
-        # No output lock means another supervisor may own the canonical tree.
-        # Fail without publishing there or invalidating that run's artifacts.
-        print(f"ERROR before supervisor output transaction: {exc}", file=sys.stderr)
-        return EXIT_SUPERVISOR_FAILCLOSED
+        return _handle_pretransaction_failure(args, exc)
 
 
 def _raise_supervisor_signal(signal_number: int, _frame: object) -> None:
