@@ -1,9 +1,9 @@
 {
   "provenance": {
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
-    "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
-    "model": "Grok-4.5",
-    "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+    "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "model": "OpenAI Codex",
+    "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
     "baseline_64": {
       "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
       "tokens": 2048,
@@ -141,7 +141,7 @@
       "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness."
     },
     "implementation": {
-      "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+      "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
       "dirty": false
     },
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
@@ -173,10 +173,10 @@
     "per_block": [
       {
         "block": 0,
-        "reference_seconds": 238.97658944129944,
+        "reference_seconds": 266.6767609119415,
         "expert_only": {
           "label": "research_int4_side",
-          "seconds": 309.16027450561523,
+          "seconds": 355.4767093658447,
           "attention_output_cosine": 1.0,
           "attention_output_cosine_per_token": 1.0,
           "residual_stream_cosine": 1.0000000000000002,
@@ -276,7 +276,7 @@
         },
         "fp16_control": {
           "label": "fp16_roundtrip",
-          "seconds": 284.69182801246643,
+          "seconds": 320.2840836048126,
           "attention_output_cosine": 0.9999999985728412,
           "attention_output_cosine_per_token": 0.9999999986361572,
           "residual_stream_cosine": 0.9999999819762834,
@@ -378,10 +378,10 @@
       },
       {
         "block": 1,
-        "reference_seconds": 233.11412382125854,
+        "reference_seconds": 193.54124808311462,
         "expert_only": {
           "label": "research_int4_side",
-          "seconds": 196.34954357147217,
+          "seconds": 325.74283051490784,
           "attention_output_cosine": 0.9994921977874481,
           "attention_output_cosine_per_token": 0.9994901484606165,
           "residual_stream_cosine": 0.9990365860991692,
@@ -481,7 +481,7 @@
         },
         "fp16_control": {
           "label": "fp16_roundtrip",
-          "seconds": 216.5490860939026,
+          "seconds": 311.47637486457825,
           "attention_output_cosine": 0.9999844464986306,
           "attention_output_cosine_per_token": 0.9999843032690912,
           "residual_stream_cosine": 0.9999756963861242,
@@ -583,10 +583,10 @@
       },
       {
         "block": 2,
-        "reference_seconds": 178.37757635116577,
+        "reference_seconds": 242.07538318634033,
         "expert_only": {
           "label": "research_int4_side",
-          "seconds": 246.09003281593323,
+          "seconds": 345.4744019508362,
           "attention_output_cosine": 0.9965665106057541,
           "attention_output_cosine_per_token": 0.9966740867903803,
           "residual_stream_cosine": 0.9980410644324349,
@@ -686,7 +686,7 @@
         },
         "fp16_control": {
           "label": "fp16_roundtrip",
-          "seconds": 281.5117938518524,
+          "seconds": 316.63707876205444,
           "attention_output_cosine": 0.9999716287912973,
           "attention_output_cosine_per_token": 0.9999694231843663,
           "residual_stream_cosine": 0.9999749873089938,
@@ -788,10 +788,10 @@
       },
       {
         "block": 3,
-        "reference_seconds": 213.8233666419983,
+        "reference_seconds": 229.87560534477234,
         "expert_only": {
           "label": "research_int4_side",
-          "seconds": 258.6500837802887,
+          "seconds": 309.3350121974945,
           "attention_output_cosine": 0.9849794005308738,
           "attention_output_cosine_per_token": 0.9848368129062782,
           "residual_stream_cosine": 0.9924074300943141,
@@ -891,7 +891,7 @@
         },
         "fp16_control": {
           "label": "fp16_roundtrip",
-          "seconds": 279.00134801864624,
+          "seconds": 336.2478401660919,
           "attention_output_cosine": 0.9996371522691706,
           "attention_output_cosine_per_token": 0.9996587349820896,
           "residual_stream_cosine": 0.9998417382509542,

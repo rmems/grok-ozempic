@@ -446,7 +446,7 @@
           "router_top1_agreement": 1.0,
           "router_top2_set_agreement": 1.0,
           "router_topk_set_agreement": 1.0,
-          "seconds": 292.7965888977051,
+          "seconds": 325.6512689590454,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -546,11 +546,11 @@
           "router_top1_agreement": 0.9991455078125,
           "router_top2_set_agreement": 0.99658203125,
           "router_topk_set_agreement": 0.99658203125,
-          "seconds": 315.97720766067505,
+          "seconds": 286.92310333251953,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 151.565527677536
+        "reference_seconds": 218.2891149520874
       },
       {
         "block": 1,
@@ -651,7 +651,7 @@
           "router_top1_agreement": 0.9820556640625,
           "router_top2_set_agreement": 0.932861328125,
           "router_topk_set_agreement": 0.932861328125,
-          "seconds": 337.6895294189453,
+          "seconds": 305.7945308685303,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -751,11 +751,11 @@
           "router_top1_agreement": 0.9996337890625,
           "router_top2_set_agreement": 0.9981689453125,
           "router_topk_set_agreement": 0.9981689453125,
-          "seconds": 342.03950691223145,
+          "seconds": 281.497962474823,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 213.51879334449768
+        "reference_seconds": 198.70540928840637
       },
       {
         "block": 2,
@@ -856,7 +856,7 @@
           "router_top1_agreement": 0.9110107421875,
           "router_top2_set_agreement": 0.8681640625,
           "router_topk_set_agreement": 0.8681640625,
-          "seconds": 350.2537670135498,
+          "seconds": 329.9074652194977,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -956,11 +956,11 @@
           "router_top1_agreement": 0.996826171875,
           "router_top2_set_agreement": 0.995361328125,
           "router_topk_set_agreement": 0.995361328125,
-          "seconds": 335.70151019096375,
+          "seconds": 291.72122859954834,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 212.27473497390747
+        "reference_seconds": 230.69037413597107
       },
       {
         "block": 3,
@@ -1061,7 +1061,7 @@
           "router_top1_agreement": 0.8017578125,
           "router_top2_set_agreement": 0.6864013671875,
           "router_topk_set_agreement": 0.6864013671875,
-          "seconds": 239.10686492919922,
+          "seconds": 317.7853844165802,
           "selected_experts": 2
         },
         "fp16_control": {
@@ -1161,11 +1161,11 @@
           "router_top1_agreement": 0.9912109375,
           "router_top2_set_agreement": 0.987548828125,
           "router_topk_set_agreement": 0.987548828125,
-          "seconds": 286.9547107219696,
+          "seconds": 280.503812789917,
           "selected_experts": 2
         },
         "pilot_label": "research_int4_channel_alpha_side",
-        "reference_seconds": 221.281183719635
+        "reference_seconds": 218.0075500011444
       }
     ],
     "pilot_labels_per_block": [
@@ -1214,7 +1214,7 @@
     "primary_arm": "expert_int4_channel_alpha",
     "primary_provenance": {
       "implementation": {
-        "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+        "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
         "dirty": false
       }
     },
@@ -1684,7 +1684,7 @@
                 "router_top1_agreement": 1.0,
                 "router_top2_set_agreement": 1.0,
                 "router_topk_set_agreement": 1.0,
-                "seconds": 309.16027450561523,
+                "seconds": 355.4767093658447,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -1784,11 +1784,11 @@
                 "router_top1_agreement": 0.9991455078125,
                 "router_top2_set_agreement": 0.99658203125,
                 "router_topk_set_agreement": 0.99658203125,
-                "seconds": 284.69182801246643,
+                "seconds": 320.2840836048126,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 238.97658944129944
+              "reference_seconds": 266.6767609119415
             },
             {
               "block": 1,
@@ -1889,7 +1889,7 @@
                 "router_top1_agreement": 0.9822998046875,
                 "router_top2_set_agreement": 0.9385986328125,
                 "router_topk_set_agreement": 0.9385986328125,
-                "seconds": 196.34954357147217,
+                "seconds": 325.74283051490784,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -1989,11 +1989,11 @@
                 "router_top1_agreement": 0.9996337890625,
                 "router_top2_set_agreement": 0.9981689453125,
                 "router_topk_set_agreement": 0.9981689453125,
-                "seconds": 216.5490860939026,
+                "seconds": 311.47637486457825,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 233.11412382125854
+              "reference_seconds": 193.54124808311462
             },
             {
               "block": 2,
@@ -2094,7 +2094,7 @@
                 "router_top1_agreement": 0.92626953125,
                 "router_top2_set_agreement": 0.8861083984375,
                 "router_topk_set_agreement": 0.8861083984375,
-                "seconds": 246.09003281593323,
+                "seconds": 345.4744019508362,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -2194,11 +2194,11 @@
                 "router_top1_agreement": 0.996826171875,
                 "router_top2_set_agreement": 0.995361328125,
                 "router_topk_set_agreement": 0.995361328125,
-                "seconds": 281.5117938518524,
+                "seconds": 316.63707876205444,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 178.37757635116577
+              "reference_seconds": 242.07538318634033
             },
             {
               "block": 3,
@@ -2299,7 +2299,7 @@
                 "router_top1_agreement": 0.82373046875,
                 "router_top2_set_agreement": 0.7210693359375,
                 "router_topk_set_agreement": 0.7210693359375,
-                "seconds": 258.6500837802887,
+                "seconds": 309.3350121974945,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -2399,11 +2399,11 @@
                 "router_top1_agreement": 0.9912109375,
                 "router_top2_set_agreement": 0.987548828125,
                 "router_topk_set_agreement": 0.987548828125,
-                "seconds": 279.00134801864624,
+                "seconds": 336.2478401660919,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_side",
-              "reference_seconds": 213.8233666419983
+              "reference_seconds": 229.87560534477234
             }
           ],
           "pilot_labels_per_block": [
@@ -2422,7 +2422,7 @@
         },
         "provenance": {
           "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
-          "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+          "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
           "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
           "arm": "int4",
           "baseline_64": {
@@ -2561,18 +2561,18 @@
             "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
             "top_k": 2
           },
-          "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+          "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
           "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
           "embedding_shard": "embedding__slot_00__token_embedding.npy",
           "evidence_role": "secondary; no independent decision",
           "implementation": {
-            "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+            "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
             "dirty": false
           },
           "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
           "metrics_filename": "metrics.json",
           "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
-          "model": "Grok-4.5",
+          "model": "OpenAI Codex",
           "numpy": "2.5.1",
           "python": "3.14.6",
           "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",
@@ -3026,7 +3026,7 @@
                 "router_top1_agreement": 1.0,
                 "router_top2_set_agreement": 1.0,
                 "router_topk_set_agreement": 1.0,
-                "seconds": 289.2064609527588,
+                "seconds": 333.4465341567993,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3126,11 +3126,11 @@
                 "router_top1_agreement": 0.9991455078125,
                 "router_top2_set_agreement": 0.99658203125,
                 "router_topk_set_agreement": 0.99658203125,
-                "seconds": 315.9707987308502,
+                "seconds": 287.79632353782654,
                 "selected_experts": 2
               },
               "pilot_label": "research_int4_channel_alpha_side",
-              "reference_seconds": 157.56357407569885
+              "reference_seconds": 257.4511570930481
             },
             {
               "block": 1,
@@ -3231,7 +3231,7 @@
                 "router_top1_agreement": 0.9820556640625,
                 "router_top2_set_agreement": 0.932861328125,
                 "router_topk_set_agreement": 0.932861328125,
-                "seconds": 230.84059381484985,
+                "seconds": 293.18333554267883,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3331,11 +3331,11 @@
                 "router_top1_agreement": 0.9996337890625,
                 "router_top2_set_agreement": 0.9981689453125,
                 "router_topk_set_agreement": 0.9981689453125,
-                "seconds": 296.21696376800537,
+                "seconds": 335.42269349098206,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 167.67060899734497
+              "reference_seconds": 204.38440132141113
             },
             {
               "block": 2,
@@ -3436,7 +3436,7 @@
                 "router_top1_agreement": 0.9351806640625,
                 "router_top2_set_agreement": 0.9066162109375,
                 "router_topk_set_agreement": 0.9066162109375,
-                "seconds": 260.33888030052185,
+                "seconds": 320.02914905548096,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3536,11 +3536,11 @@
                 "router_top1_agreement": 0.996826171875,
                 "router_top2_set_agreement": 0.995361328125,
                 "router_topk_set_agreement": 0.995361328125,
-                "seconds": 322.32828736305237,
+                "seconds": 294.91808676719666,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 172.76675724983215
+              "reference_seconds": 244.76727294921875
             },
             {
               "block": 3,
@@ -3641,7 +3641,7 @@
                 "router_top1_agreement": 0.8873291015625,
                 "router_top2_set_agreement": 0.8260498046875,
                 "router_topk_set_agreement": 0.8260498046875,
-                "seconds": 243.0828080177307,
+                "seconds": 274.67492175102234,
                 "selected_experts": 2
               },
               "fp16_control": {
@@ -3741,11 +3741,11 @@
                 "router_top1_agreement": 0.9912109375,
                 "router_top2_set_agreement": 0.987548828125,
                 "router_topk_set_agreement": 0.987548828125,
-                "seconds": 291.4015588760376,
+                "seconds": 301.19865012168884,
                 "selected_experts": 2
               },
               "pilot_label": "expert_int4_channel_alpha_123",
-              "reference_seconds": 176.63534998893738
+              "reference_seconds": 203.10643815994263
             }
           ],
           "pilot_labels_per_block": [
@@ -3764,7 +3764,7 @@
         },
         "provenance": {
           "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
-          "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+          "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
           "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
           "arm": "int4_channel_alpha",
           "baseline_64": {
@@ -3903,18 +3903,18 @@
             "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
             "top_k": 2
           },
-          "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+          "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
           "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
           "embedding_shard": "embedding__slot_00__token_embedding.npy",
           "evidence_role": "secondary; no independent decision",
           "implementation": {
-            "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+            "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
             "dirty": false
           },
           "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
           "metrics_filename": "metrics.json",
           "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
-          "model": "Grok-4.5",
+          "model": "OpenAI Codex",
           "numpy": "2.5.1",
           "python": "3.14.6",
           "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",
@@ -4121,7 +4121,7 @@
   },
   "provenance": {
     "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
-    "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "arm": "int4_channel_alpha",
     "baseline_64": {
@@ -4260,18 +4260,18 @@
       "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
       "top_k": 2
     },
-    "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+    "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
     "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
     "embedding_shard": "embedding__slot_00__token_embedding.npy",
     "evidence_role": "primary; sole canonical #85 decision",
     "implementation": {
-      "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+      "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
       "dirty": false
     },
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
     "metrics_filename": "metrics.json",
     "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
-    "model": "Grok-4.5",
+    "model": "OpenAI Codex",
     "numpy": "2.5.1",
     "python": "3.14.6",
     "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",

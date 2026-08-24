@@ -12,7 +12,7 @@
     "top_k": 2
   },
   "implementation": {
-    "commit": "ce90d12dd9efabde79b99404fb2d602d8aa1f536",
+    "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
     "dirty": false
   },
   "input_identity": {
@@ -26,9 +26,9 @@
   },
   "provenance_identity": {
     "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
-    "agent": "Grok Build: Grok 4.5 (high) (xAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
-    "model": "Grok-4.5",
-    "design": "Grok Build design lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+    "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "model": "OpenAI Codex",
+    "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
     "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
     "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
     "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle"
