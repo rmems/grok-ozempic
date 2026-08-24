@@ -1,121 +1,62 @@
-# Grok-1 SAAQ artifact flow
+# Grok-1 metadata and first real-weight GOZ1 runbook
 
-This document is the sprint handoff contract for GitHub issues #13, #14,
-#15, #17, #18, and #19.
+SAAQ means **Spiking Adaptive Activity Quantization**, terminology coined by
+this project's creator. This runbook connects its metadata validation path to
+the first verified real Grok-1 embedding pack. The paths are complementary, but
+they produce different artifacts: the SAAQ commands write structural metadata,
+while `quantize-goz1` reads exported tensor values and writes a GOZ1 container.
 
-## Ingest validation
+## 1. Build and choose portable locations
 
-Before conversion, validate the `xai-dissect` manifest and optional checkpoint
-checksum map:
+From the repository root:
 
 ```bash
-cargo run --features cli -- \
-  validate-ingest \
+cargo build --release --features cli
+
+GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
+GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
+GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
+mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
+```
+
+`GROK1_CKPT` must point to a local official `ckpt-0` directory. The measured
+checkpoint used for the first experiment contained 770 shards and occupied
+about 297 GiB, but `validate-ingest` does not establish those counts. GitHub
+#35 owns exact local checkpoint inventory validation.
+
+## 2. Validate ingest metadata
+
+```bash
+./target/release/grok-ozempic validate-ingest \
   --manifest dissect/grok-1/baseline.json \
-  --checkpoint /path/to/ckpt-0
+  --checkpoint "$GROK1_CKPT"
 ```
 
-Validation enforces:
+This checks manifest identity and schema, checkpoint-directory presence, and
+the entries in `checksums.json` when that optional file exists. If present,
+those entries cause real shard reads for hashing. It does not independently
+count all checkpoint shards or quantize weights.
 
-- readable JSON manifest
-- supported manifest schema version
-- supported tensor name convention
-- `model.family = grok-1`
-- optional checkpoint directory existence
-- optional `checksums.json` SHA-256 integrity when present in the checkpoint
-  directory
-
-The checksum file is a JSON object whose keys are checkpoint-relative file paths
-and whose values are either raw lowercase SHA-256 hex strings or
-`sha256:<hex>` strings.
-
-## First quantization target
-
-The first bounded target remains:
-
-```text
-embedding.slot_00.token_embedding
-```
-
-In this sprint artifact writer, that target is represented in the deterministic
-artifact index with policy:
-
-```text
-candidate_saaq_embedding
-```
-
-Routers and norms are protected as pass-through f32 metadata, while existing
-int8 expert and dense payloads are wrapped rather than requantized. This keeps
-the first PR concrete and structurally safe without claiming full inference or
-quality benchmarking.
-
-## One-block smoke gate
-
-Run the smoke slice before claiming a full artifact conversion:
+## 3. Run the metadata-only smoke and conversion gates
 
 ```bash
-cargo run --features cli -- \
-  smoke-grok1 \
+./target/release/grok-ozempic smoke-grok1 \
   --manifest dissect/grok-1/baseline.json \
   --block 0 \
   --include-embedding true \
   --include-final-norm true \
   --output-root /tmp/grok1-smoke \
   --dry-run
-```
 
-Expected outputs:
-
-```text
-smoke.summary.md
-smoke.index.json
-smoke.checksums.json
-smoke.warnings.json
-```
-
-The smoke gate validates `block_000` as 12 tensors with one protected f32 router,
-four protected f32 block norms, three expert tensor families, and four wrapped
-unknown dense slots. Unresolved expert projection labels are warnings, not hard
-failures.
-
-## Full conversion metadata writer
-
-Run the full deterministic metadata writer:
-
-```bash
-cargo run --features cli -- \
-  convert-grok1 \
+./target/release/grok-ozempic convert-grok1 \
   --manifest dissect/grok-1/baseline.json \
   --output-root /tmp/grok1-artifact \
   --format saaq-g1-v0 \
   --protect-routers true \
   --protect-norms true \
   --dry-run
-```
 
-Expected outputs:
-
-```text
-manifest.used.json
-conversion.summary.md
-artifact.index.json
-checksums.json
-warnings.json
-```
-
-The writer refuses non-`grok-1` manifests, validates 770 planned tensor entries,
-64 routers, protected f32 routers with shape `(6144, 8)`, protected norms,
-`64 * 8 * 3` logical expert associations, deterministic offsets, and stable JSON
-ordering.
-
-## Final SAAQ-based validation gate
-
-The final sprint gate is scriptable and grounded in the SAAQ/custom-format
-artifact contract:
-
-```bash
-cargo run --features cli -- \
-  validate-grok1-artifact \
+./target/release/grok-ozempic validate-grok1-artifact \
   --manifest dissect/grok-1/baseline.json \
   --artifact-index /tmp/grok1-artifact/artifact.index.json \
   --checksums /tmp/grok1-artifact/checksums.json \
@@ -123,45 +64,90 @@ cargo run --features cli -- \
   --strict-router-protection true
 ```
 
-Expected outputs:
+The smoke output is a block-0 structural slice. The conversion output includes
+`artifact.index.json`, `conversion.summary.md`, `checksums.json`,
+`manifest.used.json`, and `warnings.json`. The final command validates that
+metadata contract, including protected routers and norms. It still does not
+write packed tensor payloads. GitHub #36 owns the complete 770-entry,
+64-router metadata execution gate.
 
-```text
-validation.summary.md
-validation.report.json
-validation.failures.json
-validation.warnings.json
+## 4. Export the real embedding from pickle to NPY
+
+The official shard is a JAX pickle frame, which `quantize-goz1` cannot consume
+directly. The known embedding payload is `tensor00000_000`, offset 151, f32,
+shape `(131072, 6144)`:
+
+```bash
+python3 scripts/export_grok1_embedding_npy.py \
+  --shard "$GROK1_CKPT/tensor00000_000" \
+  --output-dir "$GROK1_NPY"
 ```
 
-Pass criteria:
+The command reads the real approximately 3 GiB payload and writes
+`$GROK1_NPY/embedding__slot_00__token_embedding.npy`. The NPY loader converts
+the stem's `__` separators to the logical name
+`embedding.slot_00.token_embedding`. Safetensors checkpoints can instead be
+passed directly to the real-weight packer with `--input-format safetensors`;
+the official pickle shard cannot.
 
-- source manifest is Grok-1 and schema-valid
-- full artifact has exactly 770 tensor entries
-- every source tensor is represented once in the artifact index
-- exactly 64 routers exist
-- every router is protected/pass-through/f32 with shape `(6144, 8)`
-- block norms and final norm are protected/pass-through/f32
-- every block has 8 experts and 3 expert tensor families
-- unresolved expert projections remain warnings
-- unknown dense slots remain warnings unless count/shape/dtype changes
-- source byte accounting equals artifact byte accounting
-- full raw source byte accounting equals `318114914304`
+## 5. Pack and verify a real GOZ1 artifact
 
-Stable failure categories include:
-
-```text
-missing_tensor
-duplicate_tensor
-shape_mismatch
-dtype_mismatch
-byte_mismatch
-router_count_mismatch
-router_policy_violation
-norm_policy_violation
-expert_family_missing
-manifest_artifact_mismatch
+```bash
+./target/release/grok-ozempic quantize-goz1 \
+  --input-dir "$GROK1_NPY" \
+  --output "$GROK1_ARTIFACTS/grok1-first-embed.goz1" \
+  --manifest dissect/grok-1/structural-manifest.json \
+  --input-format npy \
+  --verify
 ```
+
+This is the first command in the runbook that quantizes and packs weight
+values. Current writes use GOZ1 layout version 3, with per-tensor
+reconstruction scale, GIF threshold, applied absolute threshold, and the row
+sentinel documented in [`goz1-format.md`](./goz1-format.md). The V2 structural
+manifest path fails closed when an input name has no explicit rule, protecting
+against silent router/norm misclassification.
+
+The original measured experiment used the then-current baseline manifest and
+GOZ1 version 1; it produced a verified 192.00 MiB embedding artifact. See the
+canonical [`results.md`](../reports/grok-1-first-embed-goz1/results.md) for its
+immutable command, hashes, compression, and trit histogram. A new v3 pack is a
+reproduction of the workflow, not a promise of byte identity with that v1 file.
+
+## 6. Inspect the result and understand the boundary
+
+`--verify` reopens the container and validates its header, tensor table,
+payload bounds, scale/threshold fields, and row sentinel. For a histogram using
+the repository's independent parser:
+
+```bash
+python3 scripts/goz1_trit_histogram.py \
+  "$GROK1_ARTIFACTS/grok1-first-embed.goz1"
+```
+
+The first embedding experiment proves only export → ternary pack → container
+verification for one tensor. It does not run full inference or establish
+routing or model-quality preservation.
+
+## Advanced multi-block evidence
+
+GitHub #85 and PR #89 extend the research to blocks 0–3 at the locked 8192-token
+Grok-1 context. The canonical entry point is the surviving out-of-process
+[`grok1_multiblock_v4_supervisor.py`](../scripts/grok1_multiblock_v4_supervisor.py),
+not three manually launched experiment commands. It runs one high-memory child
+at a time and fails closed if an arm cannot publish valid evidence. Its
+approximately 64 MiB intra-expert chunks bound side-table construction without
+splitting an expert row.
+
+Read the canonical
+[`results.md`](../reports/grok-1-expert-precision-remedy-v4/results.md) and
+[`metrics.json`](../reports/grok-1-expert-precision-remedy-v4/metrics.json)
+rather than copying their decision values into this runbook. The experiment's
+persisted INT4 code/scale side tables are research caches; they are not the GOZ1
+container format and must not be presented as deployable GOZ1 artifacts.
 
 ## Non-goals
 
-This sprint path does not run full inference, benchmark model quality, quantize
-routers, perform cloud provisioning, or resolve every projection-name ambiguity.
+This runbook does not claim completion of #35 or #36, run full-model inference,
+quantize routers or norms, provision cloud resources, or rerun the multi-hour
+#85 experiment.

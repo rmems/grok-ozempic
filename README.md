@@ -72,6 +72,10 @@ For `ternary_snn` candidates, the quantizer applies a saliency threshold:
 
 ### Two CLI paths: SAAQ metadata vs GOZ1 weight packing
 
+**SAAQ** means **Spiking Adaptive Activity Quantization**, terminology coined
+by this project's creator. In the commands below, “SAAQ metadata” names the
+structural planning/index pipeline; it is not shorthand for a GOZ1 weight file.
+
 | Path | Commands | Reads weights? |
 |------|----------|----------------|
 | **SAAQ metadata** | `validate-ingest`, `smoke-grok1`, `convert-grok1`, `validate-grok1-artifact` | Index/metadata only; may hash full shards if `checksums.json` is present under `--checkpoint` |
@@ -110,12 +114,14 @@ Official `xai-org/grok-1` `ckpt-0` shards are JAX **pickle** frames.
 [RM-189](https://linear.app/rpd-34/issue/RM-189)):
 
 ```bash
-# Customize CKPT / OUT for your machine (defaults also use ~/.models/xai-grok-1/...)
-CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
-OUT="${OUT:-$HOME/.models/xai-grok-1/export-npy}"
+# Override these variables when the checkpoint or outputs live elsewhere.
+GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
+GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
+GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
+mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
 python3 scripts/export_grok1_embedding_npy.py \
-  --shard "$CKPT/tensor00000_000" \
-  --output-dir "$OUT"
+  --shard "$GROK1_CKPT/tensor00000_000" \
+  --output-dir "$GROK1_NPY"
 ```
 
 This writes `embedding__slot_00__token_embedding.npy` (logical name
@@ -126,18 +132,26 @@ directory as `--input-dir` to `quantize-goz1` below.
 
 Streams tensors through `run_quantization` into a GOZ1 file
 ([#38](https://github.com/rmems/grok-ozempic/issues/38) / Linear
-[RM-193](https://linear.app/rpd-34/issue/RM-193)) — now **GOZ1 v2** with per-tensor reconstruction scale:
+[RM-193](https://linear.app/rpd-34/issue/RM-193)). Current writes use **GOZ1
+v3**, which includes per-tensor reconstruction scale and applied-threshold
+fields:
 
 ```bash
 cargo run --features cli -- quantize-goz1 \
-  --input-dir /path/to/npy \
-  --output /tmp/model.goz1 \
+  --input-dir "$GROK1_NPY" \
+  --output "$GROK1_ARTIFACTS/grok1-first-embed.goz1" \
   --manifest dissect/grok-1/structural-manifest.json \
   --input-format npy \
   --verify
 ```
 
-GOZ1 v2 (`version=2`) appends `scale: f32` + `sentinel 0x5CA1E021` per tensor row so `value = scale × payload` reconstructs without the checkpoint. `TENSOR_TERNARY` stores reconstruction-optimal `α* = Σ(w·t)/count(fired)` (signed, not `Σ|w|`), `TENSOR_F16` stores `1.0`, fully-sparse stores `0.0`; non-finite/negative (ternary) and non-`1.0` (fp16) are rejected at write and at `--verify`. v1 packs remain readable via `entry["scale"] is None` oracle fallback. See [`docs/goz1-format.md`](docs/goz1-format.md).
+GOZ1 v2 introduced `scale: f32` + `sentinel 0x5CA1E021` per tensor row so
+`value = scale × payload` reconstructs without the checkpoint. Current v3 also
+stores `gif_threshold` and the applied absolute threshold. `TENSOR_TERNARY`
+uses the reconstruction-optimal scale; `TENSOR_F16` uses `1.0`; fully sparse
+tensors use `0.0`. Writers and `--verify` reject invalid scales and threshold
+metadata. Older v1/v2 packs remain readable under their versioned layouts. See
+[`docs/goz1-format.md`](docs/goz1-format.md).
 
 ## Developer verification
 
