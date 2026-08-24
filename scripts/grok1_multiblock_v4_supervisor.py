@@ -1868,13 +1868,17 @@ def _bootstrap_run_state(_args: argparse.Namespace, state: _RunState) -> None:
     state.payloads = {}
 
 
-def _ensure_failure_state(_args: argparse.Namespace, state: _RunState) -> None:
-    """Complete partially bootstrapped state after a one-shot interruption."""
+def _ensure_failure_state(
+    _args: argparse.Namespace, state: _RunState
+) -> tuple[str, dict[str, Any]]:
+    """Complete and return fail-closed state after a one-shot interruption."""
     started_at = state.started_at or _utc_now()
     state.started_at = started_at
-    state.start_memory = state.start_memory or _pending_memory_snapshot(started_at)
+    start_memory = state.start_memory or _pending_memory_snapshot(started_at)
+    state.start_memory = start_memory
     state.completed = state.completed if state.completed is not None else []
     state.payloads = state.payloads if state.payloads is not None else {}
+    return started_at, start_memory
 
 
 def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
@@ -2243,9 +2247,7 @@ def _publish_supervisor_exception(
     args.out.mkdir(parents=True, exist_ok=True)
     # Invalidate stale success before any diagnostic construction can fail.
     _durably_unlink(args.out / "metrics.json")
-    _ensure_failure_state(args, state)
-    assert state.started_at is not None
-    assert state.start_memory is not None
+    started_at, start_memory = _ensure_failure_state(args, state)
     completed = list(state.completed or [])
     payloads = dict(state.payloads or {})
     completed_stages = {item.stage for item in completed}
@@ -2260,10 +2262,10 @@ def _publish_supervisor_exception(
         prelaunch = _prelaunch_progress(
             args,
             arm,
-            supervisor_started_at=state.started_at,
+            supervisor_started_at=started_at,
             stage_started_at=stage_started_at,
             completed=[item.expected_label for item in completed],
-            start_memory=state.start_memory,
+            start_memory=start_memory,
             embedding_fingerprint=state.embedding_fingerprint,
         )
         progress_override = prelaunch
@@ -2290,9 +2292,9 @@ def _publish_supervisor_exception(
         prelaunch=prelaunch,
         completed=completed,
         payloads=payloads,
-        started_at=state.started_at,
+        started_at=started_at,
         stage_started_at=stage_started_at,
-        start_memory=state.start_memory,
+        start_memory=start_memory,
         progress_override=progress_override,
     )
 

@@ -414,7 +414,7 @@ def _write_success(
                 "embedding_sha256": payload_kwargs["embedding_sha256"],
             },
             "embedding_sha256": payload_kwargs["embedding_sha256"],
-            "provenance_identity": {"model": "Grok-4.5"},
+            "provenance_identity": {"model": "OpenAI Codex"},
             "current_block": 3,
             "completed_blocks": list(supervisor.BLOCKS),
         },
@@ -2574,7 +2574,7 @@ class SupervisorTests(unittest.TestCase):
                         },
                         "implementation": dict(_IMPLEMENTATION),
                         "input_identity": {"embedding_shard": "embedding.npy"},
-                        "provenance_identity": {"model": "Grok-4.5"},
+                        "provenance_identity": {"model": "OpenAI Codex"},
                         "current_block": 2,
                         "completed_blocks": [0, 1],
                     },
@@ -2588,11 +2588,16 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(payload["completed_blocks"], [0, 1])
             self.assertEqual(payload["highest_completed_block"], 1)
             self.assertEqual(payload["active_tokens"], 8192)
+            failed_progress = payload["provenance"][
+                "failed_arm_progress_provenance"
+            ]
             self.assertEqual(
-                payload["provenance"]["failed_arm_progress_provenance"][
-                    "implementation"
-                ],
+                failed_progress["implementation"],
                 _IMPLEMENTATION,
+            )
+            self.assertEqual(
+                failed_progress["provenance_identity"]["model"],
+                "OpenAI Codex",
             )
 
     def test_atomic_progress_interruption_keeps_previous_final(self) -> None:
