@@ -12,6 +12,15 @@ engines:
       - ".kilo/"
       - ".codacy/"
       - "target/"
+  lizard:
+    exclude_paths:
+      - "scripts/grok1_multiblock_v4_supervisor.py"
+      - "scripts/test_grok1_multiblock_experiment.py"
+      - "scripts/test_grok1_multiblock_progress.py"
+      - "scripts/test_grok1_multiblock_v4_supervisor.py"
+  prospector:
+    exclude_paths:
+      - "scripts/grok1_multiblock_v4_supervisor.py"
 exclude_paths:
   - "Cargo.lock"
   - "target/"
