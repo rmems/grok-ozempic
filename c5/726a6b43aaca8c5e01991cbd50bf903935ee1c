@@ -1,0 +1,39 @@
+scripts/test_grok1_multiblock_side_table_binding.py
+  s_3337e6410e76f0::t_d091573bfe20f4 1-18,20-22,24-50,64,69,83-215,385-388
+  s_3337e6410e76f0::t_db9e223ad09463 19,23,216-231,233-247,249-251,253-256,258-265,267-292,294-296,337-339
+  s_3337e6410e76f0::t_11c38a77f3f787 51-53,55-63,65-68,70-79,81-82,340-384
+  s_3337e6410e76f0::t_587ecff37eba0b 232,248,252
+  s_3337e6410e76f0::t_dd0e1c8fa26378 257,266,293,297-336
+  s_3337e6410e76f0::t_ec0664679743a7 54,80
+scripts/grok1_multiblock_lib.py
+  s_3337e6410e76f0::t_4e4ef93cad53de 93,434-449,456-475,477-480,484-499
+  s_3337e6410e76f0::t_db9e223ad09463 1043-1047
+  s_3337e6410e76f0::t_b1285266965ab9 1064-1079,1094-1095,1097,1099-1116
+  s_3337e6410e76f0::t_a7017a82a3b92c 875,912,931,1080-1083,1087,1089,1093,1096,1098,1117-1142,1144,1184-1189,1199-1200,1209-1213,1215-1216,1219-1226,1230,1233-1240,1255-1276
+scripts/grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_ec0664679743a7 2448-2458,2493
+reports/grok-1-expert-precision-remedy-v4/cache-binding-audit.md
+  s_3337e6410e76f0::t_c3db4207d34a53 1-49
+scripts/test_grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_0710ef031e9909 499-543,605-610,612,669-779
+reports/grok-1-expert-precision-remedy-v4/cache-binding-audit.sha256
+  s_3337e6410e76f0::t_f61cf96b553dba 1-36
+reports/grok-1-expert-precision-remedy-v4/results.md
+  s_3337e6410e76f0::t_c3db4207d34a53 144-149,189-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c5726a6b43aaca8c5e01991cbd50bf903935ee1c",
+  "prompts": {},
+  "sessions": {
+    "s_3337e6410e76f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02d44-1355-76a0-955c-d1b12c39ec4b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
