@@ -54,6 +54,9 @@ jobs:
       - name: Unit tests (bounded INT4 side tables)
         run: python3 -m unittest scripts.test_grok1_multiblock_side_table -v
 
+      - name: Unit tests (content-bound INT4 side tables)
+        run: python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
+
       - name: Unit tests (v4 out-of-process supervisor)
         run: python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 
