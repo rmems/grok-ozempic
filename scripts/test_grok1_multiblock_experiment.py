@@ -1809,6 +1809,18 @@ class RemedyV4DecisionTests(unittest.TestCase):
         self.assertIn("#85", issue)
         self.assertIn("RM-608", issue)
         self.assertIn("#85", agent)
+        self.assertIn("Codex (OpenAI)", agent)
+        self.assertNotIn("Grok", agent)
+
+    def test_v4_provenance_separates_planning_from_implementation(self) -> None:
+        issue, agent, model, design = multiblock._remedy_issue_meta(
+            v2=False, v3=False, v4=True
+        )
+        self.assertIn("#85", issue)
+        self.assertIn("Codex (OpenAI)", agent)
+        self.assertEqual(model, "OpenAI Codex")
+        self.assertIn("Grok issue-planning lock", design)
+        self.assertIn("implementation and evidence by Codex (OpenAI)", design)
 
     def test_same_budget_int4_baseline_cites_issue_85(self) -> None:
         """The 8192 evidence-only INT4 control is #85 evidence, not a #80 run."""

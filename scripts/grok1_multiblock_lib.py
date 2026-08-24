@@ -58,7 +58,7 @@ REMEDY_V3_AGENT_LINE = (
 )
 
 REMEDY_V4_AGENT_LINE = (
-    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
+    "Codex (OpenAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
 )
 
 # #85 / RM-608 — Grok-1 max *sequence* budget for the real causal forward.

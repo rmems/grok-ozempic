@@ -60,9 +60,7 @@ PROTOCOL = {
     "fallback_tokens": None,
 }
 
-AGENT_LINE = (
-    "Grok Build: Grok 4.5 (high) (xAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
-)
+AGENT_LINE = "Codex (OpenAI) · Issue: #85 / Linear RM-608 · beads goz-3h3"
 ISSUE = "GH #85 / Linear RM-608 / beads goz-3h3"
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -73,6 +71,7 @@ _GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _EMBEDDING_HASH_CHUNK = 64 * 1024 * 1024
 _IMPROVEMENT_EPS = 1e-3
 _P0_STAGING_NAME = ".p0-staging"
+_SUPERVISOR_INTERRUPT_SIGNALS = frozenset((signal.SIGINT, signal.SIGTERM))
 _REPORT_OPTION_RE = re.compile(
     r"(?m)^(?:\*\*Decision:\*\*\s*Option\s+(\d+)|\*\*Option\s+(\d+)\s+[—-])"
 )
@@ -184,6 +183,18 @@ def _utc_now() -> str:
 def _output_lock_path(out: Path) -> Path:
     """Return the persistent sibling lock that owns one canonical output tree."""
     return out.parent / f".{out.name}.supervisor.lock"
+
+
+@contextmanager
+def _defer_supervisor_interrupts() -> Iterator[None]:
+    """Defer operator interrupts across the canonical success commit point."""
+    previous_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, _SUPERVISOR_INTERRUPT_SIGNALS
+    )
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 @contextmanager
@@ -685,6 +696,17 @@ def _pack_provenance_errors(chain: object, arm: ArmSpec) -> list[str]:
         if not isinstance(sources, dict) or not sources:
             errors.append(f"pack_provenance[{index}] missing applied scale sources")
         elif _exact_int(block, index):
+            keys = set(sources)
+            expected_keys = {
+                f"block_{index:03d}.slot_00.moe_expert.gate",
+                f"block_{index:03d}.slot_01.moe_expert.down",
+                f"block_{index:03d}.slot_02.moe_expert.up",
+            }
+            if keys != expected_keys:
+                errors.append(
+                    f"pack_provenance[{index}] scale source keys="
+                    f"{sorted(map(str, keys))!r} expected={sorted(expected_keys)!r}"
+                )
             values = set(sources.values())
             expected = expected_sources[index]
             if values != {expected}:
@@ -2164,8 +2186,9 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         if arm.stage == "p0":
             if report_body is None:
                 raise AssertionError("validated P0 artifact has no report body")
-            _publish_validated_success(args.out, payload, report_body)
-            state.canonical_validated = True
+            with _defer_supervisor_interrupts():
+                _publish_validated_success(args.out, payload, report_body)
+                state.canonical_validated = True
             _best_effort_clear_p0_staging(child_out)
         _record_validated_arm(payloads, completed, arm, payload)
         _atomic_write_json(

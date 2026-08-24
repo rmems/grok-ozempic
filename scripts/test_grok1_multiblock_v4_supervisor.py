@@ -24,6 +24,16 @@ _NPY_SHA = "b" * 64
 _IMPLEMENTATION = {"commit": "c" * 40, "dirty": False}
 _EMBEDDING_BYTES = b"gh85-v4-supervisor-embedding-fixture\n"
 _EMBEDDING_SHA = hashlib.sha256(_EMBEDDING_BYTES).hexdigest()
+
+
+def _expert_scale_sources(block: int, source: str) -> dict[str, str]:
+    return {
+        f"block_{block:03d}.slot_00.moe_expert.gate": source,
+        f"block_{block:03d}.slot_01.moe_expert.down": source,
+        f"block_{block:03d}.slot_02.moe_expert.up": source,
+    }
+
+
 _ARM_FIXTURES = {
     "baseline": {
         "schedule": ("int4", [], [0, 1, 2, 3], []),
@@ -242,7 +252,7 @@ def _payload(
     provenance = {
         "issue": supervisor.ISSUE,
         "agent": supervisor.AGENT_LINE,
-        "model": "Grok-4.5",
+        "model": "OpenAI Codex",
         "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
         "implementation": (
             dict(_IMPLEMENTATION) if implementation is None else implementation
@@ -300,7 +310,7 @@ def _payload(
                 "block": block,
                 "pack_sha256": pack_sha,
                 "npy_sha256": npy_sha,
-                "scale_sources": {f"block_{block:03d}.expert": sources[block]},
+                "scale_sources": _expert_scale_sources(block, sources[block]),
             }
             for block in supervisor.BLOCKS
         ],
@@ -1317,6 +1327,52 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(payload["completed_arms"], [])
                 self.assertEqual(payload["invalid_arms"], ["expert_int4"])
 
+    def test_scale_provenance_requires_exact_expert_tensor_keys(self) -> None:
+        source = "research_int4_side"
+
+        def incomplete(payload: dict) -> None:
+            payload["chain"]["pack_provenance"][0]["scale_sources"] = {
+                "block_000.slot_00.moe_expert.gate": source
+            }
+
+        def fabricated(payload: dict) -> None:
+            payload["chain"]["pack_provenance"][0]["scale_sources"] = {
+                f"block_000.fabricated_{index}": source for index in range(3)
+            }
+
+        def foreign_block(payload: dict) -> None:
+            payload["chain"]["pack_provenance"][0]["scale_sources"] = (
+                _expert_scale_sources(1, source)
+            )
+
+        corruptions = {
+            "incomplete": incomplete,
+            "fabricated": fabricated,
+            "foreign_block": foreign_block,
+        }
+        for case, corrupt in corruptions.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+
+                def child(command, current_corrupt=corrupt, **_kwargs):
+                    _write_success(list(command), mutate=current_corrupt)
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                result, run = self._run(args, child)
+
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 1)
+                payload = self._failure(args)
+                self.assertEqual(payload["failure_class"], "invalid_evidence")
+                self.assertEqual(payload["completed_arms"], [])
+                self.assertEqual(payload["invalid_arms"], ["expert_int4"])
+                self.assertTrue(
+                    any(
+                        "scale source keys=" in error
+                        for error in payload["failure"]["errors"]
+                    )
+                )
+
     def test_missing_malformed_or_wrong_embedding_digest_fails_closed(self) -> None:
         corruptions = {
             "missing": lambda payload: payload["provenance"].pop("embedding_sha256"),
@@ -1679,6 +1735,77 @@ class SupervisorTests(unittest.TestCase):
                 "synthetic promotion failure", " ".join(failure["failure"]["errors"])
             )
 
+    def test_interrupt_during_success_publication_preserves_canonical_evidence(
+        self,
+    ) -> None:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=signum.name), tempfile.TemporaryDirectory() as td:
+                args = self._args(Path(td))
+                canonical: dict[str, str] = {}
+
+                def child(command, **_kwargs):
+                    command = list(command)
+                    spec = _spec_for_command(command)
+                    report = _write_success(command)
+                    if spec.stage == "p0":
+                        staged_out = Path(_value(command, "--out"))
+                        canonical["report"] = report or ""
+                        canonical["metrics"] = (
+                            staged_out / "metrics.json"
+                        ).read_text(encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                real_atomic_write_json = supervisor._atomic_write_json
+                interrupt_sent = False
+
+                def interrupt_after_success(path: Path, payload: object) -> None:
+                    nonlocal interrupt_sent
+                    real_atomic_write_json(path, payload)
+                    if (
+                        not interrupt_sent
+                        and path == args.out / "metrics.json"
+                        and isinstance(payload, dict)
+                        and payload.get("decision", {}).get("decision") == 2
+                    ):
+                        interrupt_sent = True
+                        os.kill(os.getpid(), signum)
+
+                previous_handler = signal.signal(
+                    signum, supervisor._raise_supervisor_signal
+                )
+                try:
+                    with mock.patch.object(
+                        supervisor,
+                        "_atomic_write_json",
+                        side_effect=interrupt_after_success,
+                    ):
+                        result, run = self._run(args, child)
+                finally:
+                    signal.signal(signum, previous_handler)
+
+                self.assertTrue(interrupt_sent)
+                self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+                self.assertEqual(run.call_count, 3)
+                self.assertEqual(
+                    json.loads(
+                        (args.out / "metrics.json").read_text(encoding="utf-8")
+                    ),
+                    json.loads(canonical["metrics"]),
+                )
+                self.assertEqual(
+                    (args.out / "results.md").read_text(encoding="utf-8"),
+                    canonical["report"],
+                )
+                diagnostic = json.loads(
+                    (args.out / "supervisor-bookkeeping-error.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(diagnostic["status"], "bookkeeping_failed")
+                self.assertTrue(diagnostic["canonical_protocol_validated"])
+                self.assertEqual(diagnostic["signal"], signum.name)
+                self.assertEqual(diagnostic["signal_number"], signum.value)
+
     def test_p0_container_memory_error_preserves_validated_canonical_evidence(
         self,
     ) -> None:
@@ -1971,6 +2098,12 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(payload["decision"]["decision"], 4)
             self.assertEqual(payload["returncode"], -signal.SIGINT)
             self.assertEqual(payload["signal"], "SIGINT")
+            agent = payload["provenance"]["agent"]
+            self.assertIn("Codex (OpenAI)", agent)
+            self.assertNotIn("Grok", agent)
+            report = (args.out / "results.md").read_text(encoding="utf-8")
+            self.assertIn("**Agent:** Codex (OpenAI)", report)
+            self.assertNotIn("**Agent:** Grok", report)
 
     def test_unexpected_supervisor_error_publishes_option_4(self) -> None:
         with tempfile.TemporaryDirectory() as td:
