@@ -1,0 +1,22 @@
+scripts/grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_ffaba1d2b546cc 208,245-246,2432-2447,2454-2455
+scripts/test_grok1_multiblock_v4_supervisor.py
+  s_3337e6410e76f0::t_ffaba1d2b546cc 559,565-567,579-605
+  s_3337e6410e76f0::t_8194d67bda715f 568-570
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b44f4b76b5f879da01d5ec50cd87c0ff3f6a35da",
+  "prompts": {},
+  "sessions": {
+    "s_3337e6410e76f0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02d44-1355-76a0-955c-d1b12c39ec4b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
