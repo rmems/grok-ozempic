@@ -205,7 +205,7 @@ def _defer_supervisor_interrupts() -> Iterator[None]:
 
 
 @contextmanager
-def _supervisor_output_lock(out: Path) -> Iterator[Path]:
+def _supervisor_output_lock(out: Path, *, nonblocking: bool = False) -> Iterator[Path]:
     """Serialize the complete transaction for one canonical output directory.
 
     The lock file is deliberately persistent: unlinking it after release can let
@@ -242,7 +242,8 @@ def _supervisor_output_lock(out: Path) -> Iterator[Path]:
 
     try:
         try:
-            _fcntl.flock(fd, _fcntl.LOCK_EX)
+            operation = _fcntl.LOCK_EX | (_fcntl.LOCK_NB if nonblocking else 0)
+            _fcntl.flock(fd, operation)
         except OSError as exc:
             raise OutputLockError(
                 f"could not acquire supervisor output lock {lock_path}: {exc}"
@@ -2428,12 +2429,30 @@ def _record_post_validation_exception(
     return EXIT_SUPERVISOR_FAILCLOSED
 
 
+def _recover_startup_interrupt(args: argparse.Namespace, exc: KeyboardInterrupt) -> int:
+    """Supersede stale success only when no active supervisor owns the output."""
+    print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+    try:
+        with _supervisor_output_lock(args.out, nonblocking=True) as locked_out:
+            args.out = locked_out
+            return _publish_supervisor_exception(args, _RunState(), exc)
+    except OutputLockError as lock_exc:
+        print(
+            "ERROR before supervisor output transaction: "
+            f"startup interrupt recovery did not acquire the output lock: {lock_exc}",
+            file=sys.stderr,
+        )
+        return EXIT_SUPERVISOR_FAILCLOSED
+
+
 def run(args: argparse.Namespace) -> int:
     try:
         startup_implementation: dict[str, str | bool] | None = None
         startup_error: Exception | None = None
         try:
             startup_implementation = _clean_supervisor_implementation()
+        except KeyboardInterrupt as exc:
+            return _recover_startup_interrupt(args, exc)
         except Exception as exc:
             startup_error = exc
 

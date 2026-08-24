@@ -556,7 +556,38 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
             self.assertEqual(report.read_text(encoding="utf-8"), "active report\n")
 
-    def test_interrupted_startup_identity_pin_does_not_mutate_output(self) -> None:
+    def test_interrupted_startup_identity_pin_supersedes_stale_success(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            args = self._args(Path(td))
+            args.out.mkdir(parents=True, exist_ok=True)
+            metrics = args.out / "metrics.json"
+            report = args.out / "results.md"
+            metrics.write_text(
+                json.dumps({"decision": {"decision": 2}}), encoding="utf-8"
+            )
+            report.write_text(
+                "# stale success\n\n**Option 2 — stale**\n", encoding="utf-8"
+            )
+
+            with mock.patch.object(
+                supervisor,
+                "_clean_supervisor_implementation",
+                side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
+            ):
+                result = supervisor.run(args)
+
+            self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
+            payload = json.loads(metrics.read_text(encoding="utf-8"))
+            self.assertEqual(payload["decision"]["decision"], 4)
+            self.assertEqual(payload["failure_class"], "interrupted")
+            self.assertEqual(payload["signal"], "SIGTERM")
+            report_body = report.read_text(encoding="utf-8")
+            self.assertIn("Option 4", report_body)
+            self.assertNotIn("stale success", report_body)
+
+    def test_interrupted_startup_identity_pin_preserves_active_lock_owner(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
             args.out.mkdir(parents=True, exist_ok=True)
@@ -565,12 +596,13 @@ class SupervisorTests(unittest.TestCase):
             metrics.write_text("active metrics\n", encoding="utf-8")
             report.write_text("active report\n", encoding="utf-8")
 
-            with mock.patch.object(
-                supervisor,
-                "_clean_supervisor_implementation",
-                side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
-            ):
-                result = supervisor.run(args)
+            with supervisor._supervisor_output_lock(args.out):
+                with mock.patch.object(
+                    supervisor,
+                    "_clean_supervisor_implementation",
+                    side_effect=supervisor.SupervisorSignal(signal.SIGTERM),
+                ):
+                    result = supervisor.run(args)
 
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
             self.assertEqual(metrics.read_text(encoding="utf-8"), "active metrics\n")
