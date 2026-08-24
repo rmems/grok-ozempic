@@ -2,6 +2,7 @@
 name = "grok-ozempic"
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.88"
 description = "SNN-logic quantization for Grok models — turning big model into spikes"
 repository = "https://github.com/rmems/grok-ozempic"
 license = "Apache-2.0 OR MIT"

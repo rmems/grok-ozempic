@@ -1,0 +1,46 @@
+{
+  "embedding_fingerprint": {
+    "path": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    },
+    "sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "target": {
+      "ctime_ns": 1785541845692011325,
+      "device": 36,
+      "inode": 107974764,
+      "mtime_ns": 1785541845673010976,
+      "size_bytes": 3221225600
+    }
+  },
+  "memory": {
+    "captured_at": "2026-08-24T14:05:32.398918Z",
+    "children_max_rss_kib": 0,
+    "launch_gate_applied": false,
+    "source": "/proc/meminfo + resource.getrusage",
+    "supervisor_max_rss_kib": 25200,
+    "values": {
+      "MemAvailable_bytes": 27845763072,
+      "MemTotal_bytes": 64906240000,
+      "SwapFree_bytes": 106196992,
+      "SwapTotal_bytes": 8589930496
+    }
+  },
+  "protocol": {
+    "blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "fallback_tokens": null,
+    "fp16_control": true,
+    "seed": 20260806,
+    "tokens": 8192,
+    "top_k": 2
+  },
+  "status": "prelaunch"
+}

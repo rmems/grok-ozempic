@@ -35,6 +35,11 @@ _python-tests:
       scripts.test_route_preservation_surface
       scripts.test_route_preservation_io
       scripts.test_grok1_multiblock_experiment
+      scripts.test_grok1_multiblock_progress
+      scripts.test_grok1_multiblock_v4_decision
+      scripts.test_grok1_multiblock_side_table
+      scripts.test_grok1_multiblock_side_table_binding
+      scripts.test_grok1_multiblock_v4_supervisor
     )
     for m in "${mods[@]}"; do
       echo "+ python3 -m unittest ${m} -v"

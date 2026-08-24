@@ -45,6 +45,21 @@ jobs:
       - name: Unit tests (multi-block remedy decisions)
         run: python3 -m unittest scripts.test_grok1_multiblock_experiment -v
 
+      - name: Unit tests (multi-block progress journal)
+        run: python3 -m unittest scripts.test_grok1_multiblock_progress -v
+
+      - name: Unit tests (v4 completeness and ranking)
+        run: python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
+
+      - name: Unit tests (bounded INT4 side tables)
+        run: python3 -m unittest scripts.test_grok1_multiblock_side_table -v
+
+      - name: Unit tests (content-bound INT4 side tables)
+        run: python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
+
+      - name: Unit tests (v4 out-of-process supervisor)
+        run: python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
+
       - name: Codex co-author hook contract
         run: |
           jq empty .codex/hooks.json

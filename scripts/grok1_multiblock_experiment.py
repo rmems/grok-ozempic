@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Multi-block residual fidelity: #68 ternary baseline + #73 remedy arms."""
+"""Multi-block residual fidelity for #68/#73 and #85 / RM-608."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +29,7 @@ from grok1_block_forward import (  # noqa: E402
     ForwardError,
     UnresolvedArchitectureError,
 )
-from grok1_block_weights import implementation_commit  # noqa: E402
+from grok1_block_weights import implementation_commit, sha256_file  # noqa: E402
 from grok1_multiblock_lib import (  # noqa: E402
     AGENT_LINE,
     BASELINE_64,
@@ -50,6 +52,7 @@ from grok1_multiblock_lib import (  # noqa: E402
     decide_remedy_v3,
     decide_remedy_v4,
     load_block_sources,
+    npy_dir_fingerprint,
     pack_provenance_row,
     parse_blocks,
     parse_hp_blocks,
@@ -93,6 +96,9 @@ _V2_REMEDY_ARMS = frozenset({"stacked_hp_channel_alpha", "hp_ceiling"})
 _V3_ARMS = frozenset({"int4"})
 _V4_ARMS = frozenset({"int4_channel_alpha"})
 _INT4_FAMILY_ARMS = _V3_ARMS | _V4_ARMS
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_ABSOLUTE_NPY_PATTERN = "<ABSOLUTE_NPY_PATTERN>"
+_ABSOLUTE_PACK_PATTERN = "<ABSOLUTE_PACK_PATTERN>"
 
 EXIT_LEGACY_ORACLE = 5
 EXIT_OK = 0
@@ -106,6 +112,20 @@ class ChainPaths:
     pack_root: Path
     pack_pattern: str
     embedding_shard: Path
+
+
+def _portable_input_pattern(pattern: str, placeholder: str) -> str:
+    """Preserve a pattern's block suffix without persisting its host prefix."""
+    path = Path(pattern)
+    if not path.is_absolute():
+        return pattern
+    parts = path.parts[1:]
+    start = next(
+        (index for index, part in enumerate(parts) if "{block" in part),
+        None,
+    )
+    suffix = path.name if start is None else Path(*parts[start:]).as_posix()
+    return f"{placeholder}/{suffix}" if suffix else placeholder
 
 
 def _validate_embedding_shard(shard: Path) -> None:
@@ -125,6 +145,82 @@ def _block_paths(paths: ChainPaths, b: int) -> tuple[Path, Path]:
     if not pack_path.is_file():
         raise ForwardError(f"missing pack for block {b}: {pack_path}")
     return npy_dir, pack_path
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Atomically replace ``path`` with one complete JSON document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a successful same-directory rename durable."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_text(path: Path, body: str) -> None:
+    """Atomically replace ``path`` with one complete UTF-8 document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _write_progress(
+    path: Path | None,
+    base: dict | None,
+    *,
+    current_block: int,
+    completed_blocks: list[int],
+) -> None:
+    if path is None:
+        return
+    payload = {
+        **(base or {}),
+        "status": "running",
+        "current_block": int(current_block),
+        "completed_blocks": [int(block) for block in completed_blocks],
+    }
+    _atomic_write_json(path, payload)
 
 
 def _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k):
@@ -151,6 +247,8 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
     """Forward one block; streams is (h_ref, h_pilot, h_fp16)."""
     h_ref, h_pilot, h_fp16 = streams
     npy_dir, pack_path = _block_paths(paths, b)
+    npy_sha256_before = npy_dir_fingerprint(npy_dir)
+    pack_sha256_before = sha256_file(pack_path)
     print(f"== block {b:03d}  residual_in shape={h_ref.shape}", flush=True)
     reference, pack, mixed, control = load_block_sources(
         b,
@@ -192,7 +290,25 @@ def _run_block(b, paths, streams, cfg: _BlockRunCfg):
         "pilot_label": mixed.label,
     }
     applied = getattr(mixed, "applied_scale_sources", None)
-    prov = pack_provenance_row(b, pack_path, npy_dir, pack, applied_scale_sources=applied)
+    npy_sha256_after = npy_dir_fingerprint(npy_dir)
+    if npy_sha256_after != npy_sha256_before:
+        raise ForwardError(
+            f"block {b}: NPY inputs changed while the forward was being measured"
+        )
+    prov = pack_provenance_row(
+        b,
+        pack_path,
+        npy_dir,
+        pack,
+        applied_scale_sources=applied,
+        npy_sha256=npy_sha256_after,
+        pack_sha256=pack_sha256_before,
+    )
+    pack_sha256_after = sha256_file(pack_path)
+    if pack_sha256_after != pack_sha256_before:
+        raise ForwardError(
+            f"block {b}: GOZ1 pack changed while the forward was being measured"
+        )
     return row, (ref_trace.block_out, pilot_trace.block_out, next_fp16), prov
 
 
@@ -403,6 +519,8 @@ def run_chain(
     hp_period=2,
     hp_blocks: set[int] | None = None,
     int4_side_root: Path | None = None,
+    progress_path: Path | None = None,
+    progress_base: dict | None = None,
 ) -> dict:
     if blocks[0] != 0:
         raise ForwardError(f"chain must start at block 0 (got blocks={blocks})")
@@ -417,15 +535,48 @@ def run_chain(
         hp_label=_schedule_label(resolved_hp, hp_period, explicit_hp),
         int4_side_root=int4_side_root,
     )
+    progress_meta = _arm_meta(
+        blocks,
+        expert_mode,
+        hp_period,
+        resolved_hp,
+        [],
+        explicit_hp=explicit_hp,
+    )
+    progress_base = {
+        **(progress_base or {}),
+        "arm_label": progress_meta["arm_label"],
+        "hp_blocks": progress_meta["hp_blocks"],
+    }
     ids = token_ids(tokens, seed, vocab=131072)
     _validate_embedding_shard(paths.embedding_shard)
     h0 = embedding_rows(paths.embedding_shard, ids)
     streams = (h0, h0.copy(), h0.copy() if not skip_fp16 else None)
     per_block, pack_provenance = [], []
+    completed_blocks: list[int] = []
     for b in blocks:
+        _write_progress(
+            progress_path,
+            {
+                **progress_base,
+                "pack_provenance": list(pack_provenance),
+            },
+            current_block=b,
+            completed_blocks=completed_blocks,
+        )
         row, streams, prov = _run_block(b, paths, streams, cfg)
         per_block.append(row)
         pack_provenance.append(prov)
+        completed_blocks.append(b)
+        _write_progress(
+            progress_path,
+            {
+                **progress_base,
+                "pack_provenance": list(pack_provenance),
+            },
+            current_block=b,
+            completed_blocks=completed_blocks,
+        )
     h_ref, h_pilot, h_fp16 = streams
     meta = _arm_meta(
         blocks,
@@ -458,11 +609,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pack-root", type=Path, required=True)
     p.add_argument("--pack-pattern", default="block_{block:03d}-attention_plus_expert.goz1")
     p.add_argument("--embedding-shard", type=Path, required=True)
+    p.add_argument(
+        "--embedding-sha256",
+        default=None,
+        help=(
+            "Whole-shard SHA-256 pinned by the #85 supervisor; required for "
+            "canonical #85 evidence"
+        ),
+    )
     p.add_argument("--tokens", type=int, default=2048)
     # YYYYMMDD decision-run seed; arithmetic form avoids Bandit B105 on *token*.
     p.add_argument("--seed", type=int, default=2026 * 10_000 + 806)
     p.add_argument("--top-k", type=int, default=NUM_SELECTED_EXPERTS)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument(
+        "--progress-json",
+        type=Path,
+        default=None,
+        help="Optional atomic progress snapshot overwritten before and after each block",
+    )
     p.add_argument("--skip-fp16-control", action="store_true")
     p.add_argument("--write-report-md", action="store_true")
     p.add_argument(
@@ -503,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Root for persisted INT4 research side-tables (block_BBB/ q+scale npy). "
+            "Requires local POSIX advisory locking and directory fsync. "
             "Default for --arm int4: <out>/int4-side/"
         ),
     )
@@ -686,6 +852,12 @@ def _validate_v2_cli(args: argparse.Namespace) -> None:
     _validate_int4_family(args, evidence_only)
     _validate_v2_comparison_paths(args, comparison_paths)
     _validate_v2_fp16_control(args)
+    if _is_v4_run(args) and _SHA256_RE.fullmatch(
+        str(getattr(args, "embedding_sha256", ""))
+    ) is None:
+        raise ForwardError(
+            "canonical #85 runs require --embedding-sha256 from the supervisor"
+        )
 
 
 def _validate_v2_evidence_only_arm(args: argparse.Namespace, evidence_only: bool) -> None:
@@ -740,9 +912,12 @@ def _remedy_issue_meta(*, v2: bool, v3: bool, v4: bool = False) -> tuple[str, st
         return (
             "GH #85 / Linear RM-608 / beads goz-3h3",
             REMEDY_V4_AGENT_LINE,
-            "Grok-4.5",
-            "Grok Build design lock: INT4 codes × LS channel-α stack at Grok-1 "
-            "max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only",
+            "OpenAI Codex",
+            (
+                "Grok issue-planning lock: INT4 codes × LS channel-α stack at Grok-1 "
+                "max context (8192); re-measure INT4 baseline same-budget; #80@2048 "
+                "historical only; implementation and evidence by Codex (OpenAI)"
+            ),
         )
     if v3:
         return (
@@ -789,6 +964,7 @@ def _provenance(
     v2: bool = False,
     v3: bool = False,
     v4: bool = False,
+    embedding_sha256: str | None = None,
 ) -> dict:
     if not _is_remedy_arm(arm):
         return {
@@ -824,6 +1000,7 @@ def _provenance(
         "numpy": np.__version__,
         "python": platform.python_version(),
         "embedding_shard": Path(paths.embedding_shard).name,
+        "embedding_sha256": embedding_sha256 if v4 else None,
         "skip_fp16_control": bool(skip_fp16),
         "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
         "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision",
@@ -832,6 +1009,54 @@ def _provenance(
         "metrics_filename": "metrics.json",
         # metrics_note filled after chain when comparability is known
         "metrics_note": None,
+    }
+
+
+def _progress_record_base(
+    args: argparse.Namespace,
+    blocks: list[int],
+    paths: ChainPaths,
+    provenance: dict,
+    *,
+    int4_side_root: Path | None,
+) -> dict:
+    """Build the stable portion of each child progress snapshot."""
+    return {
+        "arm": args.arm,
+        "protocol": {
+            "tokens": int(args.tokens),
+            "seed": int(args.seed),
+            "blocks": [int(block) for block in blocks],
+            "top_k": int(args.top_k),
+        },
+        "implementation": provenance.get("implementation"),
+        "input_identity": {
+            "npy_root": "<NPY_ROOT>",
+            "npy_pattern": _portable_input_pattern(
+                paths.npy_pattern, _ABSOLUTE_NPY_PATTERN
+            ),
+            "pack_root": "<PACK_ROOT>",
+            "pack_pattern": _portable_input_pattern(
+                paths.pack_pattern, _ABSOLUTE_PACK_PATTERN
+            ),
+            "embedding_shard": Path(paths.embedding_shard).name,
+            "embedding_sha256": provenance.get("embedding_sha256"),
+            "int4_side_root": (
+                "<INT4_SIDE_ROOT>" if int4_side_root is not None else None
+            ),
+        },
+        "provenance_identity": {
+            key: provenance.get(key)
+            for key in (
+                "issue",
+                "agent",
+                "model",
+                "design",
+                "architecture_source",
+                "activation_policy",
+                "scale_policy",
+            )
+        },
     }
 
 
@@ -860,6 +1085,22 @@ def run(args: argparse.Namespace) -> int:
             else (args.out / "int4-side")
         )
         int4_side_root.mkdir(parents=True, exist_ok=True)
+    is_v2 = _is_v2_run(args)
+    is_v3 = _is_v3_run(args)
+    is_v4 = _is_v4_run(args)
+    prov = _provenance(
+        paths,
+        args.skip_fp16_control,
+        args.arm,
+        v2=is_v2 and not is_v3 and not is_v4,
+        v3=is_v3 and not is_v4,
+        v4=is_v4,
+        embedding_sha256=getattr(args, "embedding_sha256", None),
+    )
+    raw_progress_path = getattr(args, "progress_json", None)
+    progress_path = (
+        raw_progress_path.expanduser() if raw_progress_path is not None else None
+    )
     chain = run_chain(
         blocks,
         paths,
@@ -871,17 +1112,14 @@ def run(args: argparse.Namespace) -> int:
         hp_period=args.hp_period,
         hp_blocks=args.hp_blocks,
         int4_side_root=int4_side_root,
-    )
-    is_v2 = _is_v2_run(args)
-    is_v3 = _is_v3_run(args)
-    is_v4 = _is_v4_run(args)
-    prov = _provenance(
-        paths,
-        args.skip_fp16_control,
-        args.arm,
-        v2=is_v2 and not is_v3 and not is_v4,
-        v3=is_v3 and not is_v4,
-        v4=is_v4,
+        progress_path=progress_path,
+        progress_base=_progress_record_base(
+            args,
+            blocks,
+            paths,
+            prov,
+            int4_side_root=int4_side_root,
+        ),
     )
     if _is_remedy_arm(args.arm):
         prov["metrics_note"] = remedy_metrics_note(chain)
@@ -969,7 +1207,7 @@ def run(args: argparse.Namespace) -> int:
         decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
         payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "metrics.json").write_text(json.dumps(payload, indent=2) + "\n")
+    _atomic_write_json(args.out / "metrics.json", payload)
     print(f"wrote {args.out / 'metrics.json'}")
     if evidence_only:
         print("EVIDENCE ONLY: no decision emitted")
@@ -1007,14 +1245,20 @@ def _selected_option_in_report(body: str) -> int | None:
 
 
 def _write_v3_report(report: Path, payload: dict) -> None:
-    """Write #80 results.md without clobbering a pre-authored analysis.
+    """Write a v3/v4 report, refreshing every canonical #85 P0 run.
 
-    ``metrics.json`` is the machine source of truth. A long hand-authored report
-    is kept on reruns; only a missing file gets a generated skeleton.
+    #80 keeps its pre-authored analysis on reruns.  The supervised #85 protocol
+    instead requires the P0 child to refresh ``results.md`` so a stale report
+    with the same option cannot be mistaken for current canonical evidence.
     """
     decision = payload.get("decision") or {}
     option = decision.get("decision")
-    if report.is_file():
+    chain = payload.get("chain") or {}
+    provenance = payload.get("provenance") or {}
+    arm = str(chain.get("arm_label") or "") if isinstance(chain, dict) else ""
+    issue = str(provenance.get("issue") or "") if isinstance(provenance, dict) else ""
+    refresh_required = "#85" in issue or arm.startswith("expert_int4_channel_alpha")
+    if report.is_file() and not refresh_required:
         reported = _selected_option_in_report(report.read_text(encoding="utf-8"))
         if option is not None and reported != option:
             print(
@@ -1024,7 +1268,7 @@ def _write_v3_report(report: Path, payload: dict) -> None:
             )
         print(f"kept existing {report} (pre-authored; metrics.json is SoT)")
         return
-    report.write_text(_v3_results_md(payload), encoding="utf-8")
+    _atomic_write_text(report, _v3_results_md(payload))
     print(f"wrote {report}")
 
 

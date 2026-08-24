@@ -1,0 +1,40 @@
+started_at: 2026-08-24T16:12:31.125079Z
+ended_at: 2026-08-24T17:13:18.439973Z
+command: python3 scripts/grok1_multiblock_experiment.py --npy-root '<NPY_ROOT>' --npy-pattern 'goz68-block_{block:03d}-attn' --pack-root '<PACK_ROOT>' --pack-pattern 'block_{block:03d}-attention_plus_expert.goz1' --embedding-shard '<EMBEDDING_SHARD>' --embedding-sha256 55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6 --int4-side-root '<INT4_SIDE_ROOT>' --tokens 8192 --seed 20260806 --blocks 0,1,2,3 --top-k 2 --out reports/grok-1-expert-precision-remedy-v4/.p0-staging --progress-json reports/grok-1-expert-precision-remedy-v4/progress-int4-channel-alpha.json --arm int4_channel_alpha --write-report-md --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-baseline/metrics.json --comparison-metrics reports/grok-1-expert-precision-remedy-v4/int4-channel-alpha-123/metrics.json
+returncode: 0
+timeout: false
+
+----- stdout -----
+== block 000  residual_in shape=(8192, 6144)
+  reference forward ...
+    218.3s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_channel_alpha_side) ...
+    325.7s  cos=0.998136 top1=1.000000 drift=0.000000
+  fp16 control ...
+    286.9s  block_out_cos=0.999966
+== block 001  residual_in shape=(8192, 6144)
+  reference forward ...
+    198.7s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_channel_alpha_side) ...
+    305.8s  cos=0.997071 top1=0.982056 drift=0.061249
+  fp16 control ...
+    281.5s  block_out_cos=0.999966
+== block 002  residual_in shape=(8192, 6144)
+  reference forward ...
+    230.7s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_channel_alpha_side) ...
+    329.9s  cos=0.985698 top1=0.911011 drift=0.076533
+  fp16 control ...
+    291.7s  block_out_cos=0.999765
+== block 003  residual_in shape=(8192, 6144)
+  reference forward ...
+    218.0s experts=[0, 1, 2, 3, 4, 5, 6, 7]
+  pilot (research_int4_channel_alpha_side) ...
+    317.8s  cos=0.976182 top1=0.801758 drift=0.168773
+  fp16 control ...
+    280.5s  block_out_cos=0.999437
+wrote reports/grok-1-expert-precision-remedy-v4/.p0-staging/metrics.json
+DECISION option 2: Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still compounds / misses the ~0.95 viability band.
+wrote reports/grok-1-expert-precision-remedy-v4/.p0-staging/results.md
+
+----- stderr -----

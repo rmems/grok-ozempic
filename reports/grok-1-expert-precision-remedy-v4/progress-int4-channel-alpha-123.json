@@ -1,0 +1,360 @@
+{
+  "arm": "int4_channel_alpha",
+  "protocol": {
+    "tokens": 8192,
+    "seed": 20260806,
+    "blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "top_k": 2
+  },
+  "implementation": {
+    "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
+    "dirty": false
+  },
+  "input_identity": {
+    "npy_root": "<NPY_ROOT>",
+    "npy_pattern": "goz68-block_{block:03d}-attn",
+    "pack_root": "<PACK_ROOT>",
+    "pack_pattern": "block_{block:03d}-attention_plus_expert.goz1",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
+    "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "int4_side_root": "<INT4_SIDE_ROOT>"
+  },
+  "provenance_identity": {
+    "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
+    "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "model": "OpenAI Codex",
+    "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
+    "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+    "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+    "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle"
+  },
+  "arm_label": "expert_int4_channel_alpha_123",
+  "hp_blocks": [
+    1,
+    2,
+    3
+  ],
+  "pack_provenance": [
+    {
+      "block": 0,
+      "pack": "block_000-attention_plus_expert.goz1",
+      "pack_sha256": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+      "pack_bytes": 1230128768,
+      "npy_dir": "goz68-block_000-attn",
+      "npy_sha256": "42ccd9c9a98a6a222d95a157f72e49c0364624f89074c7a7a381cf3cdcf6aa9b",
+      "container_versions": [
+        3
+      ],
+      "scale_sources": {
+        "block_000.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+        "block_000.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+        "block_000.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+      },
+      "pack_scale_sources": {
+        "block_000.slot_01.moe_expert.down": "pack_v2",
+        "block_000.slot_00.moe_expert.gate": "pack_v2",
+        "block_000.slot_02.moe_expert.up": "pack_v2"
+      },
+      "ternary_scales": {
+        "block_000.slot_00.moe_expert.gate": {
+          "alpha": 0.03446429222822189,
+          "sparsity": 0.652848777671655,
+          "fired": 559126180,
+          "total": 1610612736
+        },
+        "block_000.slot_01.moe_expert.down": {
+          "alpha": 0.02270425483584404,
+          "sparsity": 0.6372781544923782,
+          "fired": 584204424,
+          "total": 1610612736
+        },
+        "block_000.slot_02.moe_expert.up": {
+          "alpha": 0.0343967042863369,
+          "sparsity": 0.6443704627454281,
+          "fired": 572781462,
+          "total": 1610612736
+        }
+      },
+      "gif_thresholds": {
+        "block_000.slot_00.moe_expert.gate": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.021201981231570244
+        },
+        "block_000.slot_01.moe_expert.down": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.014123744331300259
+        },
+        "block_000.slot_02.moe_expert.up": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.02120128832757473
+        },
+        "block_000.slot_03.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.004231256432831287
+        },
+        "block_000.slot_04.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.002920885570347309
+        },
+        "block_000.slot_05.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.004230865743011236
+        },
+        "block_000.slot_06.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.004230931401252747
+        }
+      },
+      "pack_metadata": {
+        "oz.quantization_version": 3,
+        "oz.gif_threshold": "0.05",
+        "oz.gif_threshold_authority": "tensor_row",
+        "oz.gif_threshold_scope": "baseline_only_not_applied"
+      }
+    },
+    {
+      "block": 1,
+      "pack": "block_001-attention_plus_expert.goz1",
+      "pack_sha256": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+      "pack_bytes": 1230128768,
+      "npy_dir": "goz68-block_001-attn",
+      "npy_sha256": "fada26dbc8f2c330d01f9e6b18c4384d35850e55c52ae1b5162885a9d7cdd181",
+      "container_versions": [
+        3
+      ],
+      "scale_sources": {
+        "block_001.slot_01.moe_expert.down": "fp16_control",
+        "block_001.slot_00.moe_expert.gate": "fp16_control",
+        "block_001.slot_02.moe_expert.up": "fp16_control"
+      },
+      "pack_scale_sources": {
+        "block_001.slot_01.moe_expert.down": "pack_v2",
+        "block_001.slot_00.moe_expert.gate": "pack_v2",
+        "block_001.slot_02.moe_expert.up": "pack_v2"
+      },
+      "ternary_scales": {
+        "block_001.slot_00.moe_expert.gate": {
+          "alpha": 0.04331796243786812,
+          "sparsity": 0.633674278234442,
+          "fired": 590008873,
+          "total": 1610612736
+        },
+        "block_001.slot_01.moe_expert.down": {
+          "alpha": 0.010844916105270386,
+          "sparsity": 0.6404839977622032,
+          "fired": 579041052,
+          "total": 1610612736
+        },
+        "block_001.slot_02.moe_expert.up": {
+          "alpha": 0.04337596148252487,
+          "sparsity": 0.6348795853555202,
+          "fired": 588067590,
+          "total": 1610612736
+        }
+      },
+      "gif_thresholds": {
+        "block_001.slot_00.moe_expert.gate": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.02693229168653488
+        },
+        "block_001.slot_01.moe_expert.down": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.006763441953808069
+        },
+        "block_001.slot_02.moe_expert.up": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.02693232148885727
+        },
+        "block_001.slot_03.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.007185009773820639
+        },
+        "block_001.slot_04.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.010658656246960163
+        },
+        "block_001.slot_05.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.006901538465172052
+        },
+        "block_001.slot_06.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.007041923236101866
+        }
+      },
+      "pack_metadata": {
+        "oz.quantization_version": 3,
+        "oz.gif_threshold": "0.05",
+        "oz.gif_threshold_authority": "tensor_row",
+        "oz.gif_threshold_scope": "baseline_only_not_applied"
+      }
+    },
+    {
+      "block": 2,
+      "pack": "block_002-attention_plus_expert.goz1",
+      "pack_sha256": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+      "pack_bytes": 1230128768,
+      "npy_dir": "goz68-block_002-attn",
+      "npy_sha256": "5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f",
+      "container_versions": [
+        3
+      ],
+      "scale_sources": {
+        "block_002.slot_01.moe_expert.down": "fp16_control",
+        "block_002.slot_00.moe_expert.gate": "fp16_control",
+        "block_002.slot_02.moe_expert.up": "fp16_control"
+      },
+      "pack_scale_sources": {
+        "block_002.slot_01.moe_expert.down": "pack_v2",
+        "block_002.slot_00.moe_expert.gate": "pack_v2",
+        "block_002.slot_02.moe_expert.up": "pack_v2"
+      },
+      "ternary_scales": {
+        "block_002.slot_00.moe_expert.gate": {
+          "alpha": 0.047630175948143005,
+          "sparsity": 0.6356016273299854,
+          "fired": 586904660,
+          "total": 1610612736
+        },
+        "block_002.slot_01.moe_expert.down": {
+          "alpha": 0.022462978959083557,
+          "sparsity": 0.6368899804850419,
+          "fired": 584829622,
+          "total": 1610612736
+        },
+        "block_002.slot_02.moe_expert.up": {
+          "alpha": 0.047669243067502975,
+          "sparsity": 0.6359017888704936,
+          "fired": 586421216,
+          "total": 1610612736
+        }
+      },
+      "gif_thresholds": {
+        "block_002.slot_00.moe_expert.gate": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.029568785801529884
+        },
+        "block_002.slot_01.moe_expert.down": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.013963296078145504
+        },
+        "block_002.slot_02.moe_expert.up": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.029568949714303017
+        },
+        "block_002.slot_03.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.03146064653992653
+        },
+        "block_002.slot_04.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.004875801037997007
+        },
+        "block_002.slot_05.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.005448548588901758
+        },
+        "block_002.slot_06.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.01309292297810316
+        }
+      },
+      "pack_metadata": {
+        "oz.quantization_version": 3,
+        "oz.gif_threshold": "0.05",
+        "oz.gif_threshold_authority": "tensor_row",
+        "oz.gif_threshold_scope": "baseline_only_not_applied"
+      }
+    },
+    {
+      "block": 3,
+      "pack": "block_003-attention_plus_expert.goz1",
+      "pack_sha256": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
+      "pack_bytes": 1230128768,
+      "npy_dir": "goz68-block_003-attn",
+      "npy_sha256": "39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7",
+      "container_versions": [
+        3
+      ],
+      "scale_sources": {
+        "block_003.slot_01.moe_expert.down": "fp16_control",
+        "block_003.slot_00.moe_expert.gate": "fp16_control",
+        "block_003.slot_02.moe_expert.up": "fp16_control"
+      },
+      "pack_scale_sources": {
+        "block_003.slot_01.moe_expert.down": "pack_v2",
+        "block_003.slot_00.moe_expert.gate": "pack_v2",
+        "block_003.slot_02.moe_expert.up": "pack_v2"
+      },
+      "ternary_scales": {
+        "block_003.slot_00.moe_expert.gate": {
+          "alpha": 0.03307119756937027,
+          "sparsity": 0.6364477450648944,
+          "fired": 585541892,
+          "total": 1610612736
+        },
+        "block_003.slot_01.moe_expert.down": {
+          "alpha": 0.015412655659019947,
+          "sparsity": 0.6372132208198309,
+          "fired": 584309007,
+          "total": 1610612736
+        },
+        "block_003.slot_02.moe_expert.up": {
+          "alpha": 0.033106379210948944,
+          "sparsity": 0.6368649223198493,
+          "fired": 584869981,
+          "total": 1610612736
+        }
+      },
+      "gif_thresholds": {
+        "block_003.slot_00.moe_expert.gate": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.02051529847085476
+        },
+        "block_003.slot_01.moe_expert.down": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.009574421681463718
+        },
+        "block_003.slot_02.moe_expert.up": {
+          "gif_threshold": 0.8999999761581421,
+          "threshold_abs": 0.020515233278274536
+        },
+        "block_003.slot_03.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.0028222892433404922
+        },
+        "block_003.slot_04.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.0028535902965813875
+        },
+        "block_003.slot_05.attn_proj_i8.model_width": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.0009772719349712133
+        },
+        "block_003.slot_06.attn_proj_i8.narrow": {
+          "gif_threshold": 0.4000000059604645,
+          "threshold_abs": 0.0016606772551313043
+        }
+      },
+      "pack_metadata": {
+        "oz.quantization_version": 3,
+        "oz.gif_threshold": "0.05",
+        "oz.gif_threshold_authority": "tensor_row",
+        "oz.gif_threshold_scope": "baseline_only_not_applied"
+      }
+    }
+  ],
+  "status": "running",
+  "current_block": 3,
+  "completed_blocks": [
+    0,
+    1,
+    2,
+    3
+  ]
+}

@@ -1,0 +1,4281 @@
+{
+  "chain": {
+    "arm_label": "expert_int4_channel_alpha",
+    "blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "channel_alpha_blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "end_of_chain": {
+      "expert_only_chain_exit": {
+        "note": "post-final-block residual stream (chain exit), not last-block residual-in",
+        "residual_cosine": 0.9761822196087365,
+        "residual_drift_relative_norm": 0.22110917292671636
+      },
+      "fp16_chain_exit": {
+        "note": "post-final-block residual stream under FP16 control",
+        "residual_cosine": 0.9994370955486388,
+        "residual_drift_relative_norm": 0.03355323588949929
+      }
+    },
+    "expert_mode": "int4_channel_alpha",
+    "hp_blocks": [],
+    "hp_period": null,
+    "hp_schedule_kind": "none",
+    "hp_schedule_prose": "INT4 codes \u00d7 LS channel-\u03b1 scales (research_int4_channel_alpha_side) on all chain blocks.",
+    "int4_blocks": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "pack_provenance": [
+      {
+        "block": 0,
+        "container_versions": [
+          3
+        ],
+        "gif_thresholds": {
+          "block_000.slot_00.moe_expert.gate": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.021201981231570244
+          },
+          "block_000.slot_01.moe_expert.down": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.014123744331300259
+          },
+          "block_000.slot_02.moe_expert.up": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.02120128832757473
+          },
+          "block_000.slot_03.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.004231256432831287
+          },
+          "block_000.slot_04.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.002920885570347309
+          },
+          "block_000.slot_05.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.004230865743011236
+          },
+          "block_000.slot_06.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.004230931401252747
+          }
+        },
+        "npy_dir": "goz68-block_000-attn",
+        "npy_sha256": "42ccd9c9a98a6a222d95a157f72e49c0364624f89074c7a7a381cf3cdcf6aa9b",
+        "pack": "block_000-attention_plus_expert.goz1",
+        "pack_bytes": 1230128768,
+        "pack_metadata": {
+          "oz.gif_threshold": "0.05",
+          "oz.gif_threshold_authority": "tensor_row",
+          "oz.gif_threshold_scope": "baseline_only_not_applied",
+          "oz.quantization_version": 3
+        },
+        "pack_scale_sources": {
+          "block_000.slot_00.moe_expert.gate": "pack_v2",
+          "block_000.slot_01.moe_expert.down": "pack_v2",
+          "block_000.slot_02.moe_expert.up": "pack_v2"
+        },
+        "pack_sha256": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+        "scale_sources": {
+          "block_000.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+          "block_000.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+          "block_000.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+        },
+        "ternary_scales": {
+          "block_000.slot_00.moe_expert.gate": {
+            "alpha": 0.03446429222822189,
+            "fired": 559126180,
+            "sparsity": 0.652848777671655,
+            "total": 1610612736
+          },
+          "block_000.slot_01.moe_expert.down": {
+            "alpha": 0.02270425483584404,
+            "fired": 584204424,
+            "sparsity": 0.6372781544923782,
+            "total": 1610612736
+          },
+          "block_000.slot_02.moe_expert.up": {
+            "alpha": 0.0343967042863369,
+            "fired": 572781462,
+            "sparsity": 0.6443704627454281,
+            "total": 1610612736
+          }
+        }
+      },
+      {
+        "block": 1,
+        "container_versions": [
+          3
+        ],
+        "gif_thresholds": {
+          "block_001.slot_00.moe_expert.gate": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.02693229168653488
+          },
+          "block_001.slot_01.moe_expert.down": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.006763441953808069
+          },
+          "block_001.slot_02.moe_expert.up": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.02693232148885727
+          },
+          "block_001.slot_03.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.007185009773820639
+          },
+          "block_001.slot_04.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.010658656246960163
+          },
+          "block_001.slot_05.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.006901538465172052
+          },
+          "block_001.slot_06.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.007041923236101866
+          }
+        },
+        "npy_dir": "goz68-block_001-attn",
+        "npy_sha256": "fada26dbc8f2c330d01f9e6b18c4384d35850e55c52ae1b5162885a9d7cdd181",
+        "pack": "block_001-attention_plus_expert.goz1",
+        "pack_bytes": 1230128768,
+        "pack_metadata": {
+          "oz.gif_threshold": "0.05",
+          "oz.gif_threshold_authority": "tensor_row",
+          "oz.gif_threshold_scope": "baseline_only_not_applied",
+          "oz.quantization_version": 3
+        },
+        "pack_scale_sources": {
+          "block_001.slot_00.moe_expert.gate": "pack_v2",
+          "block_001.slot_01.moe_expert.down": "pack_v2",
+          "block_001.slot_02.moe_expert.up": "pack_v2"
+        },
+        "pack_sha256": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+        "scale_sources": {
+          "block_001.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+          "block_001.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+          "block_001.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+        },
+        "ternary_scales": {
+          "block_001.slot_00.moe_expert.gate": {
+            "alpha": 0.04331796243786812,
+            "fired": 590008873,
+            "sparsity": 0.633674278234442,
+            "total": 1610612736
+          },
+          "block_001.slot_01.moe_expert.down": {
+            "alpha": 0.010844916105270386,
+            "fired": 579041052,
+            "sparsity": 0.6404839977622032,
+            "total": 1610612736
+          },
+          "block_001.slot_02.moe_expert.up": {
+            "alpha": 0.04337596148252487,
+            "fired": 588067590,
+            "sparsity": 0.6348795853555202,
+            "total": 1610612736
+          }
+        }
+      },
+      {
+        "block": 2,
+        "container_versions": [
+          3
+        ],
+        "gif_thresholds": {
+          "block_002.slot_00.moe_expert.gate": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.029568785801529884
+          },
+          "block_002.slot_01.moe_expert.down": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.013963296078145504
+          },
+          "block_002.slot_02.moe_expert.up": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.029568949714303017
+          },
+          "block_002.slot_03.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.03146064653992653
+          },
+          "block_002.slot_04.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.004875801037997007
+          },
+          "block_002.slot_05.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.005448548588901758
+          },
+          "block_002.slot_06.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.01309292297810316
+          }
+        },
+        "npy_dir": "goz68-block_002-attn",
+        "npy_sha256": "5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f",
+        "pack": "block_002-attention_plus_expert.goz1",
+        "pack_bytes": 1230128768,
+        "pack_metadata": {
+          "oz.gif_threshold": "0.05",
+          "oz.gif_threshold_authority": "tensor_row",
+          "oz.gif_threshold_scope": "baseline_only_not_applied",
+          "oz.quantization_version": 3
+        },
+        "pack_scale_sources": {
+          "block_002.slot_00.moe_expert.gate": "pack_v2",
+          "block_002.slot_01.moe_expert.down": "pack_v2",
+          "block_002.slot_02.moe_expert.up": "pack_v2"
+        },
+        "pack_sha256": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+        "scale_sources": {
+          "block_002.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+          "block_002.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+          "block_002.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+        },
+        "ternary_scales": {
+          "block_002.slot_00.moe_expert.gate": {
+            "alpha": 0.047630175948143005,
+            "fired": 586904660,
+            "sparsity": 0.6356016273299854,
+            "total": 1610612736
+          },
+          "block_002.slot_01.moe_expert.down": {
+            "alpha": 0.022462978959083557,
+            "fired": 584829622,
+            "sparsity": 0.6368899804850419,
+            "total": 1610612736
+          },
+          "block_002.slot_02.moe_expert.up": {
+            "alpha": 0.047669243067502975,
+            "fired": 586421216,
+            "sparsity": 0.6359017888704936,
+            "total": 1610612736
+          }
+        }
+      },
+      {
+        "block": 3,
+        "container_versions": [
+          3
+        ],
+        "gif_thresholds": {
+          "block_003.slot_00.moe_expert.gate": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.02051529847085476
+          },
+          "block_003.slot_01.moe_expert.down": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.009574421681463718
+          },
+          "block_003.slot_02.moe_expert.up": {
+            "gif_threshold": 0.8999999761581421,
+            "threshold_abs": 0.020515233278274536
+          },
+          "block_003.slot_03.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.0028222892433404922
+          },
+          "block_003.slot_04.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.0028535902965813875
+          },
+          "block_003.slot_05.attn_proj_i8.model_width": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.0009772719349712133
+          },
+          "block_003.slot_06.attn_proj_i8.narrow": {
+            "gif_threshold": 0.4000000059604645,
+            "threshold_abs": 0.0016606772551313043
+          }
+        },
+        "npy_dir": "goz68-block_003-attn",
+        "npy_sha256": "39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7",
+        "pack": "block_003-attention_plus_expert.goz1",
+        "pack_bytes": 1230128768,
+        "pack_metadata": {
+          "oz.gif_threshold": "0.05",
+          "oz.gif_threshold_authority": "tensor_row",
+          "oz.gif_threshold_scope": "baseline_only_not_applied",
+          "oz.quantization_version": 3
+        },
+        "pack_scale_sources": {
+          "block_003.slot_00.moe_expert.gate": "pack_v2",
+          "block_003.slot_01.moe_expert.down": "pack_v2",
+          "block_003.slot_02.moe_expert.up": "pack_v2"
+        },
+        "pack_sha256": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
+        "scale_sources": {
+          "block_003.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+          "block_003.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+          "block_003.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+        },
+        "ternary_scales": {
+          "block_003.slot_00.moe_expert.gate": {
+            "alpha": 0.03307119756937027,
+            "fired": 585541892,
+            "sparsity": 0.6364477450648944,
+            "total": 1610612736
+          },
+          "block_003.slot_01.moe_expert.down": {
+            "alpha": 0.015412655659019947,
+            "fired": 584309007,
+            "sparsity": 0.6372132208198309,
+            "total": 1610612736
+          },
+          "block_003.slot_02.moe_expert.up": {
+            "alpha": 0.033106379210948944,
+            "fired": 584869981,
+            "sparsity": 0.6368649223198493,
+            "total": 1610612736
+          }
+        }
+      }
+    ],
+    "per_block": [
+      {
+        "block": 0,
+        "expert_only": {
+          "attention_output_cosine": 1.0,
+          "attention_output_cosine_per_token": 1.0,
+          "attn_delta_over_stream": 0.9033581150208522,
+          "block_output_cosine": 0.9981363940675975,
+          "block_output_cosine_per_token": 0.998144934126475,
+          "block_output_drift_relative_norm": 0.061248773387512494,
+          "expert_load_js_bits": 0.0,
+          "expert_load_max_abs_delta": 0.0,
+          "expert_load_observed": [
+            0.15130615234375,
+            0.111328125,
+            0.15545654296875,
+            0.13671875,
+            0.10418701171875,
+            0.1141357421875,
+            0.11602783203125,
+            0.11083984375
+          ],
+          "expert_load_reference": [
+            0.15130615234375,
+            0.111328125,
+            0.15545654296875,
+            0.13671875,
+            0.10418701171875,
+            0.1141357421875,
+            0.11602783203125,
+            0.11083984375
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 4299,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 1846,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1700,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 346,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 1,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "research_int4_channel_alpha_side",
+          "moe_delta_over_stream": 0.4832609877350179,
+          "moe_input_normalized_cosine": 1.0000000000000002,
+          "moe_output_cosine": 0.9934975387787467,
+          "residual_drift_relative_norm": 0.0,
+          "residual_stream_cosine": 1.0000000000000002,
+          "residual_stream_in": {
+            "residual_in_cosine": 1.0,
+            "residual_in_drift_relative_norm": 0.0
+          },
+          "router_logit_cosine": 1.0,
+          "router_margin_mean_delta": 0.0,
+          "router_margin_mean_observed": 0.0346857385962856,
+          "router_margin_mean_reference": 0.0346857385962856,
+          "router_margin_median_observed": 0.008471452573598867,
+          "router_margin_median_reference": 0.008471452573598867,
+          "router_top1_agreement": 1.0,
+          "router_top2_set_agreement": 1.0,
+          "router_topk_set_agreement": 1.0,
+          "seconds": 325.6512689590454,
+          "selected_experts": 2
+        },
+        "fp16_control": {
+          "attention_output_cosine": 0.9999999985728412,
+          "attention_output_cosine_per_token": 0.9999999986361572,
+          "attn_delta_over_stream": 0.9031929817106404,
+          "block_output_cosine": 0.9999662344185568,
+          "block_output_cosine_per_token": 0.9999632230144466,
+          "block_output_drift_relative_norm": 0.008217809632556623,
+          "expert_load_js_bits": 1.1395797616989257e-06,
+          "expert_load_max_abs_delta": 0.00048828125,
+          "expert_load_observed": [
+            0.1513671875,
+            0.11181640625,
+            0.15570068359375,
+            0.13677978515625,
+            0.10382080078125,
+            0.11431884765625,
+            0.11578369140625,
+            0.11041259765625
+          ],
+          "expert_load_reference": [
+            0.15130615234375,
+            0.111328125,
+            0.15545654296875,
+            0.13671875,
+            0.10418701171875,
+            0.1141357421875,
+            0.11602783203125,
+            0.11083984375
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 4299,
+              "top1_flip_rate": 0.0016282856478250756,
+              "top1_flips": 7
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 1846,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1700,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 346,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 1,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "fp16_roundtrip",
+          "moe_delta_over_stream": 0.4934264147307654,
+          "moe_input_normalized_cosine": 0.999999958445224,
+          "moe_output_cosine": 0.9998959798468963,
+          "residual_drift_relative_norm": 0.00022418911406672668,
+          "residual_stream_cosine": 0.9999999819762834,
+          "residual_stream_in": {
+            "residual_in_cosine": 1.0,
+            "residual_in_drift_relative_norm": 0.0
+          },
+          "router_logit_cosine": 0.9999999972602787,
+          "router_margin_mean_delta": 3.053922813402341e-06,
+          "router_margin_mean_observed": 0.034688792519098996,
+          "router_margin_mean_reference": 0.0346857385962856,
+          "router_margin_median_observed": 0.008459846907189983,
+          "router_margin_median_reference": 0.008471452573598867,
+          "router_top1_agreement": 0.9991455078125,
+          "router_top2_set_agreement": 0.99658203125,
+          "router_topk_set_agreement": 0.99658203125,
+          "seconds": 286.92310333251953,
+          "selected_experts": 2
+        },
+        "pilot_label": "research_int4_channel_alpha_side",
+        "reference_seconds": 218.2891149520874
+      },
+      {
+        "block": 1,
+        "expert_only": {
+          "attention_output_cosine": 0.9991453652888852,
+          "attention_output_cosine_per_token": 0.9992006416127804,
+          "attn_delta_over_stream": 0.4254724587590576,
+          "block_output_cosine": 0.9970708376561523,
+          "block_output_cosine_per_token": 0.9970696032149723,
+          "block_output_drift_relative_norm": 0.07653289247308387,
+          "expert_load_js_bits": 3.4276330251193764e-05,
+          "expert_load_max_abs_delta": 0.003173828125,
+          "expert_load_observed": [
+            0.16107177734375,
+            0.12713623046875,
+            0.10845947265625,
+            0.1065673828125,
+            0.1126708984375,
+            0.1436767578125,
+            0.11456298828125,
+            0.1258544921875
+          ],
+          "expert_load_reference": [
+            0.1622314453125,
+            0.1270751953125,
+            0.10992431640625,
+            0.10797119140625,
+            0.1124267578125,
+            0.145263671875,
+            0.11138916015625,
+            0.12371826171875
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 421,
+              "top1_flip_rate": 0.2826603325415677,
+              "top1_flips": 119
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 1368,
+              "top1_flip_rate": 0.02046783625730994,
+              "top1_flips": 28
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 2479,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 3608,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 316,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "research_int4_channel_alpha_side",
+          "moe_delta_over_stream": 0.2799739222920268,
+          "moe_input_normalized_cosine": 0.9981928393441294,
+          "moe_output_cosine": 0.9861534930385553,
+          "residual_drift_relative_norm": 0.05188467503474186,
+          "residual_stream_cosine": 0.9986616815064538,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.9981363940675975,
+            "residual_in_drift_relative_norm": 0.061248773387512494
+          },
+          "router_logit_cosine": 0.9998184605628635,
+          "router_margin_mean_delta": 0.0012566144787176476,
+          "router_margin_mean_observed": 0.1780683993963692,
+          "router_margin_mean_reference": 0.1768117849176516,
+          "router_margin_median_observed": 0.1414818821250895,
+          "router_margin_median_reference": 0.14185318157435073,
+          "router_top1_agreement": 0.9820556640625,
+          "router_top2_set_agreement": 0.932861328125,
+          "router_topk_set_agreement": 0.932861328125,
+          "seconds": 305.7945308685303,
+          "selected_experts": 2
+        },
+        "fp16_control": {
+          "attention_output_cosine": 0.9999844464986306,
+          "attention_output_cosine_per_token": 0.9999843032690912,
+          "attn_delta_over_stream": 0.4284735778277611,
+          "block_output_cosine": 0.999965929851699,
+          "block_output_cosine_per_token": 0.9999644733042241,
+          "block_output_drift_relative_norm": 0.008254778779977658,
+          "expert_load_js_bits": 1.5620965325225452e-07,
+          "expert_load_max_abs_delta": 0.000244140625,
+          "expert_load_observed": [
+            0.1624755859375,
+            0.1270751953125,
+            0.10992431640625,
+            0.10791015625,
+            0.11224365234375,
+            0.1453857421875,
+            0.111328125,
+            0.1236572265625
+          ],
+          "expert_load_reference": [
+            0.1622314453125,
+            0.1270751953125,
+            0.10992431640625,
+            0.10797119140625,
+            0.1124267578125,
+            0.145263671875,
+            0.11138916015625,
+            0.12371826171875
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 421,
+              "top1_flip_rate": 0.007125890736342043,
+              "top1_flips": 3
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 1368,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 2479,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 3608,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 316,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "fp16_roundtrip",
+          "moe_delta_over_stream": 0.27375707876517935,
+          "moe_input_normalized_cosine": 0.9999509294401662,
+          "moe_output_cosine": 0.9999010859004773,
+          "residual_drift_relative_norm": 0.006972312249031641,
+          "residual_stream_cosine": 0.9999756963861242,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.9999662344185568,
+            "residual_in_drift_relative_norm": 0.008217809632556623
+          },
+          "router_logit_cosine": 0.9999932806125511,
+          "router_margin_mean_delta": 0.00012309683268611266,
+          "router_margin_mean_observed": 0.1769348817503377,
+          "router_margin_mean_reference": 0.1768117849176516,
+          "router_margin_median_observed": 0.14202488915802522,
+          "router_margin_median_reference": 0.14185318157435073,
+          "router_top1_agreement": 0.9996337890625,
+          "router_top2_set_agreement": 0.9981689453125,
+          "router_topk_set_agreement": 0.9981689453125,
+          "seconds": 281.497962474823,
+          "selected_experts": 2
+        },
+        "pilot_label": "research_int4_channel_alpha_side",
+        "reference_seconds": 198.70540928840637
+      },
+      {
+        "block": 2,
+        "expert_only": {
+          "attention_output_cosine": 0.9917136534696445,
+          "attention_output_cosine_per_token": 0.9922672126524061,
+          "attn_delta_over_stream": 0.609683392401363,
+          "block_output_cosine": 0.9856984885711603,
+          "block_output_cosine_per_token": 0.9857543523921414,
+          "block_output_drift_relative_norm": 0.16877270290143606,
+          "expert_load_js_bits": 0.00034164579906311755,
+          "expert_load_max_abs_delta": 0.009033203125,
+          "expert_load_observed": [
+            0.04144287109375,
+            0.17388916015625,
+            0.09820556640625,
+            0.29022216796875,
+            0.07012939453125,
+            0.061279296875,
+            0.14398193359375,
+            0.120849609375
+          ],
+          "expert_load_reference": [
+            0.04443359375,
+            0.1650390625,
+            0.09173583984375,
+            0.29046630859375,
+            0.069580078125,
+            0.0606689453125,
+            0.148193359375,
+            0.1298828125
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 2019,
+              "top1_flip_rate": 0.31104507181773156,
+              "top1_flips": 628
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 4362,
+              "top1_flip_rate": 0.022925263640531865,
+              "top1_flips": 100
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1752,
+              "top1_flip_rate": 0.0005707762557077625,
+              "top1_flips": 1
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 59,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 0,
+              "top1_flip_rate": null,
+              "top1_flips": 0
+            }
+          ],
+          "label": "research_int4_channel_alpha_side",
+          "moe_delta_over_stream": 0.45150305063642315,
+          "moe_input_normalized_cosine": 0.9936374115646132,
+          "moe_output_cosine": 0.950915685805202,
+          "residual_drift_relative_norm": 0.07566247026531679,
+          "residual_stream_cosine": 0.9971334974647628,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.9970708376561523,
+            "residual_in_drift_relative_norm": 0.07653289247308387
+          },
+          "router_logit_cosine": 0.9993323242240015,
+          "router_margin_mean_delta": 0.00022935147165830302,
+          "router_margin_mean_observed": 0.03337955186251805,
+          "router_margin_mean_reference": 0.03315020039085974,
+          "router_margin_median_observed": 0.02431001614127,
+          "router_margin_median_reference": 0.024014774987458368,
+          "router_top1_agreement": 0.9110107421875,
+          "router_top2_set_agreement": 0.8681640625,
+          "router_topk_set_agreement": 0.8681640625,
+          "seconds": 329.9074652194977,
+          "selected_experts": 2
+        },
+        "fp16_control": {
+          "attention_output_cosine": 0.9999716287912973,
+          "attention_output_cosine_per_token": 0.9999694231843663,
+          "attn_delta_over_stream": 0.6092783179867541,
+          "block_output_cosine": 0.9997649252084471,
+          "block_output_cosine_per_token": 0.9997605920963788,
+          "block_output_drift_relative_norm": 0.021683098492711318,
+          "expert_load_js_bits": 4.204230303538151e-07,
+          "expert_load_max_abs_delta": 0.00030517578125,
+          "expert_load_observed": [
+            0.0445556640625,
+            0.1650390625,
+            0.09173583984375,
+            0.29046630859375,
+            0.06988525390625,
+            0.0606689453125,
+            0.14794921875,
+            0.12969970703125
+          ],
+          "expert_load_reference": [
+            0.04443359375,
+            0.1650390625,
+            0.09173583984375,
+            0.29046630859375,
+            0.069580078125,
+            0.0606689453125,
+            0.148193359375,
+            0.1298828125
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 2019,
+              "top1_flip_rate": 0.012877662209014363,
+              "top1_flips": 26
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 4362,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1752,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 59,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 0,
+              "top1_flip_rate": null,
+              "top1_flips": 0
+            }
+          ],
+          "label": "fp16_roundtrip",
+          "moe_delta_over_stream": 0.4316547372269685,
+          "moe_input_normalized_cosine": 0.9999439196166795,
+          "moe_output_cosine": 0.9991185860861073,
+          "residual_drift_relative_norm": 0.0070732812585666514,
+          "residual_stream_cosine": 0.9999749873089938,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.999965929851699,
+            "residual_in_drift_relative_norm": 0.008254778779977658
+          },
+          "router_logit_cosine": 0.9999958994382009,
+          "router_margin_mean_delta": 1.6864946445976705e-05,
+          "router_margin_mean_observed": 0.03316706533730572,
+          "router_margin_mean_reference": 0.03315020039085974,
+          "router_margin_median_observed": 0.02397975142504559,
+          "router_margin_median_reference": 0.024014774987458368,
+          "router_top1_agreement": 0.996826171875,
+          "router_top2_set_agreement": 0.995361328125,
+          "router_topk_set_agreement": 0.995361328125,
+          "seconds": 291.72122859954834,
+          "selected_experts": 2
+        },
+        "pilot_label": "research_int4_channel_alpha_side",
+        "reference_seconds": 230.69037413597107
+      },
+      {
+        "block": 3,
+        "expert_only": {
+          "attention_output_cosine": 0.9771838166211378,
+          "attention_output_cosine_per_token": 0.9763517298044697,
+          "attn_delta_over_stream": 0.5816906812375786,
+          "block_output_cosine": 0.9761822196087365,
+          "block_output_cosine_per_token": 0.9758667316928685,
+          "block_output_drift_relative_norm": 0.22110917292671636,
+          "expert_load_js_bits": 0.0007234054126472283,
+          "expert_load_max_abs_delta": 0.01324462890625,
+          "expert_load_observed": [
+            0.04229736328125,
+            0.06048583984375,
+            0.0948486328125,
+            0.2200927734375,
+            0.32733154296875,
+            0.04437255859375,
+            0.10772705078125,
+            0.10284423828125
+          ],
+          "expert_load_reference": [
+            0.04150390625,
+            0.05712890625,
+            0.0887451171875,
+            0.21875,
+            0.339111328125,
+            0.04656982421875,
+            0.11859130859375,
+            0.089599609375
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 2219,
+              "top1_flip_rate": 0.44569625957638576,
+              "top1_flips": 989
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 4206,
+              "top1_flip_rate": 0.1431288635282929,
+              "top1_flips": 602
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1595,
+              "top1_flip_rate": 0.020689655172413793,
+              "top1_flips": 33
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 170,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 2,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "research_int4_channel_alpha_side",
+          "moe_delta_over_stream": 0.3504628231266749,
+          "moe_input_normalized_cosine": 0.9699451752169249,
+          "moe_output_cosine": 0.9250912674775055,
+          "residual_drift_relative_norm": 0.14156492701353734,
+          "residual_stream_cosine": 0.9901109379324204,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.9856984885711603,
+            "residual_in_drift_relative_norm": 0.16877270290143606
+          },
+          "router_logit_cosine": 0.9983405197597703,
+          "router_margin_mean_delta": -0.0007452358909723543,
+          "router_margin_mean_observed": 0.033575179736397454,
+          "router_margin_mean_reference": 0.034320415627369816,
+          "router_margin_median_observed": 0.021598562251239045,
+          "router_margin_median_reference": 0.0220433932007284,
+          "router_top1_agreement": 0.8017578125,
+          "router_top2_set_agreement": 0.6864013671875,
+          "router_topk_set_agreement": 0.6864013671875,
+          "seconds": 317.7853844165802,
+          "selected_experts": 2
+        },
+        "fp16_control": {
+          "attention_output_cosine": 0.9996371522691706,
+          "attention_output_cosine_per_token": 0.9996587349820896,
+          "attn_delta_over_stream": 0.5618916032039319,
+          "block_output_cosine": 0.9994370955486388,
+          "block_output_cosine_per_token": 0.9994322357588377,
+          "block_output_drift_relative_norm": 0.03355323588949929,
+          "expert_load_js_bits": 1.4895787361700699e-06,
+          "expert_load_max_abs_delta": 0.00054931640625,
+          "expert_load_observed": [
+            0.04168701171875,
+            0.05718994140625,
+            0.08819580078125,
+            0.218994140625,
+            0.3394775390625,
+            0.0467529296875,
+            0.1180419921875,
+            0.08966064453125
+          ],
+          "expert_load_reference": [
+            0.04150390625,
+            0.05712890625,
+            0.0887451171875,
+            0.21875,
+            0.339111328125,
+            0.04656982421875,
+            0.11859130859375,
+            0.089599609375
+          ],
+          "experts_touched": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "experts_unused_observed": 0,
+          "experts_unused_reference": 0,
+          "flip_stratification_by_reference_margin": [
+            {
+              "margin_high": 0.01,
+              "margin_low": 0.0,
+              "tokens": 2219,
+              "top1_flip_rate": 0.027039206849932402,
+              "top1_flips": 60
+            },
+            {
+              "margin_high": 0.05,
+              "margin_low": 0.01,
+              "tokens": 4206,
+              "top1_flip_rate": 0.0028530670470756064,
+              "top1_flips": 12
+            },
+            {
+              "margin_high": 0.15,
+              "margin_low": 0.05,
+              "tokens": 1595,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 0.5,
+              "margin_low": 0.15,
+              "tokens": 170,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            },
+            {
+              "margin_high": 1.01,
+              "margin_low": 0.5,
+              "tokens": 2,
+              "top1_flip_rate": 0.0,
+              "top1_flips": 0
+            }
+          ],
+          "label": "fp16_roundtrip",
+          "moe_delta_over_stream": 0.33880058537802515,
+          "moe_input_normalized_cosine": 0.9994953806921836,
+          "moe_output_cosine": 0.9980916705559675,
+          "residual_drift_relative_norm": 0.017792575310936677,
+          "residual_stream_cosine": 0.9998417382509542,
+          "residual_stream_in": {
+            "residual_in_cosine": 0.9997649252084471,
+            "residual_in_drift_relative_norm": 0.021683098492711318
+          },
+          "router_logit_cosine": 0.9999683118236804,
+          "router_margin_mean_delta": 3.102300184862202e-05,
+          "router_margin_mean_observed": 0.03435143862921844,
+          "router_margin_mean_reference": 0.034320415627369816,
+          "router_margin_median_observed": 0.021954006940788154,
+          "router_margin_median_reference": 0.0220433932007284,
+          "router_top1_agreement": 0.9912109375,
+          "router_top2_set_agreement": 0.987548828125,
+          "router_topk_set_agreement": 0.987548828125,
+          "seconds": 280.503812789917,
+          "selected_experts": 2
+        },
+        "pilot_label": "research_int4_channel_alpha_side",
+        "reference_seconds": 218.0075500011444
+      }
+    ],
+    "pilot_labels_per_block": [
+      "research_int4_channel_alpha_side",
+      "research_int4_channel_alpha_side",
+      "research_int4_channel_alpha_side",
+      "research_int4_channel_alpha_side"
+    ],
+    "skip_fp16_control": false,
+    "ternary_blocks": [],
+    "token_id_first": 37,
+    "token_id_last": 131061,
+    "token_seed": 20260806,
+    "tokens": 8192,
+    "top_k": 2
+  },
+  "comparison": {
+    "baselines_cited": {
+      "historical_80_int4_all": {
+        "b3_top1": 0.850586,
+        "note": "2048-token #80 P0 all-INT4 historical only \u2014 not same-budget",
+        "tokens": 2048
+      },
+      "protocol": {
+        "blocks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "source": "GH #85 / RM-608 \u2014 protocol lock (Grok-1 max context sequence)",
+        "token_seed": 20260806,
+        "tokens": 8192,
+        "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
+        "top_k": 2
+      }
+    },
+    "best_remedy_arm": "expert_int4_channel_alpha_123",
+    "completed_arms": [
+      "expert_int4",
+      "expert_int4_channel_alpha_123",
+      "expert_int4_channel_alpha"
+    ],
+    "invalid_arms": [],
+    "missing_arms": [],
+    "primary_arm": "expert_int4_channel_alpha",
+    "primary_provenance": {
+      "implementation": {
+        "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
+        "dirty": false
+      }
+    },
+    "protocol_complete": true,
+    "ranking": {
+      "baseline_comparator": "expert_int4",
+      "baseline_deltas": {
+        "expert_int4_channel_alpha": {
+          "b3_cos_gain": -0.004384046135199382,
+          "b3_top1_gain": -0.02197265625,
+          "chain_exit_drift_reduction": -0.02338702652338079
+        },
+        "expert_int4_channel_alpha_123": {
+          "b3_cos_gain": 0.0094375783172157,
+          "b3_top1_gain": 0.0635986328125,
+          "chain_exit_drift_reduction": 0.05572775468843033
+        }
+      },
+      "ordered_candidates": [
+        "expert_int4_channel_alpha_123",
+        "expert_int4_channel_alpha"
+      ],
+      "tie_break_reason": "not needed; winner has the highest viability/top-1/cosine/exit-drift rank",
+      "winner": "expert_int4_channel_alpha_123"
+    },
+    "secondary_arms": {
+      "expert_int4": {
+        "chain": {
+          "arm_label": "expert_int4",
+          "blocks": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "channel_alpha_blocks": [],
+          "end_of_chain": {
+            "expert_only_chain_exit": {
+              "note": "post-final-block residual stream (chain exit), not last-block residual-in",
+              "residual_cosine": 0.9805662657439359,
+              "residual_drift_relative_norm": 0.19772214640333557
+            },
+            "fp16_chain_exit": {
+              "note": "post-final-block residual stream under FP16 control",
+              "residual_cosine": 0.9994370955486388,
+              "residual_drift_relative_norm": 0.03355323588949929
+            }
+          },
+          "expert_mode": "int4",
+          "hp_blocks": [],
+          "hp_period": null,
+          "hp_schedule_kind": "none",
+          "hp_schedule_prose": "INT4 experts (research_int4_side) on all chain blocks.",
+          "int4_blocks": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "pack_provenance": [
+            {
+              "block": 0,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_000.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.021201981231570244
+                },
+                "block_000.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.014123744331300259
+                },
+                "block_000.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02120128832757473
+                },
+                "block_000.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004231256432831287
+                },
+                "block_000.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.002920885570347309
+                },
+                "block_000.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004230865743011236
+                },
+                "block_000.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004230931401252747
+                }
+              },
+              "npy_dir": "goz68-block_000-attn",
+              "npy_sha256": "42ccd9c9a98a6a222d95a157f72e49c0364624f89074c7a7a381cf3cdcf6aa9b",
+              "pack": "block_000-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_000.slot_00.moe_expert.gate": "pack_v2",
+                "block_000.slot_01.moe_expert.down": "pack_v2",
+                "block_000.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "scale_sources": {
+                "block_000.slot_00.moe_expert.gate": "research_int4_side",
+                "block_000.slot_01.moe_expert.down": "research_int4_side",
+                "block_000.slot_02.moe_expert.up": "research_int4_side"
+              },
+              "ternary_scales": {
+                "block_000.slot_00.moe_expert.gate": {
+                  "alpha": 0.03446429222822189,
+                  "fired": 559126180,
+                  "sparsity": 0.652848777671655,
+                  "total": 1610612736
+                },
+                "block_000.slot_01.moe_expert.down": {
+                  "alpha": 0.02270425483584404,
+                  "fired": 584204424,
+                  "sparsity": 0.6372781544923782,
+                  "total": 1610612736
+                },
+                "block_000.slot_02.moe_expert.up": {
+                  "alpha": 0.0343967042863369,
+                  "fired": 572781462,
+                  "sparsity": 0.6443704627454281,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 1,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_001.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02693229168653488
+                },
+                "block_001.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.006763441953808069
+                },
+                "block_001.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02693232148885727
+                },
+                "block_001.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.007185009773820639
+                },
+                "block_001.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.010658656246960163
+                },
+                "block_001.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.006901538465172052
+                },
+                "block_001.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.007041923236101866
+                }
+              },
+              "npy_dir": "goz68-block_001-attn",
+              "npy_sha256": "fada26dbc8f2c330d01f9e6b18c4384d35850e55c52ae1b5162885a9d7cdd181",
+              "pack": "block_001-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_001.slot_00.moe_expert.gate": "pack_v2",
+                "block_001.slot_01.moe_expert.down": "pack_v2",
+                "block_001.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "scale_sources": {
+                "block_001.slot_00.moe_expert.gate": "research_int4_side",
+                "block_001.slot_01.moe_expert.down": "research_int4_side",
+                "block_001.slot_02.moe_expert.up": "research_int4_side"
+              },
+              "ternary_scales": {
+                "block_001.slot_00.moe_expert.gate": {
+                  "alpha": 0.04331796243786812,
+                  "fired": 590008873,
+                  "sparsity": 0.633674278234442,
+                  "total": 1610612736
+                },
+                "block_001.slot_01.moe_expert.down": {
+                  "alpha": 0.010844916105270386,
+                  "fired": 579041052,
+                  "sparsity": 0.6404839977622032,
+                  "total": 1610612736
+                },
+                "block_001.slot_02.moe_expert.up": {
+                  "alpha": 0.04337596148252487,
+                  "fired": 588067590,
+                  "sparsity": 0.6348795853555202,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 2,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_002.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.029568785801529884
+                },
+                "block_002.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.013963296078145504
+                },
+                "block_002.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.029568949714303017
+                },
+                "block_002.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.03146064653992653
+                },
+                "block_002.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004875801037997007
+                },
+                "block_002.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.005448548588901758
+                },
+                "block_002.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.01309292297810316
+                }
+              },
+              "npy_dir": "goz68-block_002-attn",
+              "npy_sha256": "5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f",
+              "pack": "block_002-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_002.slot_00.moe_expert.gate": "pack_v2",
+                "block_002.slot_01.moe_expert.down": "pack_v2",
+                "block_002.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "scale_sources": {
+                "block_002.slot_00.moe_expert.gate": "research_int4_side",
+                "block_002.slot_01.moe_expert.down": "research_int4_side",
+                "block_002.slot_02.moe_expert.up": "research_int4_side"
+              },
+              "ternary_scales": {
+                "block_002.slot_00.moe_expert.gate": {
+                  "alpha": 0.047630175948143005,
+                  "fired": 586904660,
+                  "sparsity": 0.6356016273299854,
+                  "total": 1610612736
+                },
+                "block_002.slot_01.moe_expert.down": {
+                  "alpha": 0.022462978959083557,
+                  "fired": 584829622,
+                  "sparsity": 0.6368899804850419,
+                  "total": 1610612736
+                },
+                "block_002.slot_02.moe_expert.up": {
+                  "alpha": 0.047669243067502975,
+                  "fired": 586421216,
+                  "sparsity": 0.6359017888704936,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 3,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_003.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02051529847085476
+                },
+                "block_003.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.009574421681463718
+                },
+                "block_003.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.020515233278274536
+                },
+                "block_003.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0028222892433404922
+                },
+                "block_003.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0028535902965813875
+                },
+                "block_003.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0009772719349712133
+                },
+                "block_003.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0016606772551313043
+                }
+              },
+              "npy_dir": "goz68-block_003-attn",
+              "npy_sha256": "39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7",
+              "pack": "block_003-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_003.slot_00.moe_expert.gate": "pack_v2",
+                "block_003.slot_01.moe_expert.down": "pack_v2",
+                "block_003.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
+              "scale_sources": {
+                "block_003.slot_00.moe_expert.gate": "research_int4_side",
+                "block_003.slot_01.moe_expert.down": "research_int4_side",
+                "block_003.slot_02.moe_expert.up": "research_int4_side"
+              },
+              "ternary_scales": {
+                "block_003.slot_00.moe_expert.gate": {
+                  "alpha": 0.03307119756937027,
+                  "fired": 585541892,
+                  "sparsity": 0.6364477450648944,
+                  "total": 1610612736
+                },
+                "block_003.slot_01.moe_expert.down": {
+                  "alpha": 0.015412655659019947,
+                  "fired": 584309007,
+                  "sparsity": 0.6372132208198309,
+                  "total": 1610612736
+                },
+                "block_003.slot_02.moe_expert.up": {
+                  "alpha": 0.033106379210948944,
+                  "fired": 584869981,
+                  "sparsity": 0.6368649223198493,
+                  "total": 1610612736
+                }
+              }
+            }
+          ],
+          "per_block": [
+            {
+              "block": 0,
+              "expert_only": {
+                "attention_output_cosine": 1.0,
+                "attention_output_cosine_per_token": 1.0,
+                "attn_delta_over_stream": 0.9033581150208522,
+                "block_output_cosine": 0.998636599415437,
+                "block_output_cosine_per_token": 0.9986353002909485,
+                "block_output_drift_relative_norm": 0.052476083867624736,
+                "expert_load_js_bits": 0.0,
+                "expert_load_max_abs_delta": 0.0,
+                "expert_load_observed": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "expert_load_reference": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 4299,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1846,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1700,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 346,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 1,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "research_int4_side",
+                "moe_delta_over_stream": 0.49148734495865865,
+                "moe_input_normalized_cosine": 1.0000000000000002,
+                "moe_output_cosine": 0.9942099657787136,
+                "residual_drift_relative_norm": 0.0,
+                "residual_stream_cosine": 1.0000000000000002,
+                "residual_stream_in": {
+                  "residual_in_cosine": 1.0,
+                  "residual_in_drift_relative_norm": 0.0
+                },
+                "router_logit_cosine": 1.0,
+                "router_margin_mean_delta": 0.0,
+                "router_margin_mean_observed": 0.0346857385962856,
+                "router_margin_mean_reference": 0.0346857385962856,
+                "router_margin_median_observed": 0.008471452573598867,
+                "router_margin_median_reference": 0.008471452573598867,
+                "router_top1_agreement": 1.0,
+                "router_top2_set_agreement": 1.0,
+                "router_topk_set_agreement": 1.0,
+                "seconds": 355.4767093658447,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999999985728412,
+                "attention_output_cosine_per_token": 0.9999999986361572,
+                "attn_delta_over_stream": 0.9031929817106404,
+                "block_output_cosine": 0.9999662344185568,
+                "block_output_cosine_per_token": 0.9999632230144466,
+                "block_output_drift_relative_norm": 0.008217809632556623,
+                "expert_load_js_bits": 1.1395797616989257e-06,
+                "expert_load_max_abs_delta": 0.00048828125,
+                "expert_load_observed": [
+                  0.1513671875,
+                  0.11181640625,
+                  0.15570068359375,
+                  0.13677978515625,
+                  0.10382080078125,
+                  0.11431884765625,
+                  0.11578369140625,
+                  0.11041259765625
+                ],
+                "expert_load_reference": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 4299,
+                    "top1_flip_rate": 0.0016282856478250756,
+                    "top1_flips": 7
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1846,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1700,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 346,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 1,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.4934264147307654,
+                "moe_input_normalized_cosine": 0.999999958445224,
+                "moe_output_cosine": 0.9998959798468963,
+                "residual_drift_relative_norm": 0.00022418911406672668,
+                "residual_stream_cosine": 0.9999999819762834,
+                "residual_stream_in": {
+                  "residual_in_cosine": 1.0,
+                  "residual_in_drift_relative_norm": 0.0
+                },
+                "router_logit_cosine": 0.9999999972602787,
+                "router_margin_mean_delta": 3.053922813402341e-06,
+                "router_margin_mean_observed": 0.034688792519098996,
+                "router_margin_mean_reference": 0.0346857385962856,
+                "router_margin_median_observed": 0.008459846907189983,
+                "router_margin_median_reference": 0.008471452573598867,
+                "router_top1_agreement": 0.9991455078125,
+                "router_top2_set_agreement": 0.99658203125,
+                "router_topk_set_agreement": 0.99658203125,
+                "seconds": 320.2840836048126,
+                "selected_experts": 2
+              },
+              "pilot_label": "research_int4_side",
+              "reference_seconds": 266.6767609119415
+            },
+            {
+              "block": 1,
+              "expert_only": {
+                "attention_output_cosine": 0.9994921977874481,
+                "attention_output_cosine_per_token": 0.9994901484606165,
+                "attn_delta_over_stream": 0.42559126102455946,
+                "block_output_cosine": 0.9975672646063307,
+                "block_output_cosine_per_token": 0.9975523585688557,
+                "block_output_drift_relative_norm": 0.0698795479982047,
+                "expert_load_js_bits": 2.033074208447681e-05,
+                "expert_load_max_abs_delta": 0.00274658203125,
+                "expert_load_observed": [
+                  0.16143798828125,
+                  0.12744140625,
+                  0.1083984375,
+                  0.10687255859375,
+                  0.11212158203125,
+                  0.14471435546875,
+                  0.112548828125,
+                  0.12646484375
+                ],
+                "expert_load_reference": [
+                  0.1622314453125,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10797119140625,
+                  0.1124267578125,
+                  0.145263671875,
+                  0.11138916015625,
+                  0.12371826171875
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 421,
+                    "top1_flip_rate": 0.28978622327790976,
+                    "top1_flips": 122
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1368,
+                    "top1_flip_rate": 0.016812865497076022,
+                    "top1_flips": 23
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 2479,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 3608,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 316,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "research_int4_side",
+                "moe_delta_over_stream": 0.27485205570786986,
+                "moe_input_normalized_cosine": 0.9984100924448689,
+                "moe_output_cosine": 0.9880094626292876,
+                "residual_drift_relative_norm": 0.044067242430541415,
+                "residual_stream_cosine": 0.9990365860991692,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.998636599415437,
+                  "residual_in_drift_relative_norm": 0.052476083867624736
+                },
+                "router_logit_cosine": 0.9998245027993015,
+                "router_margin_mean_delta": -3.945701596603477e-06,
+                "router_margin_mean_observed": 0.17680783921605497,
+                "router_margin_mean_reference": 0.1768117849176516,
+                "router_margin_median_observed": 0.14095126307344535,
+                "router_margin_median_reference": 0.14185318157435073,
+                "router_top1_agreement": 0.9822998046875,
+                "router_top2_set_agreement": 0.9385986328125,
+                "router_topk_set_agreement": 0.9385986328125,
+                "seconds": 325.74283051490784,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999844464986306,
+                "attention_output_cosine_per_token": 0.9999843032690912,
+                "attn_delta_over_stream": 0.4284735778277611,
+                "block_output_cosine": 0.999965929851699,
+                "block_output_cosine_per_token": 0.9999644733042241,
+                "block_output_drift_relative_norm": 0.008254778779977658,
+                "expert_load_js_bits": 1.5620965325225452e-07,
+                "expert_load_max_abs_delta": 0.000244140625,
+                "expert_load_observed": [
+                  0.1624755859375,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10791015625,
+                  0.11224365234375,
+                  0.1453857421875,
+                  0.111328125,
+                  0.1236572265625
+                ],
+                "expert_load_reference": [
+                  0.1622314453125,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10797119140625,
+                  0.1124267578125,
+                  0.145263671875,
+                  0.11138916015625,
+                  0.12371826171875
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 421,
+                    "top1_flip_rate": 0.007125890736342043,
+                    "top1_flips": 3
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1368,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 2479,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 3608,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 316,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.27375707876517935,
+                "moe_input_normalized_cosine": 0.9999509294401662,
+                "moe_output_cosine": 0.9999010859004773,
+                "residual_drift_relative_norm": 0.006972312249031641,
+                "residual_stream_cosine": 0.9999756963861242,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9999662344185568,
+                  "residual_in_drift_relative_norm": 0.008217809632556623
+                },
+                "router_logit_cosine": 0.9999932806125511,
+                "router_margin_mean_delta": 0.00012309683268611266,
+                "router_margin_mean_observed": 0.1769348817503377,
+                "router_margin_mean_reference": 0.1768117849176516,
+                "router_margin_median_observed": 0.14202488915802522,
+                "router_margin_median_reference": 0.14185318157435073,
+                "router_top1_agreement": 0.9996337890625,
+                "router_top2_set_agreement": 0.9981689453125,
+                "router_topk_set_agreement": 0.9981689453125,
+                "seconds": 311.47637486457825,
+                "selected_experts": 2
+              },
+              "pilot_label": "research_int4_side",
+              "reference_seconds": 193.54124808311462
+            },
+            {
+              "block": 2,
+              "expert_only": {
+                "attention_output_cosine": 0.9965665106057541,
+                "attention_output_cosine_per_token": 0.9966740867903803,
+                "attn_delta_over_stream": 0.6084507931815782,
+                "block_output_cosine": 0.9886573865540497,
+                "block_output_cosine_per_token": 0.9886610677209071,
+                "block_output_drift_relative_norm": 0.1504987802639529,
+                "expert_load_js_bits": 0.00019497360882110354,
+                "expert_load_max_abs_delta": 0.00946044921875,
+                "expert_load_observed": [
+                  0.04437255859375,
+                  0.17437744140625,
+                  0.0950927734375,
+                  0.281005859375,
+                  0.06939697265625,
+                  0.060791015625,
+                  0.14910888671875,
+                  0.1258544921875
+                ],
+                "expert_load_reference": [
+                  0.04443359375,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.069580078125,
+                  0.0606689453125,
+                  0.148193359375,
+                  0.1298828125
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2019,
+                    "top1_flip_rate": 0.2694403169886082,
+                    "top1_flips": 544
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4362,
+                    "top1_flip_rate": 0.013755158184319119,
+                    "top1_flips": 60
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1752,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 59,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 0,
+                    "top1_flip_rate": null,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "research_int4_side",
+                "moe_delta_over_stream": 0.4341807436222842,
+                "moe_input_normalized_cosine": 0.9955594058712655,
+                "moe_output_cosine": 0.9612818348279588,
+                "residual_drift_relative_norm": 0.06273540273174869,
+                "residual_stream_cosine": 0.9980410644324349,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9975672646063307,
+                  "residual_in_drift_relative_norm": 0.0698795479982047
+                },
+                "router_logit_cosine": 0.9996287541956903,
+                "router_margin_mean_delta": -7.849608593381847e-05,
+                "router_margin_mean_observed": 0.033071704304925925,
+                "router_margin_mean_reference": 0.03315020039085974,
+                "router_margin_median_observed": 0.023938491704430215,
+                "router_margin_median_reference": 0.024014774987458368,
+                "router_top1_agreement": 0.92626953125,
+                "router_top2_set_agreement": 0.8861083984375,
+                "router_topk_set_agreement": 0.8861083984375,
+                "seconds": 345.4744019508362,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999716287912973,
+                "attention_output_cosine_per_token": 0.9999694231843663,
+                "attn_delta_over_stream": 0.6092783179867541,
+                "block_output_cosine": 0.9997649252084471,
+                "block_output_cosine_per_token": 0.9997605920963788,
+                "block_output_drift_relative_norm": 0.021683098492711318,
+                "expert_load_js_bits": 4.204230303538151e-07,
+                "expert_load_max_abs_delta": 0.00030517578125,
+                "expert_load_observed": [
+                  0.0445556640625,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.06988525390625,
+                  0.0606689453125,
+                  0.14794921875,
+                  0.12969970703125
+                ],
+                "expert_load_reference": [
+                  0.04443359375,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.069580078125,
+                  0.0606689453125,
+                  0.148193359375,
+                  0.1298828125
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2019,
+                    "top1_flip_rate": 0.012877662209014363,
+                    "top1_flips": 26
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4362,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1752,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 59,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 0,
+                    "top1_flip_rate": null,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.4316547372269685,
+                "moe_input_normalized_cosine": 0.9999439196166795,
+                "moe_output_cosine": 0.9991185860861073,
+                "residual_drift_relative_norm": 0.0070732812585666514,
+                "residual_stream_cosine": 0.9999749873089938,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.999965929851699,
+                  "residual_in_drift_relative_norm": 0.008254778779977658
+                },
+                "router_logit_cosine": 0.9999958994382009,
+                "router_margin_mean_delta": 1.6864946445976705e-05,
+                "router_margin_mean_observed": 0.03316706533730572,
+                "router_margin_mean_reference": 0.03315020039085974,
+                "router_margin_median_observed": 0.02397975142504559,
+                "router_margin_median_reference": 0.024014774987458368,
+                "router_top1_agreement": 0.996826171875,
+                "router_top2_set_agreement": 0.995361328125,
+                "router_topk_set_agreement": 0.995361328125,
+                "seconds": 316.63707876205444,
+                "selected_experts": 2
+              },
+              "pilot_label": "research_int4_side",
+              "reference_seconds": 242.07538318634033
+            },
+            {
+              "block": 3,
+              "expert_only": {
+                "attention_output_cosine": 0.9849794005308738,
+                "attention_output_cosine_per_token": 0.9848368129062782,
+                "attn_delta_over_stream": 0.5687244774086985,
+                "block_output_cosine": 0.9805662657439359,
+                "block_output_cosine_per_token": 0.9803507306361513,
+                "block_output_drift_relative_norm": 0.19772214640333557,
+                "expert_load_js_bits": 0.0003170502785525748,
+                "expert_load_max_abs_delta": 0.01226806640625,
+                "expert_load_observed": [
+                  0.044189453125,
+                  0.0555419921875,
+                  0.09136962890625,
+                  0.225341796875,
+                  0.32684326171875,
+                  0.04168701171875,
+                  0.124267578125,
+                  0.09075927734375
+                ],
+                "expert_load_reference": [
+                  0.04150390625,
+                  0.05712890625,
+                  0.0887451171875,
+                  0.21875,
+                  0.339111328125,
+                  0.04656982421875,
+                  0.11859130859375,
+                  0.089599609375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2219,
+                    "top1_flip_rate": 0.41865705272645337,
+                    "top1_flips": 929
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4206,
+                    "top1_flip_rate": 0.11602472658107466,
+                    "top1_flips": 488
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1595,
+                    "top1_flip_rate": 0.016927899686520375,
+                    "top1_flips": 27
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 170,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 2,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "research_int4_side",
+                "moe_delta_over_stream": 0.33949200216019837,
+                "moe_input_normalized_cosine": 0.9766669769275363,
+                "moe_output_cosine": 0.9399137334498511,
+                "residual_drift_relative_norm": 0.12344734332232438,
+                "residual_stream_cosine": 0.9924074300943141,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9886573865540497,
+                  "residual_in_drift_relative_norm": 0.1504987802639529
+                },
+                "router_logit_cosine": 0.998744311294021,
+                "router_margin_mean_delta": -0.0008076860631850392,
+                "router_margin_mean_observed": 0.03351272956418477,
+                "router_margin_mean_reference": 0.034320415627369816,
+                "router_margin_median_observed": 0.021772259286882895,
+                "router_margin_median_reference": 0.0220433932007284,
+                "router_top1_agreement": 0.82373046875,
+                "router_top2_set_agreement": 0.7210693359375,
+                "router_topk_set_agreement": 0.7210693359375,
+                "seconds": 309.3350121974945,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9996371522691706,
+                "attention_output_cosine_per_token": 0.9996587349820896,
+                "attn_delta_over_stream": 0.5618916032039319,
+                "block_output_cosine": 0.9994370955486388,
+                "block_output_cosine_per_token": 0.9994322357588377,
+                "block_output_drift_relative_norm": 0.03355323588949929,
+                "expert_load_js_bits": 1.4895787361700699e-06,
+                "expert_load_max_abs_delta": 0.00054931640625,
+                "expert_load_observed": [
+                  0.04168701171875,
+                  0.05718994140625,
+                  0.08819580078125,
+                  0.218994140625,
+                  0.3394775390625,
+                  0.0467529296875,
+                  0.1180419921875,
+                  0.08966064453125
+                ],
+                "expert_load_reference": [
+                  0.04150390625,
+                  0.05712890625,
+                  0.0887451171875,
+                  0.21875,
+                  0.339111328125,
+                  0.04656982421875,
+                  0.11859130859375,
+                  0.089599609375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2219,
+                    "top1_flip_rate": 0.027039206849932402,
+                    "top1_flips": 60
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4206,
+                    "top1_flip_rate": 0.0028530670470756064,
+                    "top1_flips": 12
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1595,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 170,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 2,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.33880058537802515,
+                "moe_input_normalized_cosine": 0.9994953806921836,
+                "moe_output_cosine": 0.9980916705559675,
+                "residual_drift_relative_norm": 0.017792575310936677,
+                "residual_stream_cosine": 0.9998417382509542,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9997649252084471,
+                  "residual_in_drift_relative_norm": 0.021683098492711318
+                },
+                "router_logit_cosine": 0.9999683118236804,
+                "router_margin_mean_delta": 3.102300184862202e-05,
+                "router_margin_mean_observed": 0.03435143862921844,
+                "router_margin_mean_reference": 0.034320415627369816,
+                "router_margin_median_observed": 0.021954006940788154,
+                "router_margin_median_reference": 0.0220433932007284,
+                "router_top1_agreement": 0.9912109375,
+                "router_top2_set_agreement": 0.987548828125,
+                "router_topk_set_agreement": 0.987548828125,
+                "seconds": 336.2478401660919,
+                "selected_experts": 2
+              },
+              "pilot_label": "research_int4_side",
+              "reference_seconds": 229.87560534477234
+            }
+          ],
+          "pilot_labels_per_block": [
+            "research_int4_side",
+            "research_int4_side",
+            "research_int4_side",
+            "research_int4_side"
+          ],
+          "skip_fp16_control": false,
+          "ternary_blocks": [],
+          "token_id_first": 37,
+          "token_id_last": 131061,
+          "token_seed": 20260806,
+          "tokens": 8192,
+          "top_k": 2
+        },
+        "provenance": {
+          "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+          "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+          "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+          "arm": "int4",
+          "baseline_64": {
+            "expert_only": {
+              "block_output_cosine": 0.963572,
+              "expert_load_js_bits": 0.0,
+              "moe_output_cosine": 0.773483,
+              "residual_drift_relative_norm": 0.0,
+              "residual_stream_cosine": 1.0,
+              "router_top1_agreement": 1.0,
+              "router_top2_set_agreement": 1.0
+            },
+            "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
+            "tokens": 2048
+          },
+          "baseline_72": {
+            "arm_label": "goz1_expert_ternary_only",
+            "block_output_cosine": [
+              0.963572,
+              0.945765,
+              0.884956,
+              0.839144
+            ],
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "chain_exit_residual_drift": 0.6538863846584987,
+            "decision": 3,
+            "pack_names": {
+              "0": "block_000-attention_plus_expert.goz1",
+              "1": "block_001-attention_plus_expert.goz1",
+              "2": "block_002-attention_plus_expert.goz1",
+              "3": "block_003-attention_plus_expert.goz1"
+            },
+            "pack_sha256": {
+              "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+            },
+            "residual_in_drift": [
+              0.0,
+              0.277351,
+              0.341935,
+              0.498308
+            ],
+            "router_top1": [
+              1.0,
+              0.887695,
+              0.666504,
+              0.52832
+            ],
+            "router_top2": [
+              1.0,
+              0.680664,
+              0.548828,
+              0.289551
+            ],
+            "source": "reports/grok-1-expert-only-multiblock/ (PR #72 / #68 / RM-255)",
+            "token_seed": 20260806,
+            "tokens": 2048,
+            "top_k": 2
+          },
+          "baseline_74": {
+            "arm_label": "expert_periodic_hp_n2",
+            "block_output_cosine": [
+              0.963572,
+              0.963211,
+              0.90536,
+              0.882308
+            ],
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "chain_exit_residual_drift": 0.5292121735722244,
+            "decision": 2,
+            "expert_load_js_bits": [
+              0.0,
+              0.005559,
+              0.008548,
+              0.025243
+            ],
+            "pack_names": {
+              "0": "block_000-attention_plus_expert.goz1",
+              "1": "block_001-attention_plus_expert.goz1",
+              "2": "block_002-attention_plus_expert.goz1",
+              "3": "block_003-attention_plus_expert.goz1"
+            },
+            "pack_sha256": {
+              "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+            },
+            "residual_in_drift": [
+              0.0,
+              0.277351,
+              0.279321,
+              0.449088
+            ],
+            "router_top1": [
+              1.0,
+              0.887695,
+              0.729004,
+              0.547852
+            ],
+            "router_top2": [
+              1.0,
+              0.680664,
+              0.592773,
+              0.317383
+            ],
+            "source": "reports/grok-1-expert-precision-remedy/ (PR #74 / #73 / RM-362)",
+            "token_seed": 20260806,
+            "tokens": 2048,
+            "top_k": 2
+          },
+          "baseline_76_ceiling": null,
+          "baseline_76_denser": null,
+          "baseline_85": {
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "source": "GH #85 / RM-608 \u2014 protocol lock (Grok-1 max context sequence)",
+            "token_seed": 20260806,
+            "tokens": 8192,
+            "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
+            "top_k": 2
+          },
+          "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
+          "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+          "embedding_shard": "embedding__slot_00__token_embedding.npy",
+          "evidence_role": "secondary; no independent decision",
+          "implementation": {
+            "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
+            "dirty": false
+          },
+          "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
+          "metrics_filename": "metrics.json",
+          "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
+          "model": "OpenAI Codex",
+          "numpy": "2.5.1",
+          "python": "3.14.6",
+          "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",
+          "skip_fp16_control": false,
+          "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision"
+        }
+      },
+      "expert_int4_channel_alpha_123": {
+        "chain": {
+          "arm_label": "expert_int4_channel_alpha_123",
+          "blocks": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "channel_alpha_blocks": [
+            0
+          ],
+          "end_of_chain": {
+            "expert_only_chain_exit": {
+              "note": "post-final-block residual stream (chain exit), not last-block residual-in",
+              "residual_cosine": 0.9900038440611516,
+              "residual_drift_relative_norm": 0.14199439171490524
+            },
+            "fp16_chain_exit": {
+              "note": "post-final-block residual stream under FP16 control",
+              "residual_cosine": 0.9994370955486388,
+              "residual_drift_relative_norm": 0.03355323588949929
+            }
+          },
+          "expert_mode": "int4_channel_alpha",
+          "hp_blocks": [
+            1,
+            2,
+            3
+          ],
+          "hp_period": null,
+          "hp_schedule_kind": "explicit",
+          "hp_schedule_prose": "Stacked INT4+LS-\u03b1 label `expert_int4_channel_alpha_123`: INT4 codes with LS channel-\u03b1 on {0}, HP (FP16 experts) on {1,2,3}.",
+          "int4_blocks": [
+            0
+          ],
+          "pack_provenance": [
+            {
+              "block": 0,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_000.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.021201981231570244
+                },
+                "block_000.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.014123744331300259
+                },
+                "block_000.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02120128832757473
+                },
+                "block_000.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004231256432831287
+                },
+                "block_000.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.002920885570347309
+                },
+                "block_000.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004230865743011236
+                },
+                "block_000.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004230931401252747
+                }
+              },
+              "npy_dir": "goz68-block_000-attn",
+              "npy_sha256": "42ccd9c9a98a6a222d95a157f72e49c0364624f89074c7a7a381cf3cdcf6aa9b",
+              "pack": "block_000-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_000.slot_00.moe_expert.gate": "pack_v2",
+                "block_000.slot_01.moe_expert.down": "pack_v2",
+                "block_000.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "scale_sources": {
+                "block_000.slot_00.moe_expert.gate": "research_int4_channel_alpha_side",
+                "block_000.slot_01.moe_expert.down": "research_int4_channel_alpha_side",
+                "block_000.slot_02.moe_expert.up": "research_int4_channel_alpha_side"
+              },
+              "ternary_scales": {
+                "block_000.slot_00.moe_expert.gate": {
+                  "alpha": 0.03446429222822189,
+                  "fired": 559126180,
+                  "sparsity": 0.652848777671655,
+                  "total": 1610612736
+                },
+                "block_000.slot_01.moe_expert.down": {
+                  "alpha": 0.02270425483584404,
+                  "fired": 584204424,
+                  "sparsity": 0.6372781544923782,
+                  "total": 1610612736
+                },
+                "block_000.slot_02.moe_expert.up": {
+                  "alpha": 0.0343967042863369,
+                  "fired": 572781462,
+                  "sparsity": 0.6443704627454281,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 1,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_001.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02693229168653488
+                },
+                "block_001.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.006763441953808069
+                },
+                "block_001.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02693232148885727
+                },
+                "block_001.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.007185009773820639
+                },
+                "block_001.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.010658656246960163
+                },
+                "block_001.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.006901538465172052
+                },
+                "block_001.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.007041923236101866
+                }
+              },
+              "npy_dir": "goz68-block_001-attn",
+              "npy_sha256": "fada26dbc8f2c330d01f9e6b18c4384d35850e55c52ae1b5162885a9d7cdd181",
+              "pack": "block_001-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_001.slot_00.moe_expert.gate": "pack_v2",
+                "block_001.slot_01.moe_expert.down": "pack_v2",
+                "block_001.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "scale_sources": {
+                "block_001.slot_00.moe_expert.gate": "fp16_control",
+                "block_001.slot_01.moe_expert.down": "fp16_control",
+                "block_001.slot_02.moe_expert.up": "fp16_control"
+              },
+              "ternary_scales": {
+                "block_001.slot_00.moe_expert.gate": {
+                  "alpha": 0.04331796243786812,
+                  "fired": 590008873,
+                  "sparsity": 0.633674278234442,
+                  "total": 1610612736
+                },
+                "block_001.slot_01.moe_expert.down": {
+                  "alpha": 0.010844916105270386,
+                  "fired": 579041052,
+                  "sparsity": 0.6404839977622032,
+                  "total": 1610612736
+                },
+                "block_001.slot_02.moe_expert.up": {
+                  "alpha": 0.04337596148252487,
+                  "fired": 588067590,
+                  "sparsity": 0.6348795853555202,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 2,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_002.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.029568785801529884
+                },
+                "block_002.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.013963296078145504
+                },
+                "block_002.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.029568949714303017
+                },
+                "block_002.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.03146064653992653
+                },
+                "block_002.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.004875801037997007
+                },
+                "block_002.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.005448548588901758
+                },
+                "block_002.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.01309292297810316
+                }
+              },
+              "npy_dir": "goz68-block_002-attn",
+              "npy_sha256": "5e9a15c0de698645f82491a1b3e5118f1230f39751fc513303dffb0067f55c7f",
+              "pack": "block_002-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_002.slot_00.moe_expert.gate": "pack_v2",
+                "block_002.slot_01.moe_expert.down": "pack_v2",
+                "block_002.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "scale_sources": {
+                "block_002.slot_00.moe_expert.gate": "fp16_control",
+                "block_002.slot_01.moe_expert.down": "fp16_control",
+                "block_002.slot_02.moe_expert.up": "fp16_control"
+              },
+              "ternary_scales": {
+                "block_002.slot_00.moe_expert.gate": {
+                  "alpha": 0.047630175948143005,
+                  "fired": 586904660,
+                  "sparsity": 0.6356016273299854,
+                  "total": 1610612736
+                },
+                "block_002.slot_01.moe_expert.down": {
+                  "alpha": 0.022462978959083557,
+                  "fired": 584829622,
+                  "sparsity": 0.6368899804850419,
+                  "total": 1610612736
+                },
+                "block_002.slot_02.moe_expert.up": {
+                  "alpha": 0.047669243067502975,
+                  "fired": 586421216,
+                  "sparsity": 0.6359017888704936,
+                  "total": 1610612736
+                }
+              }
+            },
+            {
+              "block": 3,
+              "container_versions": [
+                3
+              ],
+              "gif_thresholds": {
+                "block_003.slot_00.moe_expert.gate": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.02051529847085476
+                },
+                "block_003.slot_01.moe_expert.down": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.009574421681463718
+                },
+                "block_003.slot_02.moe_expert.up": {
+                  "gif_threshold": 0.8999999761581421,
+                  "threshold_abs": 0.020515233278274536
+                },
+                "block_003.slot_03.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0028222892433404922
+                },
+                "block_003.slot_04.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0028535902965813875
+                },
+                "block_003.slot_05.attn_proj_i8.model_width": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0009772719349712133
+                },
+                "block_003.slot_06.attn_proj_i8.narrow": {
+                  "gif_threshold": 0.4000000059604645,
+                  "threshold_abs": 0.0016606772551313043
+                }
+              },
+              "npy_dir": "goz68-block_003-attn",
+              "npy_sha256": "39322c3f8ae0f13313439faa8dd5a54edc102310cb0f8c03cf131b87bf5909e7",
+              "pack": "block_003-attention_plus_expert.goz1",
+              "pack_bytes": 1230128768,
+              "pack_metadata": {
+                "oz.gif_threshold": "0.05",
+                "oz.gif_threshold_authority": "tensor_row",
+                "oz.gif_threshold_scope": "baseline_only_not_applied",
+                "oz.quantization_version": 3
+              },
+              "pack_scale_sources": {
+                "block_003.slot_00.moe_expert.gate": "pack_v2",
+                "block_003.slot_01.moe_expert.down": "pack_v2",
+                "block_003.slot_02.moe_expert.up": "pack_v2"
+              },
+              "pack_sha256": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302",
+              "scale_sources": {
+                "block_003.slot_00.moe_expert.gate": "fp16_control",
+                "block_003.slot_01.moe_expert.down": "fp16_control",
+                "block_003.slot_02.moe_expert.up": "fp16_control"
+              },
+              "ternary_scales": {
+                "block_003.slot_00.moe_expert.gate": {
+                  "alpha": 0.03307119756937027,
+                  "fired": 585541892,
+                  "sparsity": 0.6364477450648944,
+                  "total": 1610612736
+                },
+                "block_003.slot_01.moe_expert.down": {
+                  "alpha": 0.015412655659019947,
+                  "fired": 584309007,
+                  "sparsity": 0.6372132208198309,
+                  "total": 1610612736
+                },
+                "block_003.slot_02.moe_expert.up": {
+                  "alpha": 0.033106379210948944,
+                  "fired": 584869981,
+                  "sparsity": 0.6368649223198493,
+                  "total": 1610612736
+                }
+              }
+            }
+          ],
+          "per_block": [
+            {
+              "block": 0,
+              "expert_only": {
+                "attention_output_cosine": 1.0,
+                "attention_output_cosine_per_token": 1.0,
+                "attn_delta_over_stream": 0.9033581150208522,
+                "block_output_cosine": 0.9981363940675975,
+                "block_output_cosine_per_token": 0.998144934126475,
+                "block_output_drift_relative_norm": 0.061248773387512494,
+                "expert_load_js_bits": 0.0,
+                "expert_load_max_abs_delta": 0.0,
+                "expert_load_observed": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "expert_load_reference": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 4299,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1846,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1700,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 346,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 1,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "research_int4_channel_alpha_side",
+                "moe_delta_over_stream": 0.4832609877350179,
+                "moe_input_normalized_cosine": 1.0000000000000002,
+                "moe_output_cosine": 0.9934975387787467,
+                "residual_drift_relative_norm": 0.0,
+                "residual_stream_cosine": 1.0000000000000002,
+                "residual_stream_in": {
+                  "residual_in_cosine": 1.0,
+                  "residual_in_drift_relative_norm": 0.0
+                },
+                "router_logit_cosine": 1.0,
+                "router_margin_mean_delta": 0.0,
+                "router_margin_mean_observed": 0.0346857385962856,
+                "router_margin_mean_reference": 0.0346857385962856,
+                "router_margin_median_observed": 0.008471452573598867,
+                "router_margin_median_reference": 0.008471452573598867,
+                "router_top1_agreement": 1.0,
+                "router_top2_set_agreement": 1.0,
+                "router_topk_set_agreement": 1.0,
+                "seconds": 333.4465341567993,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999999985728412,
+                "attention_output_cosine_per_token": 0.9999999986361572,
+                "attn_delta_over_stream": 0.9031929817106404,
+                "block_output_cosine": 0.9999662344185568,
+                "block_output_cosine_per_token": 0.9999632230144466,
+                "block_output_drift_relative_norm": 0.008217809632556623,
+                "expert_load_js_bits": 1.1395797616989257e-06,
+                "expert_load_max_abs_delta": 0.00048828125,
+                "expert_load_observed": [
+                  0.1513671875,
+                  0.11181640625,
+                  0.15570068359375,
+                  0.13677978515625,
+                  0.10382080078125,
+                  0.11431884765625,
+                  0.11578369140625,
+                  0.11041259765625
+                ],
+                "expert_load_reference": [
+                  0.15130615234375,
+                  0.111328125,
+                  0.15545654296875,
+                  0.13671875,
+                  0.10418701171875,
+                  0.1141357421875,
+                  0.11602783203125,
+                  0.11083984375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 4299,
+                    "top1_flip_rate": 0.0016282856478250756,
+                    "top1_flips": 7
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1846,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1700,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 346,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 1,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.4934264147307654,
+                "moe_input_normalized_cosine": 0.999999958445224,
+                "moe_output_cosine": 0.9998959798468963,
+                "residual_drift_relative_norm": 0.00022418911406672668,
+                "residual_stream_cosine": 0.9999999819762834,
+                "residual_stream_in": {
+                  "residual_in_cosine": 1.0,
+                  "residual_in_drift_relative_norm": 0.0
+                },
+                "router_logit_cosine": 0.9999999972602787,
+                "router_margin_mean_delta": 3.053922813402341e-06,
+                "router_margin_mean_observed": 0.034688792519098996,
+                "router_margin_mean_reference": 0.0346857385962856,
+                "router_margin_median_observed": 0.008459846907189983,
+                "router_margin_median_reference": 0.008471452573598867,
+                "router_top1_agreement": 0.9991455078125,
+                "router_top2_set_agreement": 0.99658203125,
+                "router_topk_set_agreement": 0.99658203125,
+                "seconds": 287.79632353782654,
+                "selected_experts": 2
+              },
+              "pilot_label": "research_int4_channel_alpha_side",
+              "reference_seconds": 257.4511570930481
+            },
+            {
+              "block": 1,
+              "expert_only": {
+                "attention_output_cosine": 0.9991453652888852,
+                "attention_output_cosine_per_token": 0.9992006416127804,
+                "attn_delta_over_stream": 0.4254724587590576,
+                "block_output_cosine": 0.9982853808940991,
+                "block_output_cosine_per_token": 0.9982959753367047,
+                "block_output_drift_relative_norm": 0.058674898865502985,
+                "expert_load_js_bits": 3.4276330251193764e-05,
+                "expert_load_max_abs_delta": 0.003173828125,
+                "expert_load_observed": [
+                  0.16107177734375,
+                  0.12713623046875,
+                  0.10845947265625,
+                  0.1065673828125,
+                  0.1126708984375,
+                  0.1436767578125,
+                  0.11456298828125,
+                  0.1258544921875
+                ],
+                "expert_load_reference": [
+                  0.1622314453125,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10797119140625,
+                  0.1124267578125,
+                  0.145263671875,
+                  0.11138916015625,
+                  0.12371826171875
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 421,
+                    "top1_flip_rate": 0.2826603325415677,
+                    "top1_flips": 119
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1368,
+                    "top1_flip_rate": 0.02046783625730994,
+                    "top1_flips": 28
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 2479,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 3608,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 316,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "expert_int4_channel_alpha_123",
+                "moe_delta_over_stream": 0.2738437610862629,
+                "moe_input_normalized_cosine": 0.9981928393441294,
+                "moe_output_cosine": 0.9961783283829612,
+                "residual_drift_relative_norm": 0.05188467503474186,
+                "residual_stream_cosine": 0.9986616815064538,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9981363940675975,
+                  "residual_in_drift_relative_norm": 0.061248773387512494
+                },
+                "router_logit_cosine": 0.9998184605628635,
+                "router_margin_mean_delta": 0.0012566144787176476,
+                "router_margin_mean_observed": 0.1780683993963692,
+                "router_margin_mean_reference": 0.1768117849176516,
+                "router_margin_median_observed": 0.1414818821250895,
+                "router_margin_median_reference": 0.14185318157435073,
+                "router_top1_agreement": 0.9820556640625,
+                "router_top2_set_agreement": 0.932861328125,
+                "router_topk_set_agreement": 0.932861328125,
+                "seconds": 293.18333554267883,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999844464986306,
+                "attention_output_cosine_per_token": 0.9999843032690912,
+                "attn_delta_over_stream": 0.4284735778277611,
+                "block_output_cosine": 0.999965929851699,
+                "block_output_cosine_per_token": 0.9999644733042241,
+                "block_output_drift_relative_norm": 0.008254778779977658,
+                "expert_load_js_bits": 1.5620965325225452e-07,
+                "expert_load_max_abs_delta": 0.000244140625,
+                "expert_load_observed": [
+                  0.1624755859375,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10791015625,
+                  0.11224365234375,
+                  0.1453857421875,
+                  0.111328125,
+                  0.1236572265625
+                ],
+                "expert_load_reference": [
+                  0.1622314453125,
+                  0.1270751953125,
+                  0.10992431640625,
+                  0.10797119140625,
+                  0.1124267578125,
+                  0.145263671875,
+                  0.11138916015625,
+                  0.12371826171875
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 421,
+                    "top1_flip_rate": 0.007125890736342043,
+                    "top1_flips": 3
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 1368,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 2479,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 3608,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 316,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.27375707876517935,
+                "moe_input_normalized_cosine": 0.9999509294401662,
+                "moe_output_cosine": 0.9999010859004773,
+                "residual_drift_relative_norm": 0.006972312249031641,
+                "residual_stream_cosine": 0.9999756963861242,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9999662344185568,
+                  "residual_in_drift_relative_norm": 0.008217809632556623
+                },
+                "router_logit_cosine": 0.9999932806125511,
+                "router_margin_mean_delta": 0.00012309683268611266,
+                "router_margin_mean_observed": 0.1769348817503377,
+                "router_margin_mean_reference": 0.1768117849176516,
+                "router_margin_median_observed": 0.14202488915802522,
+                "router_margin_median_reference": 0.14185318157435073,
+                "router_top1_agreement": 0.9996337890625,
+                "router_top2_set_agreement": 0.9981689453125,
+                "router_topk_set_agreement": 0.9981689453125,
+                "seconds": 335.42269349098206,
+                "selected_experts": 2
+              },
+              "pilot_label": "expert_int4_channel_alpha_123",
+              "reference_seconds": 204.38440132141113
+            },
+            {
+              "block": 2,
+              "expert_only": {
+                "attention_output_cosine": 0.995773390039298,
+                "attention_output_cosine_per_token": 0.9959299134443145,
+                "attn_delta_over_stream": 0.6082200966354006,
+                "block_output_cosine": 0.9939599269144929,
+                "block_output_cosine_per_token": 0.9939509512646542,
+                "block_output_drift_relative_norm": 0.10976319959391136,
+                "expert_load_js_bits": 0.00020028407461690186,
+                "expert_load_max_abs_delta": 0.00958251953125,
+                "expert_load_observed": [
+                  0.04327392578125,
+                  0.16961669921875,
+                  0.09539794921875,
+                  0.28961181640625,
+                  0.07171630859375,
+                  0.0606689453125,
+                  0.1494140625,
+                  0.12030029296875
+                ],
+                "expert_load_reference": [
+                  0.04443359375,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.069580078125,
+                  0.0606689453125,
+                  0.148193359375,
+                  0.1298828125
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2019,
+                    "top1_flip_rate": 0.2441802872709262,
+                    "top1_flips": 493
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4362,
+                    "top1_flip_rate": 0.008482347546996791,
+                    "top1_flips": 37
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1752,
+                    "top1_flip_rate": 0.0005707762557077625,
+                    "top1_flips": 1
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 59,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 0,
+                    "top1_flip_rate": null,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "expert_int4_channel_alpha_123",
+                "moe_delta_over_stream": 0.4301469503551952,
+                "moe_input_normalized_cosine": 0.9967036296191482,
+                "moe_output_cosine": 0.9815207489166171,
+                "residual_drift_relative_norm": 0.05691301584577628,
+                "residual_stream_cosine": 0.9983827938054513,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9982853808940991,
+                  "residual_in_drift_relative_norm": 0.058674898865502985
+                },
+                "router_logit_cosine": 0.9996170909562814,
+                "router_margin_mean_delta": -9.515788527187796e-05,
+                "router_margin_mean_observed": 0.03305504250558787,
+                "router_margin_mean_reference": 0.03315020039085974,
+                "router_margin_median_observed": 0.024203425781422316,
+                "router_margin_median_reference": 0.024014774987458368,
+                "router_top1_agreement": 0.9351806640625,
+                "router_top2_set_agreement": 0.9066162109375,
+                "router_topk_set_agreement": 0.9066162109375,
+                "seconds": 320.02914905548096,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9999716287912973,
+                "attention_output_cosine_per_token": 0.9999694231843663,
+                "attn_delta_over_stream": 0.6092783179867541,
+                "block_output_cosine": 0.9997649252084471,
+                "block_output_cosine_per_token": 0.9997605920963788,
+                "block_output_drift_relative_norm": 0.021683098492711318,
+                "expert_load_js_bits": 4.204230303538151e-07,
+                "expert_load_max_abs_delta": 0.00030517578125,
+                "expert_load_observed": [
+                  0.0445556640625,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.06988525390625,
+                  0.0606689453125,
+                  0.14794921875,
+                  0.12969970703125
+                ],
+                "expert_load_reference": [
+                  0.04443359375,
+                  0.1650390625,
+                  0.09173583984375,
+                  0.29046630859375,
+                  0.069580078125,
+                  0.0606689453125,
+                  0.148193359375,
+                  0.1298828125
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2019,
+                    "top1_flip_rate": 0.012877662209014363,
+                    "top1_flips": 26
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4362,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1752,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 59,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 0,
+                    "top1_flip_rate": null,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.4316547372269685,
+                "moe_input_normalized_cosine": 0.9999439196166795,
+                "moe_output_cosine": 0.9991185860861073,
+                "residual_drift_relative_norm": 0.0070732812585666514,
+                "residual_stream_cosine": 0.9999749873089938,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.999965929851699,
+                  "residual_in_drift_relative_norm": 0.008254778779977658
+                },
+                "router_logit_cosine": 0.9999958994382009,
+                "router_margin_mean_delta": 1.6864946445976705e-05,
+                "router_margin_mean_observed": 0.03316706533730572,
+                "router_margin_mean_reference": 0.03315020039085974,
+                "router_margin_median_observed": 0.02397975142504559,
+                "router_margin_median_reference": 0.024014774987458368,
+                "router_top1_agreement": 0.996826171875,
+                "router_top2_set_agreement": 0.995361328125,
+                "router_topk_set_agreement": 0.995361328125,
+                "seconds": 294.91808676719666,
+                "selected_experts": 2
+              },
+              "pilot_label": "expert_int4_channel_alpha_123",
+              "reference_seconds": 244.76727294921875
+            },
+            {
+              "block": 3,
+              "expert_only": {
+                "attention_output_cosine": 0.9910314247928639,
+                "attention_output_cosine_per_token": 0.9907323252533443,
+                "attn_delta_over_stream": 0.5711743438342609,
+                "block_output_cosine": 0.9900038440611516,
+                "block_output_cosine_per_token": 0.9897918491919186,
+                "block_output_drift_relative_norm": 0.14199439171490524,
+                "expert_load_js_bits": 7.148238084593193e-05,
+                "expert_load_max_abs_delta": 0.00372314453125,
+                "expert_load_observed": [
+                  0.0430908203125,
+                  0.05828857421875,
+                  0.091796875,
+                  0.22076416015625,
+                  0.33538818359375,
+                  0.047607421875,
+                  0.1156005859375,
+                  0.08746337890625
+                ],
+                "expert_load_reference": [
+                  0.04150390625,
+                  0.05712890625,
+                  0.0887451171875,
+                  0.21875,
+                  0.339111328125,
+                  0.04656982421875,
+                  0.11859130859375,
+                  0.089599609375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2219,
+                    "top1_flip_rate": 0.30374042361424064,
+                    "top1_flips": 674
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4206,
+                    "top1_flip_rate": 0.05468378506894912,
+                    "top1_flips": 230
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1595,
+                    "top1_flip_rate": 0.011912225705329153,
+                    "top1_flips": 19
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 170,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 2,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "expert_int4_channel_alpha_123",
+                "moe_delta_over_stream": 0.3380348149052451,
+                "moe_input_normalized_cosine": 0.9875052364484207,
+                "moe_output_cosine": 0.9704103764149535,
+                "residual_drift_relative_norm": 0.091368390182391,
+                "residual_stream_cosine": 0.9958492289168094,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9939599269144929,
+                  "residual_in_drift_relative_norm": 0.10976319959391136
+                },
+                "router_logit_cosine": 0.9992178615417482,
+                "router_margin_mean_delta": -0.0004509456304863861,
+                "router_margin_mean_observed": 0.03386946999688343,
+                "router_margin_mean_reference": 0.034320415627369816,
+                "router_margin_median_observed": 0.02150663319172212,
+                "router_margin_median_reference": 0.0220433932007284,
+                "router_top1_agreement": 0.8873291015625,
+                "router_top2_set_agreement": 0.8260498046875,
+                "router_topk_set_agreement": 0.8260498046875,
+                "seconds": 274.67492175102234,
+                "selected_experts": 2
+              },
+              "fp16_control": {
+                "attention_output_cosine": 0.9996371522691706,
+                "attention_output_cosine_per_token": 0.9996587349820896,
+                "attn_delta_over_stream": 0.5618916032039319,
+                "block_output_cosine": 0.9994370955486388,
+                "block_output_cosine_per_token": 0.9994322357588377,
+                "block_output_drift_relative_norm": 0.03355323588949929,
+                "expert_load_js_bits": 1.4895787361700699e-06,
+                "expert_load_max_abs_delta": 0.00054931640625,
+                "expert_load_observed": [
+                  0.04168701171875,
+                  0.05718994140625,
+                  0.08819580078125,
+                  0.218994140625,
+                  0.3394775390625,
+                  0.0467529296875,
+                  0.1180419921875,
+                  0.08966064453125
+                ],
+                "expert_load_reference": [
+                  0.04150390625,
+                  0.05712890625,
+                  0.0887451171875,
+                  0.21875,
+                  0.339111328125,
+                  0.04656982421875,
+                  0.11859130859375,
+                  0.089599609375
+                ],
+                "experts_touched": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7
+                ],
+                "experts_unused_observed": 0,
+                "experts_unused_reference": 0,
+                "flip_stratification_by_reference_margin": [
+                  {
+                    "margin_high": 0.01,
+                    "margin_low": 0.0,
+                    "tokens": 2219,
+                    "top1_flip_rate": 0.027039206849932402,
+                    "top1_flips": 60
+                  },
+                  {
+                    "margin_high": 0.05,
+                    "margin_low": 0.01,
+                    "tokens": 4206,
+                    "top1_flip_rate": 0.0028530670470756064,
+                    "top1_flips": 12
+                  },
+                  {
+                    "margin_high": 0.15,
+                    "margin_low": 0.05,
+                    "tokens": 1595,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 0.5,
+                    "margin_low": 0.15,
+                    "tokens": 170,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  },
+                  {
+                    "margin_high": 1.01,
+                    "margin_low": 0.5,
+                    "tokens": 2,
+                    "top1_flip_rate": 0.0,
+                    "top1_flips": 0
+                  }
+                ],
+                "label": "fp16_roundtrip",
+                "moe_delta_over_stream": 0.33880058537802515,
+                "moe_input_normalized_cosine": 0.9994953806921836,
+                "moe_output_cosine": 0.9980916705559675,
+                "residual_drift_relative_norm": 0.017792575310936677,
+                "residual_stream_cosine": 0.9998417382509542,
+                "residual_stream_in": {
+                  "residual_in_cosine": 0.9997649252084471,
+                  "residual_in_drift_relative_norm": 0.021683098492711318
+                },
+                "router_logit_cosine": 0.9999683118236804,
+                "router_margin_mean_delta": 3.102300184862202e-05,
+                "router_margin_mean_observed": 0.03435143862921844,
+                "router_margin_mean_reference": 0.034320415627369816,
+                "router_margin_median_observed": 0.021954006940788154,
+                "router_margin_median_reference": 0.0220433932007284,
+                "router_top1_agreement": 0.9912109375,
+                "router_top2_set_agreement": 0.987548828125,
+                "router_topk_set_agreement": 0.987548828125,
+                "seconds": 301.19865012168884,
+                "selected_experts": 2
+              },
+              "pilot_label": "expert_int4_channel_alpha_123",
+              "reference_seconds": 203.10643815994263
+            }
+          ],
+          "pilot_labels_per_block": [
+            "research_int4_channel_alpha_side",
+            "expert_int4_channel_alpha_123",
+            "expert_int4_channel_alpha_123",
+            "expert_int4_channel_alpha_123"
+          ],
+          "skip_fp16_control": false,
+          "ternary_blocks": [],
+          "token_id_first": 37,
+          "token_id_last": 131061,
+          "token_seed": 20260806,
+          "tokens": 8192,
+          "top_k": 2
+        },
+        "provenance": {
+          "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+          "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+          "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+          "arm": "int4_channel_alpha",
+          "baseline_64": {
+            "expert_only": {
+              "block_output_cosine": 0.963572,
+              "expert_load_js_bits": 0.0,
+              "moe_output_cosine": 0.773483,
+              "residual_drift_relative_norm": 0.0,
+              "residual_stream_cosine": 1.0,
+              "router_top1_agreement": 1.0,
+              "router_top2_set_agreement": 1.0
+            },
+            "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
+            "tokens": 2048
+          },
+          "baseline_72": {
+            "arm_label": "goz1_expert_ternary_only",
+            "block_output_cosine": [
+              0.963572,
+              0.945765,
+              0.884956,
+              0.839144
+            ],
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "chain_exit_residual_drift": 0.6538863846584987,
+            "decision": 3,
+            "pack_names": {
+              "0": "block_000-attention_plus_expert.goz1",
+              "1": "block_001-attention_plus_expert.goz1",
+              "2": "block_002-attention_plus_expert.goz1",
+              "3": "block_003-attention_plus_expert.goz1"
+            },
+            "pack_sha256": {
+              "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+            },
+            "residual_in_drift": [
+              0.0,
+              0.277351,
+              0.341935,
+              0.498308
+            ],
+            "router_top1": [
+              1.0,
+              0.887695,
+              0.666504,
+              0.52832
+            ],
+            "router_top2": [
+              1.0,
+              0.680664,
+              0.548828,
+              0.289551
+            ],
+            "source": "reports/grok-1-expert-only-multiblock/ (PR #72 / #68 / RM-255)",
+            "token_seed": 20260806,
+            "tokens": 2048,
+            "top_k": 2
+          },
+          "baseline_74": {
+            "arm_label": "expert_periodic_hp_n2",
+            "block_output_cosine": [
+              0.963572,
+              0.963211,
+              0.90536,
+              0.882308
+            ],
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "chain_exit_residual_drift": 0.5292121735722244,
+            "decision": 2,
+            "expert_load_js_bits": [
+              0.0,
+              0.005559,
+              0.008548,
+              0.025243
+            ],
+            "pack_names": {
+              "0": "block_000-attention_plus_expert.goz1",
+              "1": "block_001-attention_plus_expert.goz1",
+              "2": "block_002-attention_plus_expert.goz1",
+              "3": "block_003-attention_plus_expert.goz1"
+            },
+            "pack_sha256": {
+              "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+              "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+              "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+              "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+            },
+            "residual_in_drift": [
+              0.0,
+              0.277351,
+              0.279321,
+              0.449088
+            ],
+            "router_top1": [
+              1.0,
+              0.887695,
+              0.729004,
+              0.547852
+            ],
+            "router_top2": [
+              1.0,
+              0.680664,
+              0.592773,
+              0.317383
+            ],
+            "source": "reports/grok-1-expert-precision-remedy/ (PR #74 / #73 / RM-362)",
+            "token_seed": 20260806,
+            "tokens": 2048,
+            "top_k": 2
+          },
+          "baseline_76_ceiling": null,
+          "baseline_76_denser": null,
+          "baseline_85": {
+            "blocks": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "source": "GH #85 / RM-608 \u2014 protocol lock (Grok-1 max context sequence)",
+            "token_seed": 20260806,
+            "tokens": 8192,
+            "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
+            "top_k": 2
+          },
+          "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
+          "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+          "embedding_shard": "embedding__slot_00__token_embedding.npy",
+          "evidence_role": "secondary; no independent decision",
+          "implementation": {
+            "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
+            "dirty": false
+          },
+          "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
+          "metrics_filename": "metrics.json",
+          "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
+          "model": "OpenAI Codex",
+          "numpy": "2.5.1",
+          "python": "3.14.6",
+          "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",
+          "skip_fp16_control": false,
+          "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision"
+        }
+      }
+    },
+    "summaries": {
+      "expert_int4": {
+        "arm_label": "expert_int4",
+        "block_output_cosine": [
+          0.998636599415437,
+          0.9975672646063307,
+          0.9886573865540497,
+          0.9805662657439359
+        ],
+        "chain_exit_residual_drift": 0.19772214640333557,
+        "compounding": "superlinear_or_runaway",
+        "expert_load_js_bits": [
+          0.0,
+          2.033074208447681e-05,
+          0.00019497360882110354,
+          0.0003170502785525748
+        ],
+        "residual_in_drift": [
+          0.0,
+          0.052476083867624736,
+          0.0698795479982047,
+          0.1504987802639529
+        ],
+        "router_top1": [
+          1.0,
+          0.9822998046875,
+          0.92626953125,
+          0.82373046875
+        ],
+        "router_top2": [
+          1.0,
+          0.9385986328125,
+          0.8861083984375,
+          0.7210693359375
+        ],
+        "viable": false
+      },
+      "expert_int4_channel_alpha": {
+        "arm_label": "expert_int4_channel_alpha",
+        "block_output_cosine": [
+          0.9981363940675975,
+          0.9970708376561523,
+          0.9856984885711603,
+          0.9761822196087365
+        ],
+        "chain_exit_residual_drift": 0.22110917292671636,
+        "compounding": "superlinear_or_runaway",
+        "expert_load_js_bits": [
+          0.0,
+          3.4276330251193764e-05,
+          0.00034164579906311755,
+          0.0007234054126472283
+        ],
+        "residual_in_drift": [
+          0.0,
+          0.061248773387512494,
+          0.07653289247308387,
+          0.16877270290143606
+        ],
+        "router_top1": [
+          1.0,
+          0.9820556640625,
+          0.9110107421875,
+          0.8017578125
+        ],
+        "router_top2": [
+          1.0,
+          0.932861328125,
+          0.8681640625,
+          0.6864013671875
+        ],
+        "viable": false
+      },
+      "expert_int4_channel_alpha_123": {
+        "arm_label": "expert_int4_channel_alpha_123",
+        "block_output_cosine": [
+          0.9981363940675975,
+          0.9982853808940991,
+          0.9939599269144929,
+          0.9900038440611516
+        ],
+        "chain_exit_residual_drift": 0.14199439171490524,
+        "compounding": "superlinear_or_runaway",
+        "expert_load_js_bits": [
+          0.0,
+          3.4276330251193764e-05,
+          0.00020028407461690186,
+          7.148238084593193e-05
+        ],
+        "residual_in_drift": [
+          0.0,
+          0.061248773387512494,
+          0.058674898865502985,
+          0.10976319959391136
+        ],
+        "router_top1": [
+          1.0,
+          0.9820556640625,
+          0.9351806640625,
+          0.8873291015625
+        ],
+        "router_top2": [
+          1.0,
+          0.932861328125,
+          0.9066162109375,
+          0.8260498046875
+        ],
+        "viable": false
+      }
+    },
+    "validation": {
+      "arm_status": {
+        "expert_int4": {
+          "complete": true,
+          "errors": [],
+          "present": true
+        },
+        "expert_int4_channel_alpha": {
+          "complete": true,
+          "errors": [],
+          "present": true
+        },
+        "expert_int4_channel_alpha_123": {
+          "complete": true,
+          "errors": [],
+          "present": true
+        }
+      },
+      "candidate_arms": [
+        "expert_int4_channel_alpha",
+        "expert_int4_channel_alpha_123"
+      ],
+      "completed": [
+        "expert_int4",
+        "expert_int4_channel_alpha_123",
+        "expert_int4_channel_alpha"
+      ],
+      "completed_arms": [
+        "expert_int4",
+        "expert_int4_channel_alpha_123",
+        "expert_int4_channel_alpha"
+      ],
+      "errors_by_arm": {
+        "expert_int4": [],
+        "expert_int4_channel_alpha": [],
+        "expert_int4_channel_alpha_123": []
+      },
+      "global_errors": [],
+      "invalid": [],
+      "invalid_arms": [],
+      "missing": [],
+      "missing_arms": [],
+      "protocol_complete": true,
+      "required_arms": [
+        "expert_int4",
+        "expert_int4_channel_alpha_123",
+        "expert_int4_channel_alpha"
+      ]
+    },
+    "validation_errors": []
+  },
+  "decision": {
+    "baseline_deltas": {
+      "expert_int4_channel_alpha": {
+        "b3_cos_gain": -0.004384046135199382,
+        "b3_top1_gain": -0.02197265625,
+        "chain_exit_drift_reduction": -0.02338702652338079
+      },
+      "expert_int4_channel_alpha_123": {
+        "b3_cos_gain": 0.0094375783172157,
+        "b3_top1_gain": 0.0635986328125,
+        "chain_exit_drift_reduction": 0.05572775468843033
+      }
+    },
+    "best_remedy_arm": "expert_int4_channel_alpha_123",
+    "compounding": "superlinear_or_runaway",
+    "decision": 2,
+    "decision_text": "Selected stacked / denser INT4 remedy helps vs re-measured INT4 baseline, but still compounds / misses the ~0.95 viability band.",
+    "ordered_candidates": [
+      "expert_int4_channel_alpha_123",
+      "expert_int4_channel_alpha"
+    ],
+    "protocol_complete": true,
+    "rationale": [
+      "best_stack_arm=expert_int4_channel_alpha_123",
+      "best_b3_top1=0.887329",
+      "best_b3_cos=0.990004",
+      "best_chain_exit_drift=0.14199439171490524",
+      "remeasured_int4_b3_top1=0.823730",
+      "selected_stack_improved_vs_remeasured_int4=True",
+      "tokens=8192",
+      "codec=research_int4_channel_alpha_side INT4 codes \u00d7 LS channel-\u03b1",
+      "#80_historical_b3_top1=0.850586@2048 P0 all-INT4 (cite only; not same-budget)"
+    ],
+    "tie_break_reason": "not needed; winner has the highest viability/top-1/cosine/exit-drift rank"
+  },
+  "provenance": {
+    "activation_policy": "paired residuals; no Gaussian; no embed for b!=0",
+    "agent": "Codex (OpenAI) \u00b7 Issue: #85 / Linear RM-608 \u00b7 beads goz-3h3",
+    "architecture_source": "github.com/xai-org/grok-1 model.py + run.py",
+    "arm": "int4_channel_alpha",
+    "baseline_64": {
+      "expert_only": {
+        "block_output_cosine": 0.963572,
+        "expert_load_js_bits": 0.0,
+        "moe_output_cosine": 0.773483,
+        "residual_drift_relative_norm": 0.0,
+        "residual_stream_cosine": 1.0,
+        "router_top1_agreement": 1.0,
+        "router_top2_set_agreement": 1.0
+      },
+      "source": "reports/grok-1-full-block-forward/results.md (PR #64 / #61 / RM-249)",
+      "tokens": 2048
+    },
+    "baseline_72": {
+      "arm_label": "goz1_expert_ternary_only",
+      "block_output_cosine": [
+        0.963572,
+        0.945765,
+        0.884956,
+        0.839144
+      ],
+      "blocks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "chain_exit_residual_drift": 0.6538863846584987,
+      "decision": 3,
+      "pack_names": {
+        "0": "block_000-attention_plus_expert.goz1",
+        "1": "block_001-attention_plus_expert.goz1",
+        "2": "block_002-attention_plus_expert.goz1",
+        "3": "block_003-attention_plus_expert.goz1"
+      },
+      "pack_sha256": {
+        "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+        "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+        "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+        "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+      },
+      "residual_in_drift": [
+        0.0,
+        0.277351,
+        0.341935,
+        0.498308
+      ],
+      "router_top1": [
+        1.0,
+        0.887695,
+        0.666504,
+        0.52832
+      ],
+      "router_top2": [
+        1.0,
+        0.680664,
+        0.548828,
+        0.289551
+      ],
+      "source": "reports/grok-1-expert-only-multiblock/ (PR #72 / #68 / RM-255)",
+      "token_seed": 20260806,
+      "tokens": 2048,
+      "top_k": 2
+    },
+    "baseline_74": {
+      "arm_label": "expert_periodic_hp_n2",
+      "block_output_cosine": [
+        0.963572,
+        0.963211,
+        0.90536,
+        0.882308
+      ],
+      "blocks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "chain_exit_residual_drift": 0.5292121735722244,
+      "decision": 2,
+      "expert_load_js_bits": [
+        0.0,
+        0.005559,
+        0.008548,
+        0.025243
+      ],
+      "pack_names": {
+        "0": "block_000-attention_plus_expert.goz1",
+        "1": "block_001-attention_plus_expert.goz1",
+        "2": "block_002-attention_plus_expert.goz1",
+        "3": "block_003-attention_plus_expert.goz1"
+      },
+      "pack_sha256": {
+        "0": "eb28728b6b66454753bc67072b105e701d99f589ca20f4edf174fecd06e0e1c4",
+        "1": "dd66181d6ce42ed47a6a257feaf606d20c4b0b23f471004ae373b21c1398c17f",
+        "2": "e61641e19735293e6802c33d69dda6f83507480fc955141f358eb0df31da8560",
+        "3": "9db504ff9ee08a2523f74e3f842228296458fc524a1ccf406de46c53d9e18302"
+      },
+      "residual_in_drift": [
+        0.0,
+        0.277351,
+        0.279321,
+        0.449088
+      ],
+      "router_top1": [
+        1.0,
+        0.887695,
+        0.729004,
+        0.547852
+      ],
+      "router_top2": [
+        1.0,
+        0.680664,
+        0.592773,
+        0.317383
+      ],
+      "source": "reports/grok-1-expert-precision-remedy/ (PR #74 / #73 / RM-362)",
+      "token_seed": 20260806,
+      "tokens": 2048,
+      "top_k": 2
+    },
+    "baseline_76_ceiling": null,
+    "baseline_76_denser": null,
+    "baseline_85": {
+      "blocks": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "source": "GH #85 / RM-608 \u2014 protocol lock (Grok-1 max context sequence)",
+      "token_seed": 20260806,
+      "tokens": 8192,
+      "tokens_note": "8192 = Grok-1 published max context (causal sequence). Vocab size 131072 is the sampler ceiling only \u2014 not a valid T for dense attention in this harness.",
+      "top_k": 2
+    },
+    "design": "Grok issue-planning lock: INT4 codes \u00d7 LS channel-\u03b1 stack at Grok-1 max context (8192); re-measure INT4 baseline same-budget; #80@2048 historical only; implementation and evidence by Codex (OpenAI)",
+    "embedding_sha256": "55ec19a8fdd45960579514bf471e8f5cba24436cdc3f6e9e6bcd3a004ed863f6",
+    "embedding_shard": "embedding__slot_00__token_embedding.npy",
+    "evidence_role": "primary; sole canonical #85 decision",
+    "implementation": {
+      "commit": "a159d89df1dbe2374b56a1c43ec2b4ac80dbe82e",
+      "dirty": false
+    },
+    "issue": "GH #85 / Linear RM-608 / beads goz-3h3",
+    "metrics_filename": "metrics.json",
+    "metrics_note": "#85 protocol (Grok-1 max context tokens=8192). #72/#80 2048-token figures are historical cites only; not same-budget and not a validation failure.",
+    "model": "OpenAI Codex",
+    "numpy": "2.5.1",
+    "python": "3.14.6",
+    "scale_policy": "research_int4_channel_alpha_side: INT4 codes \u00d7 LS channel-\u03b1 scales; absmax INT4 baseline uses research_int4_side; abort on legacy_oracle",
+    "skip_fp16_control": false,
+    "ternary_policy": "experts only on ternary blocks; attention/routers/norms high precision"
+  }
+}
