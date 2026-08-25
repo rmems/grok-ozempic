@@ -26,8 +26,12 @@ substring guess.
 Official Grok-1 checkpoint shards are JAX pickle frames. The real-weight
 `quantize-goz1` path accepts safetensors or a flat NPY directory, not pickle.
 Run [`scripts/export_grok1_embedding_npy.py`](../scripts/export_grok1_embedding_npy.py)
-before packing the official embedding shard. The exporter validates the known
-offset, byte count, dtype, and shape, and writes a stream-compatible `.npy`.
+before packing the official embedding shard. With a working `xai-dissect`, the
+exporter discovers the layout independently. Otherwise, for the exact
+`tensor00000_000` basename only, it uses the measured offset, dtype, and shape
+recorded above and verifies that the assumed byte range fits before writing a
+stream-compatible `.npy`; that fallback is not a source-identity or checksum
+validation.
 
 This requirement is independent of the metadata-only SAAQ commands. The two
 pipelines have different outputs:
@@ -63,6 +67,8 @@ dense/sign-like rather than strongly sparse.
 
 The immutable measurements and exact historical command are in
 [`reports/grok-1-first-embed-goz1/results.md`](../reports/grok-1-first-embed-goz1/results.md).
+The exact trit counts and threshold sweep are in
+[`reports/grok-1-tau-sweep/results.md`](../reports/grok-1-tau-sweep/results.md).
 New packs use the current GOZ1 version 3 writer, which adds per-tensor
 reconstruction scale and applied-threshold fields; see
 [`goz1-format.md`](./goz1-format.md). Do not compare the old artifact's version

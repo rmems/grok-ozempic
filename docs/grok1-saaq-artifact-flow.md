@@ -14,7 +14,7 @@ From the repository root:
 cargo build --release --features cli
 
 GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
-GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
+GROK1_NPY="${GROK1_NPY:-$(mktemp -d "${TMPDIR:-/tmp}/grok1-first-embed.XXXXXX")}"
 GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
 GROK1_MANIFEST="${GROK1_MANIFEST:-dissect/grok-1/structural-manifest.json}"
 mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
@@ -88,6 +88,9 @@ shape `(131072, 6144)`:
 python3 scripts/export_grok1_embedding_npy.py \
   --shard "$GROK1_CKPT/tensor00000_000" \
   --output-dir "$GROK1_NPY"
+
+FOUND_NPY="$(find "$GROK1_NPY" -maxdepth 1 -type f -name '*.npy' -printf '%f\n')"
+test "$FOUND_NPY" = "embedding__slot_00__token_embedding.npy"
 ```
 
 The command reads the real approximately 3 GiB payload and writes
@@ -95,7 +98,14 @@ The command reads the real approximately 3 GiB payload and writes
 the stem's `__` separators to the logical name
 `embedding.slot_00.token_embedding`. Safetensors checkpoints can instead be
 passed directly to the real-weight packer with `--input-format safetensors`;
-the official pickle shard cannot.
+the official pickle shard cannot. The default NPY directory is unique per run.
+If `GROK1_NPY` is overridden, the subsequent `test` fails closed unless the
+directory contains exactly the expected embedding NPY and no other NPY tensor.
+
+The exporter prefers independent layout discovery through a working
+`xai-dissect`. When it is unavailable, the exact `tensor00000_000` basename
+uses the measured offset, dtype, and shape shown above and checks payload bounds;
+that fallback does not prove source identity or verify a checkpoint checksum.
 
 ## 5. Pack and verify a real GOZ1 artifact
 
@@ -118,8 +128,11 @@ against silent router/norm misclassification.
 The original measured experiment used the then-current baseline manifest and
 GOZ1 version 1; it produced a verified 192.00 MiB embedding artifact. See the
 canonical [`results.md`](../reports/grok-1-first-embed-goz1/results.md) for its
-immutable command, hashes, compression, and trit histogram. A new v3 pack is a
-reproduction of the workflow, not a promise of byte identity with that v1 file.
+immutable command, file size, and compression result. The exact histogram is
+recorded separately in the canonical
+[`tau-sweep results`](../reports/grok-1-tau-sweep/results.md). No first-pack hash
+is claimed by either report. A new v3 pack is a reproduction of the workflow,
+not a promise of byte identity with that v1 file.
 
 ## 6. Inspect the result and understand the boundary
 

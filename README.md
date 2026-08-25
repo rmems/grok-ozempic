@@ -116,18 +116,23 @@ Official `xai-org/grok-1` `ckpt-0` shards are JAX **pickle** frames.
 ```bash
 # Override these variables when the checkpoint or outputs live elsewhere.
 GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
-GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
+GROK1_NPY="${GROK1_NPY:-$(mktemp -d "${TMPDIR:-/tmp}/grok1-first-embed.XXXXXX")}"
 GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
 GROK1_MANIFEST="${GROK1_MANIFEST:-dissect/grok-1/structural-manifest.json}"
 mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
 python3 scripts/export_grok1_embedding_npy.py \
   --shard "$GROK1_CKPT/tensor00000_000" \
   --output-dir "$GROK1_NPY"
+
+FOUND_NPY="$(find "$GROK1_NPY" -maxdepth 1 -type f -name '*.npy' -printf '%f\n')"
+test "$FOUND_NPY" = "embedding__slot_00__token_embedding.npy"
 ```
 
 This writes `embedding__slot_00__token_embedding.npy` (logical name
 `embedding.slot_00.token_embedding` after `__` → `.` stem mapping). Pass that
-directory as `--input-dir` to `quantize-goz1` below.
+fresh, single-tensor directory as `--input-dir` to `quantize-goz1` below. If
+you override `GROK1_NPY`, the `test` deliberately fails when that directory
+contains missing or additional NPY tensors.
 
 ### GOZ1 packing (`quantize-goz1`)
 
