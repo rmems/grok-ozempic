@@ -1,111 +1,97 @@
-# First Quantization Target for `grok-ozempic`
+# Verified first quantization target for `grok-ozempic`
 
-This document defines the first bounded quantization target for [`grok-ozempic`](../README.md) under GitHub issue `#14` / Linear `MET-76`. It is now implemented as part of the combined Grok-1 SAAQ artifact flow documented in [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md).
+This document records the observed contract for the first real Grok-1 weight
+experiment. It replaces the pre-implementation plan from GitHub #14 / Linear
+MET-76. For the copyable end-to-end commands, see the
+[Grok-1 SAAQ artifact flow](./grok1-saaq-artifact-flow.md).
 
-## Goal
+## Physical-to-logical mapping
 
-Select one concrete first quantization target that is:
+The official `xai-org/grok-1` `ckpt-0` token embedding is known and measured:
 
-- explicit enough to anchor validation and artifact expectations
-- small enough to land in one implementation PR
-- compatible with the existing GOZ1 export contract
+| Layer | Value |
+|---|---|
+| Physical checkpoint shard | `tensor00000_000` |
+| Pickle payload offset | `151` (`0x97`) |
+| Source dtype and shape | f32 `(131072, 6144)` |
+| Exported NPY filename | `embedding__slot_00__token_embedding.npy` |
+| Runtime logical name | `embedding.slot_00.token_embedding` |
 
-## Selected target
+The exporter uses `__` in the filename stem because the NPY loader maps `__`
+back to `.`. The mapping is therefore structural and deterministic; it is not a
+substring guess.
 
-The first quantization target is:
+## Why an export is required
 
-- `embedding.slot_00.token_embedding`
+Official Grok-1 checkpoint shards are JAX pickle frames. The real-weight
+`quantize-goz1` path accepts safetensors or a flat NPY directory, not pickle.
+Run [`scripts/export_grok1_embedding_npy.py`](../scripts/export_grok1_embedding_npy.py)
+before packing the official embedding shard. With a working `xai-dissect`, the
+exporter discovers the layout independently. Otherwise, for the exact
+`tensor00000_000` basename only, it uses the measured offset, dtype, and shape
+recorded above and verifies that the assumed byte range fits before writing a
+stream-compatible `.npy`; that fallback is not a source-identity or checksum
+validation.
 
-This target already appears as the clearest candidate in [`reports/grok-1-official__ckpt-0/saaq-readiness.md`](../reports/grok-1-official__ckpt-0/saaq-readiness.md).
+This requirement is independent of the metadata-only SAAQ commands. The two
+pipelines have different outputs:
 
-## Why this target
+| Pipeline | Purpose | Weight payloads |
+|---|---|---|
+| `validate-ingest` → `smoke-grok1` → `convert-grok1` → `validate-grok1-artifact` | Validate the `saaq-g1-v0` plan and deterministic structural indexes | Does not quantize or pack weights; `validate-ingest` may hash files named by `checksums.json` |
+| pickle export → `quantize-goz1 --verify` | Export and quantize real tensor values into a GOZ1 container | Reads the 3 GiB f32 embedding payload and writes packed weights |
 
-`embedding.slot_00.token_embedding` is the best first target because it is:
+An `artifact.index.json` from the first pipeline is not a GOZ1 checkpoint.
 
-- a single bounded tensor family rather than a repeated expert family
-- easier to validate than a multi-block rollout
-- not part of the routing-critical path described by the existing artifact reports
-- compatible with the current ternary quantization flow implemented in [`src/core/quantizer.rs`](../src/core/quantizer.rs)
+## Manifest and safety contract
 
-## Expected input artifacts
+Use a manifest that explicitly covers the structural NPY name. Runtime support
+for V2 structural names landed in PR #55: under a V2 manifest, an unmatched
+tensor fails closed instead of falling through to defaults. The in-tree
+[`dissect/grok-1/structural-manifest.json`](../dissect/grok-1/structural-manifest.json)
+is a non-authoritative policy reference; the latest correct xai-dissect run is
+the authoritative planning surface. See
+[`dissect-manifest.md`](./dissect-manifest.md) for resolution precedence.
 
-The first implementation PR should assume the following inputs:
+Routers and norms remain protected. This one-tensor experiment does not test
+full-model inference, routing preservation, or downstream model quality, and it
+does not justify expanding ternary selection to routing-critical tensors.
 
-1. One xai-dissect manifest JSON.
-   - Resolution precedence is already documented in [`docs/dissect-manifest.md`](./dissect-manifest.md).
-   - Runtime resolution is implemented in [`resolve_manifest()`](../src/core/stream.rs:108).
+## Observed first artifact
 
-2. One supported checkpoint source.
-   - Supported input layouts are defined by [`QuantizationInputFormat`](../src/types.rs:40).
-   - The checkpoint source may be safetensors shards or a flat `.npy` directory.
+The historical first pack used the baseline manifest and GOZ1 version 1. It
+produced one verified `201327136`-byte artifact (about 192.00 MiB), compressing
+the 3 GiB f32 payload by about 16×. Its trit distribution at `gif_threshold =
+0.05` was about 4.17% zero, 47.7% positive, and 48.2% negative, so the result was
+dense/sign-like rather than strongly sparse.
 
-3. A concrete mapping from the logical target name to the physical checkpoint tensor name.
-   - This mapping is still a known unknown and must be confirmed during implementation.
+The immutable measurements and exact historical command are in
+[`reports/grok-1-first-embed-goz1/results.md`](../reports/grok-1-first-embed-goz1/results.md).
+The exact trit counts and threshold sweep are in
+[`reports/grok-1-tau-sweep/results.md`](../reports/grok-1-tau-sweep/results.md).
+New packs use the current GOZ1 version 3 writer, which adds per-tensor
+reconstruction scale and applied-threshold fields; see
+[`goz1-format.md`](./goz1-format.md). Do not compare the old artifact's version
+number with a newly generated file as though they were byte-identical formats.
 
-## Expected output artifact
+## Remaining validation boundaries
 
-The expected output artifact for the first implementation PR is:
+The physical name and source dtype are no longer unknown. The outstanding
+boundaries are deliberately tracked elsewhere:
 
-- one GOZ1 packed checkpoint file
+- GitHub #35 validates the complete local checkpoint inventory and size.
+- GitHub #36 exercises the full 770-tensor / 64-router metadata gate.
+- GitHub #85 and PR #89 contain the later supervised multi-block precision
+  experiment; its INT4 research side tables are not GOZ1 containers.
 
-The format must remain the existing GOZ1 container defined in [`src/core/weight_pack.rs`](../src/core/weight_pack.rs).
+The first embedding result is evidence that one real tensor can be exported,
+packed, and verified. It is not evidence that a complete model is usable or
+that the broader ingest gates are complete.
 
-### Output contract
+## Scope preserved by this contract
 
-- The selected token-embedding tensor must be emitted through the ternary quantization path.
-- Ternary packing must continue to use the existing encoding path in [`pack_trits()`](../src/core/quantizer.rs:62).
-- Source tensors that are still preserve/FP16 must remain on their existing paths.
-- Routing-critical tensors must remain unchanged.
-- For the sprint metadata writer, the selected target is represented in `artifact.index.json` with `candidate_saaq_embedding` policy under the `saaq-g1-v0` custom-format contract. The older GOZ1 streaming path remains separate and unchanged.
-
-## Explicit non-goals for this issue
-
-This issue does **not** do any of the following:
-
-- broaden the first target into multiple quantization targets
-- quantize routing tensors
-- quantize the full expert tensor surface
-- change SAAQ math
-- change router math
-- change dequantization behavior
-- introduce cloud execution
-- mix runtime integration or research narrative work into the same PR
-- change heartbeat behavior, because heartbeat behavior is no longer part of this project
-
-## Assumptions
-
-- The readiness report is currently the best repository-local signal for choosing the first target.
-- GOZ1 is the intended export artifact for quantized weights.
-- Manifest-driven targeting is preferred over legacy substring fallback heuristics.
-
-## Constraints
-
-- The first implementation must stay small enough for one PR.
-- The work must preserve existing GOZ1 writer semantics.
-- The first target must be specific enough for downstream validation work.
-- Routing-critical tensors remain excluded from the first quantized target set.
-
-## Known unknowns
-
-- The exact physical checkpoint tensor name for `embedding.slot_00.token_embedding` is not yet documented.
-- The source dtype for the target tensor still needs confirmation from real checkpoint data.
-- The current fallback manifest in [`dissect/grok-1/baseline.json`](../dissect/grok-1/baseline.json) may need an explicit token-embedding rule if upstream manifest coverage is insufficient.
-- A dedicated downstream validation contract for the one-target GOZ1 case still needs to be written in implementation work.
-
-## Implementation boundary for the first PR
-
-The follow-up implementation PR should be limited to:
-
-1. confirming the physical checkpoint mapping for `embedding.slot_00.token_embedding`
-2. encoding that target as the first manifest-driven ternary quantization target
-3. producing one normal GOZ1 artifact with the token embedding quantized
-4. preserving current handling for routing-critical tensors
-5. adding only the minimum validation needed to prove the target flows through the existing GOZ1 export path
-
-## Recommended branch
-
-- `feat/met-76-first-quant-target-token-embedding`
-
-## Attribution
-
-Planning decision prepared by Roo Code agent openAI/GPT-5.4.
+- Do not quantize routers or norms.
+- Do not change quantization, routing, dequantization, or GOZ1 layout semantics
+  as part of this documentation contract.
+- Do not treat pickle as a direct `quantize-goz1` input.
+- Do not treat SAAQ metadata conversion as real-weight quantization.
