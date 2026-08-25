@@ -16,13 +16,20 @@ cargo build --release --features cli
 GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
 GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
 GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
+GROK1_MANIFEST="${GROK1_MANIFEST:-dissect/grok-1/structural-manifest.json}"
 mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
 ```
 
 `GROK1_CKPT` must point to a local official `ckpt-0` directory. The measured
 checkpoint used for the first experiment contained 770 shards and occupied
-about 297 GiB, but `validate-ingest` does not establish those counts. GitHub
-#35 owns exact local checkpoint inventory validation.
+about 297 GiB, but `validate-ingest` does not establish those counts; exact
+local checkpoint inventory validation remains with [GitHub #35](https://github.com/rmems/grok-ozempic/issues/35).
+
+`GROK1_MANIFEST` defaults to the checked-in, loader-compatible policy reference
+so the example is copyable. Override it with an authoritative
+xai-dissect-derived V2 runtime manifest when one is available. The authoritative
+run's `quant-plan.json` is planning input, not itself the
+`xai-dissect.manifest` schema accepted by `quantize-goz1`.
 
 ## 2. Validate ingest metadata
 
@@ -96,7 +103,7 @@ the official pickle shard cannot.
 ./target/release/grok-ozempic quantize-goz1 \
   --input-dir "$GROK1_NPY" \
   --output "$GROK1_ARTIFACTS/grok1-first-embed.goz1" \
-  --manifest dissect/grok-1/structural-manifest.json \
+  --manifest "$GROK1_MANIFEST" \
   --input-format npy \
   --verify
 ```
@@ -148,6 +155,8 @@ container format and must not be presented as deployable GOZ1 artifacts.
 
 ## Non-goals
 
-This runbook does not claim completion of #35 or #36, run full-model inference,
-quantize routers or norms, provision cloud resources, or rerun the multi-hour
-#85 experiment.
+This runbook does not claim completion of [GitHub #35](https://github.com/rmems/grok-ozempic/issues/35)
+or [GitHub #36](https://github.com/rmems/grok-ozempic/issues/36), run full-model
+inference, quantize routers or norms, provision cloud resources, or rerun the
+multi-hour [GitHub #85](https://github.com/rmems/grok-ozempic/issues/85)
+experiment.

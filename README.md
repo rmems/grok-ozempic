@@ -118,6 +118,7 @@ Official `xai-org/grok-1` `ckpt-0` shards are JAX **pickle** frames.
 GROK1_CKPT="${GROK1_CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
 GROK1_NPY="${GROK1_NPY:-$HOME/.models/xai-grok-1/export-npy}"
 GROK1_ARTIFACTS="${GROK1_ARTIFACTS:-$HOME/.models/xai-grok-1/artifacts}"
+GROK1_MANIFEST="${GROK1_MANIFEST:-dissect/grok-1/structural-manifest.json}"
 mkdir -p "$GROK1_NPY" "$GROK1_ARTIFACTS"
 python3 scripts/export_grok1_embedding_npy.py \
   --shard "$GROK1_CKPT/tensor00000_000" \
@@ -140,7 +141,7 @@ fields:
 cargo run --features cli -- quantize-goz1 \
   --input-dir "$GROK1_NPY" \
   --output "$GROK1_ARTIFACTS/grok1-first-embed.goz1" \
-  --manifest dissect/grok-1/structural-manifest.json \
+  --manifest "$GROK1_MANIFEST" \
   --input-format npy \
   --verify
 ```
