@@ -38,7 +38,7 @@ pipelines have different outputs:
 
 | Pipeline | Purpose | Weight payloads |
 |---|---|---|
-| `validate-ingest` → `smoke-grok1` → `convert-grok1` → `validate-grok1-artifact` | Validate the `saaq-g1-v0` plan and deterministic structural indexes | Does not quantize or pack weights; `validate-ingest` may hash files named by `checksums.json` |
+| `validate-ingest` → `smoke-grok1` → `convert-grok1` → `validate-grok1-artifact` | Validate the `saaq-g1-v0` plan and deterministic structural indexes | Does not quantize or pack weights; `validate-ingest` may hash files named by checkpoint `checksums.json`. Convert/validate emit and check `plan_fingerprint` (name/length/policy), which is not a payload sha256 |
 | pickle export → `quantize-goz1 --verify` | Export and quantize real tensor values into a GOZ1 container | Reads the 3 GiB f32 embedding payload and writes packed weights |
 
 An `artifact.index.json` from the first pipeline is not a GOZ1 checkpoint.

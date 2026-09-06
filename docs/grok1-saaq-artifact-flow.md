@@ -40,8 +40,10 @@ run's `quant-plan.json` is planning input, not itself the
 ```
 
 This checks manifest identity and schema, checkpoint-directory presence, and
-the entries in `checksums.json` when that optional file exists. If present,
-those entries cause real shard reads for hashing. It does not independently
+the entries in checkpoint `checksums.json` when that optional file exists. If
+present, those entries cause real shard reads for hashing. That ingest file is
+a payload digest of named shard files. It is not the convert-time
+`plan_fingerprint` sidecar (name/length/policy only). It does not independently
 count all checkpoint shards or quantize weights.
 
 ## 3. Run the metadata-only smoke and conversion gates
@@ -66,17 +68,21 @@ count all checkpoint shards or quantize weights.
 ./target/release/grok-ozempic validate-grok1-artifact \
   --manifest dissect/grok-1/baseline.json \
   --artifact-index /tmp/grok1-artifact/artifact.index.json \
-  --checksums /tmp/grok1-artifact/checksums.json \
+  --plan-fingerprints /tmp/grok1-artifact/plan_fingerprints.json \
   --output-root /tmp/grok1-validation \
   --strict-router-protection true
 ```
 
 The smoke output is a block-0 structural slice. The conversion output includes
-`artifact.index.json`, `conversion.summary.md`, `checksums.json`,
-`manifest.used.json`, and `warnings.json`. The final command validates that
-metadata contract, including protected routers and norms. It still does not
-write packed tensor payloads. GitHub #36 owns the complete 770-entry,
-64-router metadata execution gate.
+`artifact.index.json`, `conversion.summary.md`, `plan_fingerprints.json`,
+`manifest.used.json`, and `warnings.json`. Each index entry carries a
+`plan_fingerprint`: a lowercase hex hash of **name, planned byte length, and
+quant policy only**. It is **not** a payload sha256 and is not emitted with a
+`sha256:` prefix. `validate-grok1-artifact` checks that fingerprint against an
+independently rebuilt plan; matching it does not claim content-digest coverage
+of tensor bytes. The final command validates that metadata contract, including
+protected routers and norms. It still does not write packed tensor payloads.
+GitHub #36 owns the complete 770-entry, 64-router metadata execution gate.
 
 ## 4. Export the real embedding from pickle to NPY
 
