@@ -102,7 +102,7 @@ Key CLI entry points are available behind the `cli` feature:
 cargo run --features cli -- validate-ingest --manifest dissect/grok-1/baseline.json
 cargo run --features cli -- smoke-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-smoke --dry-run
 cargo run --features cli -- convert-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-artifact --dry-run
-cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --checksums /tmp/grok1-artifact/checksums.json --output-root /tmp/grok1-validation
+cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --plan-fingerprints /tmp/grok1-artifact/plan_fingerprints.json --output-root /tmp/grok1-validation
 ```
 
 ### Export Grok-1 embedding for GOZ1 (pickle → `.npy`)
