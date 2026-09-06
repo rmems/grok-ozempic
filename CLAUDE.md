@@ -50,8 +50,8 @@ bd config set github.repo grok-ozempic
 ```
 
 ⚠ The key is `github.owner`, **not** `github.org`. This file said `github.org`
-until GH #96; `bd` never reads that key, so `bd github status` reported
-"Not configured" and the GitHub half of the sync silently never ran. That is why
+until GH #96. `bd` reads only `github.owner`, so `bd github status` reported
+"Not configured" and the GitHub half of the sync stayed idle. That is why
 `.beads/issues.jsonl` sat nine issues behind (it topped out at #85 while the repo
 was at #108). Verify with `bd github status` rather than assuming a set key took
 effect.
@@ -182,7 +182,7 @@ cargo clippy --all-targets --features cli --locked -- -D warnings
 # just test (numpy required for several scripts/test_* modules)
 # These eleven modules are `_python-tests` in the justfile and the eleven
 # unittest steps in .github/workflows/python-scripts.yml. Keep all three lists
-# in sync -- a module missing here is a module an agent silently never runs.
+# in sync: a module omitted here is one an agent will silently skip.
 python3 -c 'import numpy; print(numpy.__version__)'
 cargo test --features cli --locked
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
