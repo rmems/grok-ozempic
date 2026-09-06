@@ -36,15 +36,25 @@ two disagree, GitHub/Linear wins and the export is refreshed.
   these, so the root `.gitignore` only adds what that file misses.
 
 **Board scope — keep both sides aligned.** The same work is tracked as GitHub
-Project [Grok Quantization](https://github.com/users/rmems/projects/6) and the
-Linear project **Grok Quantization** (team `rmems`). Beads' Linear sync is pinned
-to that project so it does not drag in other repos' issues:
+Project [Model Systems & Compression](https://github.com/users/rmems/projects/6)
+and the Linear project **Grok-1 Model Systems & Quantization** (team `rmems`).
+Both were renamed from "Grok Quantization"; the old name survived in this file
+long after the boards changed, so prefer the project **id** over its name.
+Beads' Linear sync is pinned to that project so it does not drag in other repos'
+issues:
 
 ```bash
 bd config set linear.project_id 36d0c86f-6348-44d8-a5b3-27930c488bce
-bd config set github.org rmems
+bd config set github.owner rmems
 bd config set github.repo grok-ozempic
 ```
+
+⚠ The key is `github.owner`, **not** `github.org`. This file said `github.org`
+until GH #96; `bd` never reads that key, so `bd github status` reported
+"Not configured" and the GitHub half of the sync silently never ran. That is why
+`.beads/issues.jsonl` sat nine issues behind (it topped out at #85 while the repo
+was at #108). Verify with `bd github status` rather than assuming a set key took
+effect.
 
 An unscoped sync previously pulled the whole `rmems` team into the local DB (261
 issues for a ~67-issue repo). Do not widen it. Conversely, an issue left off the
@@ -170,6 +180,9 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 
 # just test (numpy required for several scripts/test_* modules)
+# These eleven modules are `_python-tests` in the justfile and the eleven
+# unittest steps in .github/workflows/python-scripts.yml. Keep all three lists
+# in sync -- a module missing here is a module an agent silently never runs.
 python3 -c 'import numpy; print(numpy.__version__)'
 cargo test --features cli --locked
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
@@ -177,6 +190,12 @@ python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
 python3 -m unittest scripts.test_route_preservation_surface -v
 python3 -m unittest scripts.test_route_preservation_io -v
+python3 -m unittest scripts.test_grok1_multiblock_experiment -v
+python3 -m unittest scripts.test_grok1_multiblock_progress -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 
 # just ci (pre-PR parity; --locked is intentional and stricter than GHA)
 cargo fmt --all -- --check
@@ -184,8 +203,13 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
-# + the five python3 -m unittest lines above
+# + the eleven python3 -m unittest lines above
 for f in scripts/*.sh; do bash -n "$f"; done
+
+# just review adds two more modules on top of `just ci` (`_python-tests-extra`).
+# They are gated by NOTHING in CI today -- see GH #98.
+python3 -m unittest scripts.test_grok1_block_forward -v
+python3 -m unittest scripts.test_grok1_block_weights -v
 
 # CLI smoke
 cargo run --features cli -- --help
@@ -226,10 +250,19 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 
 ### Open critical path
 
-| Issue | Topic |
-|-------|--------|
-| GH [#40](https://github.com/rmems/grok-ozempic/issues/40) / Linear RM-191 | V2 structural name bridge for stream `resolve_manifest` |
-| #39 / RM-190 | First embedding → GOZ1 experiment (results when present under `reports/`) |
+**Do not hardcode issue numbers here.** This table went stale for ~40 commits
+while naming #40 and #39 as open; both had shipped (`67034e8`, `73cf7d3`), so
+agents were pointed at finished work. Read the live board instead:
+
+```bash
+gh issue list --repo rmems/grok-ozempic --state open --limit 30
+bd ready          # local readiness graph, when bd is available
+```
+
+Shipped and no longer open: **#40 / RM-191** (V2 structural name bridge in
+`resolve_manifest`) and **#39 / RM-190** (first embedding → GOZ1 experiment;
+results under `reports/grok-1-first-embed-goz1/`). Both are load-bearing
+context for new work — they are listed here as *history*, not as open items.
 
 ## Conventions & Patterns
 
@@ -263,4 +296,11 @@ Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-a
 | `.claude/commands/` | `/smoke`, `/quantize-embed`, `/v2-bridge`, `/pr-ready` |
 | `.claude/skills/` | Deep playbooks for quantize + structural V2 |
 | `.claude/agents/goz1-reviewer.md` | Review specialist |
+| `.codex/agents/goz1-reviewer.toml` | Codex counterpart of the same reviewer |
 | `scripts/claude-session-start.sh` | Cloud-safe SessionStart / PreCompact |
+
+**`.claude/` is the single source for rules and skills.** Other agent surfaces
+(`.codex/`, `.cursor/`, `.devin/`) should *reference* those files, not copy them.
+A forked copy drifts silently: the untracked `.agents/skills/` duplicate was
+found pointing at `.Codex/rules/manifests.md`, a path that exists in no casing,
+and is now gitignored (GH #96).

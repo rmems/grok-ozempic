@@ -108,11 +108,20 @@ Claim ternary only when the CLI ternary counter matches expectation.
 
 ## Container versions (#65)
 
-Packs are **GOZ1 v2**: each tensor row carries the reconstruction-optimal scale
-`α*`, so a pack dequantizes from its own contents (`value = scale × payload`).
+Packs written today are **GOZ1 v3** (`OZ1_VERSION = 3`, `src/core/weight_pack.rs:62`).
+Each tensor row has carried the reconstruction-optimal scale `α*` since **v2**
+(#65), so a pack dequantizes from its own contents (`value = scale × payload`);
+**v3** (#66) appends the applied threshold on top of that. Rows are a strict
+append, so a reader parses the common prefix and reads later fields only when
+the version says they are there.
+
 v1 packs have no scale field and are still readable; consumers fall back to the
 oracle α derived from the source npy **only** there, and must tag it
 (`PackWeights.scale_sources` → `legacy_oracle` vs `pack_v2`).
+
+⚠ The `scale_sources` tag is still spelled `pack_v2` for any pack-stored scale,
+v3 included — the vocabulary froze at v2 while the writer moved on. Read it as
+"the scale came from the pack", not as a version assertion.
 
 An oracle figure is a lower bound no runtime can reproduce, so never report one
 as a pack-only measurement. Full layout and policy: `docs/goz1-format.md`.

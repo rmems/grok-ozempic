@@ -79,8 +79,21 @@ docker build --target runtime -t grok-ozempic:latest .
 ## 4. Tracker update
 
 Before the final code push, file follow-up issues and close finished work in `bd`.
-Run `bd dolt push` after every status update that must be shared. On the explicit
-cloud/no-Dolt exception, update only the linked GitHub/Linear handoff state.
+
+**Do not run `bd dolt push`.** No beads Dolt remote is configured in this repo:
+
+```console
+$ bd dolt remote list
+No remotes configured.
+```
+
+Beads state travels via the committed `.beads/issues.jsonl` export plus
+GitHub/Linear, which stay canonical. This matches `CLAUDE.md` and
+`.claude/rules/agent-workflow.md`; until GH #96 this file contradicted both.
+If a Dolt remote is ever configured, add the push here **and** update those two
+files in the same change.
+
+On the cloud/no-`bd` path, update only the linked GitHub/Linear handoff state.
 
 ## 5. Push until the remote is current
 

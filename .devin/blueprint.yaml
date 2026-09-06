@@ -67,7 +67,10 @@ knowledge:
   - name: notes
     contents: |
       Official Grok-1 pickle is not accepted by quantize-goz1; export npy first (stdlib-only script).
-      Runtime V2 structural-manifest is rejected until GH #40 / RM-191.
-      Prefer dissect/grok-1/baseline.json for quantize-goz1 today.
+      Runtime V2 structural-manifest is ACCEPTED (GH #40 / RM-191 shipped in 67034e8).
+      Prefer dissect/grok-1/structural-manifest.json when tensor names are structural
+      (block_{NNN}.slot_{SS}.{kind}, i.e. export-script npy stems). V2 is fail-closed:
+      a name matching no explicit rule hard-errors instead of defaulting to ternary.
+      Use dissect/grok-1/baseline.json (V1) only for legacy blk.* names.
       CUDA kernels belong in myelin-accelerator, not this crate.
       Claude Code cloud uses .claude/ + CLAUDE.md; this blueprint is for Devin.

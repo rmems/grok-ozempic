@@ -23,8 +23,8 @@ just review
 
 This is the default **pre-push** recipe. It runs, in order:
 
-1. **`just ci`** — GHA parity for Rust + the five CI Python unittests + `bash -n`
-   on `scripts/*.sh` + optional `actionlint` / `shellcheck` when installed
+1. **`just ci`** — GHA parity for Rust + the **eleven** CI Python unittests +
+   `bash -n` on `scripts/*.sh` + optional `actionlint` / `shellcheck` when installed
 2. **`cargo audit`** — if `cargo-audit` is on `PATH` (matches
    `.github/workflows/cargo-audit.yml`); otherwise prints `skip:` and continues
 3. **Extra Python unittests** not yet in `python-scripts.yml` / `just ci`:
@@ -54,14 +54,26 @@ just experiment-smoke   # release CLI --help + CKPT / run3 path presence
 
 ## 2. Git hooks (call `just`)
 
-Hooks live in **`.githooks/`** (tracked). Enable once per clone:
+Hooks live in **`.githooks/`** (tracked).
 
-```bash
-git config core.hooksPath .githooks
+⚠ **`core.hooksPath` is owned by beads, not by `.githooks`.** Beads installs its
+own hooks and points `core.hooksPath` at `.beads/hooks`. Git consults **only**
+that directory — `.git/hooks` and `.githooks` are then ignored entirely — and the
+beads `pre-push` runs `bd hooks run pre-push` **without chaining to
+`.githooks/pre-push`**. So `git config core.hooksPath .githooks` (what this file
+used to say) would silently disable beads sync, and leaving it as beads set it
+silently disables `just review`. Neither is what you want.
+
+```console
+$ git config --get core.hooksPath
+/home/raulmc/rmems/grok-ozempic/.beads/hooks
 ```
 
-| Hook | Runs | Skip |
-|------|------|------|
+Restoring the chain is tracked as **GH #97**. Until it lands, `just review` does
+**not** run automatically on push — run it yourself.
+
+| Hook | Intended to run | Skip |
+|------|-----------------|------|
 | `.githooks/pre-push` | `just review` | `git push --no-verify` (escape hatch only) |
 | `.githooks/pre-commit` | `just check` | `git commit --no-verify` |
 
@@ -71,8 +83,9 @@ Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 Verify:
 
 ```bash
-git config --get core.hooksPath   # expect: .githooks
-just review                       # same gate the hook will run
+git config --get core.hooksPath   # today: .../.beads/hooks (see #97)
+bd github status                  # should not say "Not configured"
+just review                       # the gate itself — run it manually until #97 lands
 ```
 
 Agents: if `core.hooksPath` is unset, still run `just review` before any push.
@@ -152,7 +165,8 @@ GHA `rust.yml` omits `--locked`; local `just` is **stricter** (intentional).
 
 ### Python
 
-CI / `just ci` only run five modules. Also run (and **`just review` does**):
+CI / `just ci` run **eleven** modules. Two more (79 tests) are gated by nothing in
+CI and run only under `just review` — tracked as **GH #98**:
 
 ```bash
 python3 -c 'import numpy; print(numpy.__version__)'   # required for all modules below
@@ -160,7 +174,7 @@ python3 -m unittest scripts.test_grok1_block_forward -v
 python3 -m unittest scripts.test_grok1_block_weights -v
 ```
 
-Path-scoped re-runs (same modules as CI — already inside `just test` / `just ci`):
+Path-scoped re-runs (the eleven CI modules — already inside `just test` / `just ci`):
 
 ```bash
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
@@ -168,6 +182,12 @@ python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
 python3 -m unittest scripts.test_route_preservation_surface -v
 python3 -m unittest scripts.test_route_preservation_io -v
+python3 -m unittest scripts.test_grok1_multiblock_experiment -v
+python3 -m unittest scripts.test_grok1_multiblock_progress -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 ```
 
 Manual script syntax checks (stdlib-only scripts; not unittest):
