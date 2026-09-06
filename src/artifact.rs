@@ -1523,6 +1523,38 @@ mod tests {
         path
     }
 
+    fn dry_convert(name: &str) -> (PathBuf, ArtifactIndex) {
+        let dir = temp_dir(name);
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        (out, index)
+    }
+
+    fn full_validation_report(
+        index: &ArtifactIndex,
+        sidecar: Option<&BTreeMap<String, String>>,
+    ) -> ValidationReport {
+        let expected_entries = expected_full_entry_map().expect("expected entries");
+        build_validation_report(
+            index,
+            GROK1_ARTIFACT_FORMAT,
+            true,
+            true,
+            Some(&expected_entries),
+            sidecar,
+        )
+    }
+
     #[test]
     fn hex_lower_matches_known_sha256_vectors() {
         // Guards the sha2 0.10 -> 0.11 migration: `{:x}` on the digest no longer
@@ -1586,19 +1618,7 @@ mod tests {
 
     #[test]
     fn plan_fingerprint_is_not_emitted_as_sha256_content_digest() {
-        let dir = temp_dir("plan_fingerprint_emit");
-        let manifest = write_manifest(&dir);
-        let out = dir.join("out");
-        let index = convert_grok1(ConvertOptions {
-            checkpoint: None,
-            manifest: &manifest,
-            output_root: &out,
-            format: GROK1_ARTIFACT_FORMAT,
-            protect_routers: true,
-            protect_norms: true,
-            dry_run: true,
-        })
-        .expect("convert");
+        let (out, index) = dry_convert("plan_fingerprint_emit");
         let entry = index.entries.first().expect("entry");
         assert!(
             !entry.plan_fingerprint.starts_with("sha256:"),
@@ -1613,114 +1633,58 @@ mod tests {
                 &entry.quant_policy_applied
             )
         );
-
         let raw = fs::read_to_string(out.join("artifact.index.json")).expect("index json");
-        assert!(
-            raw.contains("\"plan_fingerprint\""),
-            "serialized index must name the field plan_fingerprint: {raw}"
-        );
-        assert!(
-            !raw.contains("\"output_checksum\""),
-            "serialized index must not revive output_checksum: {raw}"
-        );
+        assert!(raw.contains("\"plan_fingerprint\""));
+        assert!(!raw.contains("\"output_checksum\""));
         let parsed: serde_json::Value = serde_json::from_str(&raw).expect("index parse");
         let fp = parsed["entries"][0]["plan_fingerprint"]
             .as_str()
             .expect("plan_fingerprint string");
-        assert!(
-            !fp.to_ascii_lowercase().starts_with("sha256:"),
-            "serialized plan_fingerprint must not be dressed as sha256: {fp}"
-        );
-
+        assert!(!fp.to_ascii_lowercase().starts_with("sha256:"));
         let sidecar = fs::read_to_string(out.join(PLAN_FINGERPRINTS_FILE)).expect("sidecar");
-        assert!(
-            !sidecar.to_ascii_lowercase().contains("sha256:"),
-            "plan_fingerprints sidecar must not use sha256: prefixes: {sidecar}"
-        );
+        assert!(!sidecar.to_ascii_lowercase().contains("sha256:"));
     }
 
     #[test]
-    fn validation_does_not_treat_plan_fingerprint_as_content_hash() {
-        let dir = temp_dir("plan_fingerprint_validate");
-        let manifest = write_manifest(&dir);
-        let out = dir.join("out");
-        let index = convert_grok1(ConvertOptions {
-            checkpoint: None,
-            manifest: &manifest,
-            output_root: &out,
-            format: GROK1_ARTIFACT_FORMAT,
-            protect_routers: true,
-            protect_norms: true,
-            dry_run: true,
-        })
-        .expect("convert");
+    fn validation_reports_plan_fingerprint_coverage_not_checksum() {
+        let (_out, index) = dry_convert("plan_fingerprint_coverage");
         let sidecar = plan_fingerprint_map(&index);
-        let expected_entries = expected_full_entry_map().expect("expected entries");
-        let report = build_validation_report(
-            &index,
-            GROK1_ARTIFACT_FORMAT,
-            true,
-            true,
-            Some(&expected_entries),
-            Some(&sidecar),
-        );
+        let report = full_validation_report(&index, Some(&sidecar));
         assert_eq!(report.status, "PASS");
         assert!(
             report
                 .plan_fingerprint_coverage
-                .contains("plan fingerprints (name/length/policy; not a payload digest)"),
-            "coverage must state plan-fingerprint semantics: {}",
-            report.plan_fingerprint_coverage
+                .contains("plan fingerprints (name/length/policy; not a payload digest)")
+        );
+        assert!(
+            !report
+                .plan_fingerprint_coverage
+                .to_ascii_lowercase()
+                .contains("sha256")
         );
         let report_json = serde_json::to_string(&report).expect("report json");
-        assert!(
-            report_json.contains("\"plan_fingerprint_coverage\""),
-            "validation report must not claim checksum_coverage: {report_json}"
-        );
-        assert!(
-            !report_json.contains("\"checksum_coverage\""),
-            "validation report must not revive checksum_coverage: {report_json}"
-        );
-        assert!(
-            !report_json
-                .to_ascii_lowercase()
-                .contains("payload digest coverage")
-                && !report
-                    .plan_fingerprint_coverage
-                    .to_ascii_lowercase()
-                    .contains("sha256"),
-            "coverage must not describe a content sha256: {}",
-            report.plan_fingerprint_coverage
-        );
+        assert!(report_json.contains("\"plan_fingerprint_coverage\""));
+        assert!(!report_json.contains("\"checksum_coverage\""));
+    }
 
-        let mut theater = index.clone();
+    #[test]
+    fn validation_rejects_sha256_prefix_as_kind_mismatch() {
+        let (_out, mut theater) = dry_convert("plan_fingerprint_kind");
+        let sidecar = plan_fingerprint_map(&theater);
         if let Some(entry) = theater.entries.first_mut() {
             entry.plan_fingerprint = format!("sha256:{}", entry.plan_fingerprint);
         }
-        let theater_report = build_validation_report(
-            &theater,
-            GROK1_ARTIFACT_FORMAT,
-            true,
-            true,
-            Some(&expected_entries),
-            Some(&sidecar),
-        );
-        assert_eq!(theater_report.status, "FAIL");
+        let report = full_validation_report(&theater, Some(&sidecar));
+        assert_eq!(report.status, "FAIL");
+        assert!(report.failures.iter().any(|failure| {
+            failure.category == "plan_fingerprint_kind_mismatch"
+                && failure.message.contains("not a payload digest")
+        }));
         assert!(
-            theater_report.failures.iter().any(|failure| {
-                failure.category == "plan_fingerprint_kind_mismatch"
-                    && failure.message.contains("not a payload digest")
-            }),
-            "sha256: prefix must fail as kind mismatch, not self-compare success: {:?}",
-            theater_report.failures
-        );
-        assert!(
-            !theater_report
+            !report
                 .failures
                 .iter()
-                .any(|failure| failure.category == "checksum_mismatch"),
-            "validation must not classify plan fingerprints as checksum_mismatch: {:?}",
-            theater_report.failures
+                .any(|failure| failure.category == "checksum_mismatch")
         );
     }
 
