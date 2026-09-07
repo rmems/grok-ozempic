@@ -630,8 +630,11 @@ fn build_manifest_safetensors(
         //
         // The npy path has always been deterministic (`paths.sort()` in
         // `collect_npy_files`); sorting here makes the two documented input
-        // formats agree, and makes pack bytes and `file_size` usable as the
-        // evidence `.claude/rules/goz1-pipeline.md` treats them as.
+        // formats agree, and makes pack *bytes* reproducible so a hash or a
+        // diff of a pack means something. Note `file_size` specifically was
+        // already order-invariant — permuting tensors rearranges the container
+        // without changing its length — so it is the byte-level evidence this
+        // fixes, not the size figure.
         let mut named = tensors.tensors();
         named.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (name, view) in named {
@@ -1468,14 +1471,24 @@ mod tests {
     // intentional `continue` is duplicated per format, and only the npy copy
     // was exercised.
     //
-    // ORDER-AGNOSTIC BY CONSTRUCTION. `SafeTensors::tensors()` iterates a
-    // randomly-seeded `std::collections::HashMap`, so tensor order inside a
-    // shard — and therefore the GOZ1 tensor table and data layout — varies run
-    // to run (GH #115). Nothing below asserts position, or byte-compares two
-    // packs; the npy byte-identity idiom (`parity_legacy_vs_baseline_...`)
-    // must not be copied onto a multi-tensor safetensors fixture, where it
-    // would pass repeatedly and then fail. The fail-closed fixtures carry
-    // exactly ONE unmatched tensor so the reported name is deterministic.
+    // ORDERING. `SafeTensors::tensors()` iterates a randomly-seeded
+    // `std::collections::HashMap`, so the order it hands back still varies run
+    // to run. `build_manifest_safetensors` now sorts by tensor name before
+    // building entries (GH #115), so the resulting manifest — and therefore the
+    // GOZ1 tensor table and data layout — is deterministic, and
+    // `safetensors_packs_are_byte_reproducible` below asserts exactly that.
+    //
+    // These tests were originally written order-agnostically, before that sort
+    // existed. Two habits from then are still worth keeping:
+    //
+    // - Assert on aggregate counts or named lookups rather than on position.
+    //   Nothing here depends on *which* index a tensor lands at, only that the
+    //   whole pack is stable, so the tests stay honest if the ordering rule
+    //   ever changes from name to offset.
+    // - The fail-closed fixtures carry exactly ONE unmatched tensor. Under V2 a
+    //   shard with several unmatched names would still report an arbitrary one,
+    //   because the error is raised on the first match failure during the sorted
+    //   walk and the fixture's intent is to pin *which* name is named.
 
     fn safetensors_config(dir: &std::path::Path, out: &std::path::Path) -> QuantizationConfig {
         let mut config = base_config(dir, out);
