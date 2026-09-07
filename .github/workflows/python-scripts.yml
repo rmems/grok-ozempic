@@ -60,6 +60,15 @@ jobs:
       - name: Unit tests (v4 out-of-process supervisor)
         run: python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 
+      # These two were reachable only through `just review` (GH #98). They cover
+      # the block-forward and block-weight kernels behind every published
+      # forward-pass number, and no CI workflow ran them.
+      - name: Unit tests (block forward pass)
+        run: python3 -m unittest scripts.test_grok1_block_forward -v
+
+      - name: Unit tests (block weight loading)
+        run: python3 -m unittest scripts.test_grok1_block_weights -v
+
       - name: Codex co-author hook contract
         run: |
           jq empty .codex/hooks.json

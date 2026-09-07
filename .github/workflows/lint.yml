@@ -1,0 +1,70 @@
+name: Lint
+
+# Shell and workflow linting, promoted from `just _optional-linters` (GH #98).
+#
+# Locally those two run only when the binaries happen to be installed and print
+# `skip:` otherwise, so a clean local run proved nothing about them. Here they
+# are unconditional: `bash -n` (still in `just ci`) catches syntax errors only,
+# which leaves quoting, word-splitting and unreachable-exit bugs unguarded in
+# the scripts that drive the GOZ1 pilot.
+#
+# Both pass clean on the tree as of #98 — this workflow starts green and stays
+# green, rather than landing red and being ignored.
+
+on:
+  # No `branches:` filter on pull_request — it matches the *target* branch, so
+  # restricting it to main silently skips the workflow on stacked PRs (GH #98).
+  pull_request:
+  push:
+    branches:
+      - main
+      - "releases/*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # ShellCheck is preinstalled on ubuntu-latest; install only if that changes.
+      - name: Ensure shellcheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+
+      # Covers scripts/*.sh, the tracked git hooks, and the Codex hook scripts.
+      # The hooks have no .sh suffix, so they are listed explicitly.
+      - name: ShellCheck
+        run: shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh
+
+  workflows:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # Pinned by image digest, not `curl | bash` from a moving branch and not a
+      # mutable tag: `:1.7.7` can be re-pushed to different content, which is why
+      # Codacy's InsecureModulesLibraries rule rejected the tag form. The digest
+      # is immutable. Comment carries the human-readable version.
+      - name: actionlint
+        uses: docker://rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 # 1.7.7
+        with:
+          args: -color

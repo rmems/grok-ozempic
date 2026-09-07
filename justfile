@@ -40,22 +40,6 @@ _python-tests:
       scripts.test_grok1_multiblock_side_table
       scripts.test_grok1_multiblock_side_table_binding
       scripts.test_grok1_multiblock_v4_supervisor
-    )
-    for m in "${mods[@]}"; do
-      echo "+ python3 -m unittest ${m} -v"
-      python3 -m unittest "${m}" -v
-    done
-
-# Block-forward / block-weights unittests (not yet in python-scripts.yml / just ci)
-_python-tests-extra:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! python3 -c 'import numpy' >/dev/null 2>&1; then
-      echo "error: numpy is required for Python script unittests" >&2
-      echo "       install: python3 -m pip install --user 'numpy>=1.26,<3'" >&2
-      exit 1
-    fi
-    mods=(
       scripts.test_grok1_block_forward
       scripts.test_grok1_block_weights
     )
@@ -137,22 +121,28 @@ _codex-hook-tests:
 _optional-linters:
     #!/usr/bin/env bash
     # Fail-fast when an installed optional linter finds issues (just ci must not greenwash).
+    #
+    # Optional *locally only*. Since GH #98 both run unconditionally in
+    # .github/workflows/lint.yml, so a `skip:` here means "not checked on this
+    # machine", not "not checked at all" — CI will still fail the PR.
+    # Local coverage is narrower than CI's: CI also lints .githooks/* and
+    # .codex/hooks/*.sh. Install both to reproduce CI exactly.
     set -euo pipefail
     if command -v actionlint >/dev/null 2>&1; then
       echo "+ actionlint"
       actionlint
     else
-      echo "skip: actionlint not installed"
+      echo "skip: actionlint not installed (lint.yml enforces it in CI)"
     fi
     if command -v shellcheck >/dev/null 2>&1; then
       shopt -s nullglob
-      scripts=(scripts/*.sh)
+      scripts=(scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh)
       if [[ ${#scripts[@]} -gt 0 ]]; then
         echo "+ shellcheck ${scripts[*]}"
         shellcheck "${scripts[@]}"
       fi
     else
-      echo "skip: shellcheck not installed"
+      echo "skip: shellcheck not installed (lint.yml enforces it in CI)"
     fi
 
 # ---------------------------------------------------------------------------
@@ -207,7 +197,6 @@ ci:
 review:
     @just ci
     @just _cargo-audit
-    @just _python-tests-extra
     @just _py-compile
 
 # Local JetBrains Qodana (qodana-rust). Needs `qodana` on PATH; results under .qodana/
