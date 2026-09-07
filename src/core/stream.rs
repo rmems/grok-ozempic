@@ -818,6 +818,80 @@ mod tests {
     }
 
     /// Per-test unique scratch dir.
+    /// Minimal `*.safetensors` shard writer — the safetensors twin of
+    /// [`write_npy_f32`] / [`write_npy_i8`].
+    ///
+    /// Built with `safetensors::serialize` rather than hand-rolled bytes on
+    /// purpose. `bytemuck_cast_f32` / `bytemuck_cast_f16` reinterpret
+    /// `view.data()` as `&[f32]` / `&[f16]` with no alignment check, and the
+    /// safetensors format does not guarantee the data section is 4- or 2-byte
+    /// aligned. Letting the library lay the file out keeps these fixtures on
+    /// the aligned happy path; a hand-built shard could be UB rather than a
+    /// test failure. Do not replace this with a byte literal.
+    ///
+    /// Unlike `.npy` (one tensor per file), a shard holds many tensors and the
+    /// names live inside the file — the filename only has to end in
+    /// `.safetensors` so `collect_safetensor_shards` picks it up.
+    fn write_safetensors_raw(
+        path: &std::path::Path,
+        tensors: &[(&str, safetensors::Dtype, &[usize], &[u8])],
+    ) {
+        use safetensors::tensor::TensorView;
+        let views: Vec<(&str, TensorView<'_>)> = tensors
+            .iter()
+            .map(|&(name, dtype, shape, data)| {
+                let view = TensorView::new(dtype, shape.to_vec(), data)
+                    .expect("safetensors fixture: data length must match dtype x shape");
+                (name, view)
+            })
+            .collect();
+        let bytes = safetensors::serialize(views, None).expect("serialize safetensors fixture");
+        std::fs::write(path, bytes).expect("write safetensors fixture");
+    }
+
+    /// F32 shard: `&[(tensor_name, shape, data)]`.
+    fn write_safetensors_f32(path: &std::path::Path, tensors: &[(&str, &[usize], &[f32])]) {
+        let payloads: Vec<Vec<u8>> = tensors
+            .iter()
+            .map(|(_, shape, data)| {
+                let expected: usize = shape.iter().product();
+                assert_eq!(expected, data.len(), "data length must match shape");
+                data.iter().flat_map(|v| v.to_le_bytes()).collect()
+            })
+            .collect();
+        let rows: Vec<(&str, safetensors::Dtype, &[usize], &[u8])> = tensors
+            .iter()
+            .zip(&payloads)
+            .map(|((name, shape, _), bytes)| {
+                (*name, safetensors::Dtype::F32, *shape, bytes.as_slice())
+            })
+            .collect();
+        write_safetensors_raw(path, &rows);
+    }
+
+    /// I8 shard — `parse_safetensors_dtype` maps I8 to [`SourceDtype::Other`],
+    /// which is the branch that exercises the V2 pre-skip classification at
+    /// `build_manifest_safetensors`. The safetensors counterpart of
+    /// [`write_npy_i8`].
+    fn write_safetensors_i8(path: &std::path::Path, tensors: &[(&str, &[usize], &[i8])]) {
+        let payloads: Vec<Vec<u8>> = tensors
+            .iter()
+            .map(|(_, shape, data)| {
+                let expected: usize = shape.iter().product();
+                assert_eq!(expected, data.len(), "data length must match shape");
+                data.iter().map(|v| *v as u8).collect()
+            })
+            .collect();
+        let rows: Vec<(&str, safetensors::Dtype, &[usize], &[u8])> = tensors
+            .iter()
+            .zip(&payloads)
+            .map(|((name, shape, _), bytes)| {
+                (*name, safetensors::Dtype::I8, *shape, bytes.as_slice())
+            })
+            .collect();
+        write_safetensors_raw(path, &rows);
+    }
+
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -1366,6 +1440,180 @@ mod tests {
                 assert_eq!(name, "blk.0.moe_gate.weight");
             }
             other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    // ---------- safetensors input path (GH #103) ----------
+    //
+    // Until #103 the safetensors half of `quantize-goz1` had zero coverage,
+    // although it is one of the two documented production input formats. The
+    // V2 fail-closed *raise* is shared with npy (`classify_and_decide`), but
+    // the pre-skip call that applies it to unsupported dtypes before the
+    // intentional `continue` is duplicated per format, and only the npy copy
+    // was exercised.
+    //
+    // ORDER-AGNOSTIC BY CONSTRUCTION. `SafeTensors::tensors()` iterates a
+    // randomly-seeded `std::collections::HashMap`, so tensor order inside a
+    // shard — and therefore the GOZ1 tensor table and data layout — varies run
+    // to run (GH #115). Nothing below asserts position, or byte-compares two
+    // packs; the npy byte-identity idiom (`parity_legacy_vs_baseline_...`)
+    // must not be copied onto a multi-tensor safetensors fixture, where it
+    // would pass repeatedly and then fail. The fail-closed fixtures carry
+    // exactly ONE unmatched tensor so the reported name is deterministic.
+
+    fn safetensors_config(dir: &std::path::Path, out: &std::path::Path) -> QuantizationConfig {
+        let mut config = base_config(dir, out);
+        config.input_format = QuantizationInputFormat::Safetensors;
+        config
+    }
+
+    /// End-to-end twin of [`v2_structural_manifest_end_to_end_npy`]. One shard
+    /// holds all four structural tensors, so unlike the npy fixture (one file
+    /// per tensor) there is a single `ShardStats` carrying aggregate counts —
+    /// which is order-independent, and the right shape of assertion here.
+    #[test]
+    fn v2_structural_manifest_end_to_end_safetensors() {
+        let dir = scratch_dir("v2-st-e2e-input");
+        write_safetensors_f32(
+            &dir.join("shard.safetensors"),
+            &[
+                (
+                    "block_000.slot_00.moe_expert.gate",
+                    &[2, 2],
+                    &[0.1f32, -0.2, 0.3, -0.4],
+                ),
+                (
+                    "block_000.slot_07.block_norm",
+                    &[2, 2],
+                    &[1.0f32, -1.0, 0.5, -0.5],
+                ),
+                (
+                    "block_000.slot_11.router",
+                    &[2, 2],
+                    &[0.05f32, 0.9, -0.05, -0.9],
+                ),
+                (
+                    "embedding.slot_00.token_embedding",
+                    &[2, 2],
+                    &[0.3f32, -0.3, 0.01, -0.01],
+                ),
+            ],
+        );
+        let out = scratch_dir("v2-st-e2e-out").join("v2st.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let stats = run_quantization(&config)
+            .expect("V2 structural manifest must be accepted for safetensors");
+
+        assert_eq!(stats.len(), 1, "one ShardStats per safetensors shard");
+        // router + block_norm preserve (fp16-at-rest); gate + embedding ternary.
+        assert_eq!(
+            (stats[0].tensors_fp16, stats[0].tensors_ternary),
+            (2, 2),
+            "routers/norms preserved and candidates ternary, counted per shard"
+        );
+        assert!(out.exists(), "pack must be written");
+    }
+
+    /// Fail-closed on a supported dtype through the safetensors builder. Twin
+    /// of [`v2_manifest_fails_closed_on_unmatched_name`].
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_name_safetensors() {
+        let dir = scratch_dir("v2-st-fail-closed-input");
+        write_safetensors_f32(
+            &dir.join("shard.safetensors"),
+            &[("blk.0.moe_gate.weight", &[2, 2], &[0.1f32, -0.2, 0.3, -0.4])],
+        );
+        let out = scratch_dir("v2-st-fail-closed-out").join("bad.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("V1-named safetensors input under a V2 manifest must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// The test this issue exists for: the Other-dtype pre-skip block in
+    /// `build_manifest_safetensors` is the code that had no coverage. An I8
+    /// tensor is skipped by the float stream, but under V2 its name must still
+    /// be classified first, so a legacy stem cannot vanish past fail-closed.
+    ///
+    /// Deleting the `is_structural_v2()` pre-check in the safetensors builder
+    /// makes this test fail and leaves every other test green.
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_other_dtype_safetensors() {
+        let dir = scratch_dir("v2-st-fail-closed-other-input");
+        write_safetensors_i8(
+            &dir.join("shard.safetensors"),
+            &[("blk.0.moe_gate.weight", &[4], &[1i8, -1, 0, 2])],
+        );
+        let out = scratch_dir("v2-st-fail-closed-other-out").join("bad.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("unmatched Other-dtype safetensors name under V2 must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// Counterpart to the fail-closed pair: with **no** manifest there is no
+    /// V2 rule to violate, so an unsupported dtype is silently dropped from the
+    /// pack. This is deliberate (`.claude/rules/goz1-pipeline.md`: "V2
+    /// fail-closed does not detect under-packing"), and pinning it keeps the
+    /// two behaviours from being conflated — the guard is about
+    /// *misclassification*, never about *absence*.
+    #[test]
+    fn safetensors_other_dtype_is_skipped_when_no_manifest_applies() {
+        let dir = scratch_dir("st-other-skip-input");
+        write_safetensors_i8(
+            &dir.join("only-i8.safetensors"),
+            &[("blk.0.moe_gate.weight", &[4], &[1i8, -1, 0, 2])],
+        );
+        let out = scratch_dir("st-other-skip-out").join("empty.goz1");
+
+        let config = safetensors_config(&dir, &out);
+        // Every tensor was skipped, so nothing is quantizable and the run
+        // errors rather than emitting an empty pack. Match the variant only:
+        // the message says "all skipped as unsupported dtype?", which is right
+        // here but is a guess the code cannot actually make.
+        let err = run_quantization(&config)
+            .expect_err("a shard of only unsupported dtypes leaves nothing to pack");
+        assert!(
+            matches!(err, GrokOzempicError::InvalidConfig(_)),
+            "expected InvalidConfig for an all-skipped shard, got {err:?}"
+        );
+    }
+
+    /// `collect_safetensor_shards` filters on the extension only, so a
+    /// directory containing no `*.safetensors` short-circuits before the
+    /// builder runs. Mirrors the npy branch.
+    #[test]
+    fn safetensors_dir_without_shards_is_rejected() {
+        let dir = scratch_dir("st-no-shards-input");
+        write_npy_f32(&dir.join("stray.npy"), &[2], &[1.0f32, 2.0]);
+        let out = scratch_dir("st-no-shards-out").join("none.goz1");
+
+        let err = run_quantization(&safetensors_config(&dir, &out))
+            .expect_err("a directory with no .safetensors must be rejected");
+        match err {
+            GrokOzempicError::InvalidConfig(ref msg) => {
+                assert!(
+                    msg.contains("no .safetensors files found"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidConfig, got {other:?}"),
         }
     }
 
