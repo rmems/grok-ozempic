@@ -1,0 +1,48 @@
+scripts/grok1_block0_tau_sweep.py
+  s_1d9be5fced32b1::t_30d48e602f313a 32,221
+scripts/route_preservation_metrics.py
+  s_1d9be5fced32b1::t_30d48e602f313a 15,478
+scripts/test_route_preservation_completeness.py
+  s_aaea3eb5b5737d::t_4a7989e01b29f6 1-228
+REVIEW.md
+  ai_agent 26,189,203
+scripts/grok1_multiblock_experiment.py
+  s_1d9be5fced32b1::t_66f26d4bc8eb66 1330,1342,1353,1361
+scripts/goz1_trit_histogram.py
+  s_1d9be5fced32b1::t_30d48e602f313a 38-40,409,412
+CLAUDE.md
+  ai_agent 184,196,213
+.github/workflows/python-scripts.yml
+  ai_agent 45-49
+justfile
+  ai_agent 37
+scripts/grok1_block0_experiment.py
+  s_1d9be5fced32b1::t_66f26d4bc8eb66 488,504
+  s_1d9be5fced32b1::t_30d48e602f313a 33,465
+src/core/stream.rs
+  s_aaea3eb5b5737d::t_4a7989e01b29f6 18,475,490-509,512-513,516,518-538,627,647-649,651,653-655,660-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "37098e3025082c6972914fa77e8b51490586a84f",
+  "prompts": {},
+  "sessions": {
+    "s_1d9be5fced32b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4194afde-4978-470c-996b-9d481f95b317",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    },
+    "s_aaea3eb5b5737d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9f6d4531-9ffa-4c75-b7c1-49e8a3ae7e8f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
