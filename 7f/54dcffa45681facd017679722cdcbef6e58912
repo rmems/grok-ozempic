@@ -1,0 +1,19 @@
+scripts/goz1_trit_histogram.py
+  s_489221055402a5::t_05b2991e479ae6 412-415
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7f54dcffa45681facd017679722cdcbef6e58912",
+  "prompts": {},
+  "sessions": {
+    "s_489221055402a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f98fd222-1f8e-4201-996c-0ba3c5973951",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Tester <tester@example.com>"
+    }
+  }
+}
