@@ -154,3 +154,87 @@ fn test_saaq_readiness_criticality() {
             .contains("Missing high-risk critical routers")
     );
 }
+
+/// The detector's per-block kind counts must be derivable from the shared
+/// `GROK1_BLOCK_SLOTS` table (GH #106).
+///
+/// This is the third of the three tables that had drifted, and the one the
+/// cross-check in `grok1_inventory.rs` does not reach: `block_kind_counts()` is
+/// private to `detector`, so this asserts on its observable output in the built
+/// IR instead. Without it, `detector` could go back to saying
+/// `moe_expert.unresolved` while the shared table said `.gate`/`.up`, and only
+/// the two other copies would be pinned.
+#[test]
+fn detector_block_kind_counts_match_the_shared_slot_table() {
+    use crate::types::GROK1_BLOCK_SLOTS;
+    use std::collections::BTreeMap;
+
+    let ir = create_valid_ir();
+
+    // Expected counts derived from the single source, not retyped.
+    let mut expected: BTreeMap<&str, usize> = BTreeMap::new();
+    for slot in GROK1_BLOCK_SLOTS.iter() {
+        *expected.entry(slot.kind).or_default() += 1;
+    }
+
+    let block = ir
+        .inventory_blocks
+        .iter()
+        .find(|b| b.block == Some(0))
+        .expect("block 000 inventory entry");
+
+    let actual: BTreeMap<&str, usize> = block
+        .kinds
+        .iter()
+        .map(|k| (k.kind.as_str(), k.count))
+        .collect();
+
+    assert_eq!(
+        actual, expected,
+        "detector block kind counts must match GROK1_BLOCK_SLOTS; a divergence \
+         here is the drift GH #106 fixed reappearing in the third copy"
+    );
+
+    // The counts must also sum to the slot count, so a dropped kind cannot hide
+    // behind another kind being inflated.
+    let total: usize = actual.values().sum();
+    assert_eq!(
+        total,
+        GROK1_BLOCK_SLOTS.len(),
+        "per-block kinds must account for every slot"
+    );
+
+    // And the resolved MoE labels specifically, since those are what drifted.
+    assert_eq!(actual.get("moe_expert.gate"), Some(&1));
+    assert_eq!(actual.get("moe_expert.up"), Some(&1));
+    assert!(
+        !actual.keys().any(|k| k.contains("unresolved")),
+        "detector must not reintroduce moe_expert.unresolved"
+    );
+
+    // The GLOBAL kind counts are a second hardcoded table in the same file, and
+    // they are exactly the per-block counts times the block count, plus the two
+    // non-block tensors. Deriving them here means the per-block and whole-model
+    // tables cannot disagree.
+    //
+    // Pinning this was prompted by a mutation that did not fail: reverting a
+    // label inside `inventory_kind_counts()` left the per-block assertion above
+    // green, because that assertion only reaches `block_kind_counts()`.
+    let n_blocks = ir.hyperparameters.n_blocks;
+    let mut expected_global: BTreeMap<&str, usize> =
+        expected.iter().map(|(k, v)| (*k, v * n_blocks)).collect();
+    expected_global.insert("token_embedding", 1);
+    expected_global.insert("final_norm", 1);
+
+    let actual_global: BTreeMap<&str, usize> = ir
+        .inventory_kinds
+        .iter()
+        .map(|k| (k.kind.as_str(), k.count))
+        .collect();
+
+    assert_eq!(
+        actual_global, expected_global,
+        "whole-model kind counts must be the per-slot table scaled by n_blocks \
+         plus the embedding and final norm"
+    );
+}

@@ -142,20 +142,52 @@ mod tests {
         );
         assert_eq!(kinds[11], "router");
 
-        // Every kind the core inventory emits for a block must exist in the
-        // table, and vice versa -- this is the cross-table link that was missing.
-        let table_kinds: std::collections::BTreeSet<&str> = kinds.iter().copied().collect();
-        let inventory_kinds: std::collections::BTreeSet<String> = build_grok1_tensors()
-            .into_iter()
-            .filter(|t| t.block.is_some())
-            .map(|t| t.kind.to_string())
+        // Cross-table link: compare (slot, kind, dtype) PER SLOT, not as sets.
+        //
+        // A set comparison would have been useless here, which is worth spelling
+        // out because the first version of this test did exactly that. Collapsing
+        // both sides to a `BTreeSet<&str>` of kinds discards two things the drift
+        // in GH #106 actually consisted of:
+        //
+        //   - slot position: `moe_expert.gate` and `moe_expert.up` have identical
+        //     shapes, so swapping them between slots 00 and 02 leaves the kind set
+        //     unchanged while every structural name points at the wrong tensor.
+        //   - multiplicity: the four `block_norm` slots collapse to one entry, so
+        //     dropping three of them would still compare equal.
+        //
+        // Comparing the full per-slot record catches both.
+        let mut inventory_by_slot: Vec<(u32, &str, &str)> = build_grok1_tensors()
+            .iter()
+            .filter(|t| t.block == Some(0))
+            .map(|t| (t.slot.expect("block tensors carry a slot"), t.kind, t.dtype))
             .collect();
-        let inventory_refs: std::collections::BTreeSet<&str> =
-            inventory_kinds.iter().map(String::as_str).collect();
+        inventory_by_slot.sort_by_key(|(slot, _, _)| *slot);
+
+        let table_by_slot: Vec<(u32, &str, &str)> = GROK1_BLOCK_SLOTS
+            .iter()
+            .map(|s| (s.slot as u32, s.kind, s.dtype_inventory()))
+            .collect();
+
         assert_eq!(
-            table_kinds, inventory_refs,
-            "GROK1_BLOCK_SLOTS kinds must match the per-block kinds grok1_full_inventory emits"
+            table_by_slot, inventory_by_slot,
+            "GROK1_BLOCK_SLOTS must match build_grok1_tensors() slot-for-slot \
+             (slot, kind, dtype) -- a set comparison would miss a gate/up swap \
+             or a dropped duplicate block_norm"
         );
+
+        // Same check across every block, so a per-block special case cannot hide.
+        for blk in [1u32, 31, 63] {
+            let mut per_block: Vec<(u32, &str, &str)> = build_grok1_tensors()
+                .iter()
+                .filter(|t| t.block == Some(blk))
+                .map(|t| (t.slot.expect("slot"), t.kind, t.dtype))
+                .collect();
+            per_block.sort_by_key(|(slot, _, _)| *slot);
+            assert_eq!(
+                per_block, table_by_slot,
+                "block {blk} must have the same slot layout as the shared table"
+            );
+        }
 
         // dtype spellings stay distinct on purpose (artifact.index.json says
         // "int8", the core inventory says "i8"); both come from one flag.
