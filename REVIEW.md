@@ -23,7 +23,7 @@ just review
 
 This is the default **pre-push** recipe. It runs, in order:
 
-1. **`just ci`** — GHA parity for Rust + the **thirteen** CI Python unittests +
+1. **`just ci`** — GHA parity for Rust + the **fourteen** CI Python unittests +
    `bash -n` on `scripts/*.sh` + `actionlint` / `shellcheck` (blocking in CI via
    `.github/workflows/lint.yml` since GH #98; still skipped locally when not installed)
 2. **`cargo audit`** — if `cargo-audit` is on `PATH` (matches
@@ -186,7 +186,7 @@ GHA `rust.yml` omits `--locked`; local `just` is **stricter** (intentional).
 ### Python
 
 `just test`, `just ci`, `just review` and `python-scripts.yml` all run the same
-**thirteen** modules. Until GH #98 the last two (79 tests) lived in a separate
+**fourteen** modules. Until GH #98 the last two (79 tests) lived in a separate
 `_python-tests-extra` recipe reachable only through `just review`, and were
 gated by nothing in CI; that recipe is gone and there is now one list.
 
@@ -200,6 +200,7 @@ python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
 python3 -m unittest scripts.test_route_preservation_surface -v
 python3 -m unittest scripts.test_route_preservation_io -v
+python3 -m unittest scripts.test_json_canonical -v
 python3 -m unittest scripts.test_grok1_multiblock_experiment -v
 python3 -m unittest scripts.test_grok1_multiblock_progress -v
 python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v

@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 from grok1_block0_experiment import (  # noqa: E402
     EXIT_UNRESOLVED,
@@ -158,8 +159,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, indent=2)
-            stream.write("\n")
+            stream.write(canonical_json(payload))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp_path, path)
