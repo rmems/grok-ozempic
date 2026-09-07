@@ -115,7 +115,7 @@ mod tests {
     /// canonical manifest and this inventory had resolved them to `.gate` and
     /// `.up`. This test fails if any single table is edited alone.
     #[test]
-    fn block_slot_table_matches_the_core_inventory() {
+    fn block_slot_table_is_dense_and_correctly_tiered() {
         use crate::types::GROK1_BLOCK_SLOTS;
 
         assert_eq!(GROK1_BLOCK_SLOTS.len(), 12, "a Grok-1 block has 12 slots");
@@ -141,6 +141,12 @@ mod tests {
             "slots 00/02 are resolved to .gate/.up; 'unresolved' is stale (GH #106)"
         );
         assert_eq!(kinds[11], "router");
+    }
+
+    /// The shared table must agree with the core inventory slot-for-slot.
+    #[test]
+    fn block_slot_table_matches_the_core_inventory() {
+        use crate::types::GROK1_BLOCK_SLOTS;
 
         // Cross-table link: compare (slot, kind, dtype) PER SLOT, not as sets.
         //
@@ -174,6 +180,18 @@ mod tests {
              (slot, kind, dtype) -- a set comparison would miss a gate/up swap \
              or a dropped duplicate block_norm"
         );
+    }
+
+    /// Every block must share the same slot layout, so a per-block special
+    /// case cannot hide behind block 0 being correct.
+    #[test]
+    fn every_block_shares_the_slot_layout() {
+        use crate::types::GROK1_BLOCK_SLOTS;
+
+        let table_by_slot: Vec<(u32, &str, &str)> = GROK1_BLOCK_SLOTS
+            .iter()
+            .map(|s| (s.slot as u32, s.kind, s.dtype_inventory()))
+            .collect();
 
         // Same check across every block, so a per-block special case cannot hide.
         for blk in [1u32, 31, 63] {

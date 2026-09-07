@@ -211,6 +211,24 @@ fn detector_block_kind_counts_match_the_shared_slot_table() {
         !actual.keys().any(|k| k.contains("unresolved")),
         "detector must not reintroduce moe_expert.unresolved"
     );
+}
+
+/// The whole-model kind counts are a second hardcoded table in `detector`,
+/// and must be the per-slot table scaled by the block count.
+///
+/// Split from the per-block check because a mutation aimed at
+/// `inventory_kind_counts()` did not fail while the two shared one test --
+/// the per-block assertion never reached it (GH #106).
+#[test]
+fn detector_global_kind_counts_are_the_slot_table_scaled() {
+    use crate::types::GROK1_BLOCK_SLOTS;
+    use std::collections::BTreeMap;
+
+    let ir = create_valid_ir();
+    let mut expected: BTreeMap<&str, usize> = BTreeMap::new();
+    for slot in GROK1_BLOCK_SLOTS.iter() {
+        *expected.entry(slot.kind).or_default() += 1;
+    }
 
     // The GLOBAL kind counts are a second hardcoded table in the same file, and
     // they are exactly the per-block counts times the block count, plus the two
