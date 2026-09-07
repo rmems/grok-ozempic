@@ -92,6 +92,19 @@ cargo run --release --features cli --locked -- quantize-goz1 \
 
 Since #40 / RM-191, **runtime** packs prefer the V2 `structural-manifest.json` whenever tensor names are structural (`block_{NNN}.slot_{SS}.{kind}`, export-script stems). V2 is fail-closed: an unmatched name hard-errors instead of defaulting to ternary. For legacy `blk.*`-named inputs use V1 `baseline.json` (defaults fallthrough allowed). Prefer `--verify`. Authoritative structural names / planning surface: `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (tests honor `GROK_OZEMPIC_DISSECT_RUN`).
 
+**`GROK_OZEMPIC_DISSECT_RUN` accepts either shape** (GH #102): the run root
+(`.../LATEST_CORRECT_GROK1_RUN`, what `block_pilot_goz1.sh` and this doc export)
+or the already-resolved run3 dir (`.../manifests/xai-grok-1-ckpt-0`). The Rust
+oracle probes direct-then-nested, matching the justfile.
+
+⚠ Before #102 the Rust side accepted **only** the resolved dir, so exporting the
+documented run root made `run3_conversion_manifest_names_fully_classified` fail
+its `is_file()` probe and **skip while reporting green** — the misclassification
+oracle silently disabled itself for anyone following these instructions. It now
+**panics** when the variable is set but unresolvable. A skip means "not
+configured"; it never means "configured and ignored". If you see `skip:` from
+that test, believe the skip, not the green.
+
 **Evidence sources:**
 
 | Metric | Where |
