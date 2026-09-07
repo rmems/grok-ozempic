@@ -1,0 +1,46 @@
+scripts/block_pilot_goz1.sh
+  s_50f2c79e111596::t_a2813ced0a06a1 42-52
+justfile
+  s_50f2c79e111596::t_2750be6e31047f 128-130
+  s_50f2c79e111596::t_63cd5cc3766272 146-147
+.claude/commands/smoke.md
+  s_50f2c79e111596::t_d8cb262a196195 12-14,20-25
+.claude/commands/pr-ready.md
+  s_50f2c79e111596::t_d54b0f47ec32da 11-14,22-23,25-27,29-35,47
+.claude/commands/v2-bridge.md
+  s_50f2c79e111596::t_d8cb262a196195 40-53
+.github/workflows/lint.yml
+  s_50f2c79e111596::t_63cd5cc3766272 52
+.githooks/pre-commit
+  s_50f2c79e111596::t_fe9baffe187838 3-6
+.githooks/pre-push
+  s_50f2c79e111596::t_fe9baffe187838 3-6
+.github/workflows/cargo-audit.yml
+  s_50f2c79e111596::t_ac9e905f723d05 10
+CLAUDE.md
+  s_1d9be5fced32b1::t_b1997bf9e11b11 214-215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3f45402283a0b683deba0bf6c6af8fa1782ebf24",
+  "prompts": {},
+  "sessions": {
+    "s_1d9be5fced32b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4194afde-4978-470c-996b-9d481f95b317",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    },
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
