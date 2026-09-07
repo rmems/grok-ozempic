@@ -8,7 +8,7 @@ use crate::reports::validator;
 fn create_valid_ir() -> ArtifactIR {
     // We can use the detector to build a valid IR from the embedded baseline
     let manifest = embedded_grok1_baseline().expect("Failed to get baseline manifest");
-    detector::build_ir_from_manifest(manifest, None, None).expect("Failed to build valid IR")
+    detector::build_grok1_spec_ir(manifest, None, None).expect("Failed to build valid IR")
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_inventory_uses_resolved_attention_labels() {
 #[test]
 fn test_scan_shard_count_does_not_override_tensor_totals() {
     let manifest = embedded_grok1_baseline().expect("Failed to get baseline manifest");
-    let ir = detector::build_ir_from_manifest(manifest, None, Some(42))
+    let ir = detector::build_grok1_spec_ir(manifest, None, Some(42))
         .expect("Failed to build IR with scan-derived shard count");
 
     assert_eq!(ir.manifest.shards, 42);
@@ -74,9 +74,25 @@ fn test_manifest_block_metadata_can_be_partial_and_unordered() {
         },
     ];
 
-    let ir = detector::build_ir_from_manifest(&manifest, None, None)
+    let ir = detector::build_grok1_spec_ir(&manifest, None, None)
         .expect("partial unordered advisory blocks should be accepted");
     assert!(validator::validate_ir(&ir).is_ok());
+
+    // The consequence worth pinning: a manifest declaring TWO blocks still
+    // yields the full 64-block spec IR. Block metadata is advisory -- the
+    // builder emits the Grok-1 spec regardless -- so the block *count* is
+    // ignored rather than rejected. Anyone reading the IR as a description of
+    // the manifest, rather than of the architecture, would be wrong.
+    assert_eq!(manifest.blocks.len(), 2, "fixture declares two blocks");
+    assert_eq!(
+        ir.hyperparameters.n_blocks, 64,
+        "block count comes from the spec constant, not the manifest"
+    );
+    assert_eq!(
+        ir.routers.len(),
+        64,
+        "one router per spec block, not per manifest block"
+    );
 }
 
 #[test]

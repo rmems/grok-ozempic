@@ -24,6 +24,16 @@ const GROK1_MOE_DOWN_BYTES: u64 = 103_079_215_104;
 const GROK1_MOE_UNRESOLVED_BYTES: u64 = 206_158_430_208;
 const GROK1_ROUTER_BYTES: u64 = 12_582_912;
 
+/// Reject a manifest this builder cannot honour.
+///
+/// This is the **only** place a manifest can change the outcome. It checks four
+/// things: the model family, that every declared block index is in range, that
+/// no index repeats, and that a declared expert count matches Grok-1's. Anything
+/// else in the manifest — `preserve`, `ternary_candidates`, `defaults`,
+/// `schema_version`, and the *number* of blocks — is ignored by design, because
+/// [`build_grok1_spec_ir`] emits the full Grok-1 spec regardless. Partial and
+/// unordered block metadata is explicitly supported; see
+/// `test_manifest_block_metadata_can_be_partial_and_unordered`.
 fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOzempicError> {
     if manifest.model.family != GROK1_FAMILY {
         return Err(GrokOzempicError::InvalidConfig(format!(
@@ -59,7 +69,30 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
     Ok(())
 }
 
-pub fn build_ir_from_manifest(
+/// Build the Grok-1 **specification** IR.
+///
+/// The name matters, because the old one (`build_ir_from_manifest`) implied a
+/// detector reading structure out of the manifest. It does not, and cannot: a
+/// [`ManifestBlock`](crate::core::manifest::ManifestBlock) carries only `index`,
+/// `experts` and `role` — no shapes, no dtypes, no byte counts — so there is
+/// nothing to derive from. Every structural figure below comes from the
+/// `GROK1_*` constants; the manifest contributes `model.source` (only when
+/// `checkpoint` is `None`) and is otherwise used to *reject* incompatible input
+/// via [`validate_supported_manifest`].
+///
+/// Consequences worth knowing before trusting the output:
+///
+/// - The IR describes the Grok-1 architecture as this crate understands it, not
+///   the checkpoint on disk. `actual_shards` is the one observed quantity, and
+///   it is passed in by the caller rather than read here.
+/// - [`super::validator::validate_ir`] asserts the same constants this function
+///   writes, so it is a schema/self-consistency check, not verification. It can
+///   only fail on an IR that something else has mutated — which is exactly what
+///   `src/reports/tests.rs` does.
+///
+/// Deriving real totals from a checkpoint scan needs a manifest schema that
+/// carries them; tracked separately rather than faked here.
+pub fn build_grok1_spec_ir(
     manifest: &DissectManifest,
     checkpoint: Option<&str>,
     actual_shards: Option<usize>,
@@ -74,7 +107,10 @@ pub fn build_ir_from_manifest(
 
     let totals = TensorTotals {
         total: GROK1_TENSOR_TOTAL,
-        f32_tensors: GROK1_TENSOR_F32, // TODO: derive from actual scan in phase 2
+        // Spec constants, not a scan. Deriving these from the checkpoint needs a
+        // manifest schema that carries per-tensor dtype/bytes; see this
+        // function's doc comment.
+        f32_tensors: GROK1_TENSOR_F32,
         int8_tensors: GROK1_TENSOR_INT8,
         quant_tensors: GROK1_TENSOR_QUANT,
         total_elements: GROK1_TENSOR_TOTAL_ELEMENTS,

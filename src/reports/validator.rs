@@ -8,6 +8,24 @@ use crate::types::{
 use std::collections::HashSet;
 const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
+/// Check an [`ArtifactIR`] against the Grok-1 spec constants.
+///
+/// **This is a schema/self-consistency check, not verification of a checkpoint.**
+/// [`super::detector::build_grok1_spec_ir`] writes these same `GROK1_*`
+/// constants, so on any IR that function produces every assertion below holds by
+/// construction — it is a tautology on the happy path. It earns its keep in two
+/// narrower ways:
+///
+/// 1. It catches an IR that something *else* mutated — deserialised from a
+///    hand-edited report, or altered in a test. `src/reports/tests.rs` relies on
+///    exactly that.
+/// 2. It pins the invariants themselves, so a future change to one constant
+///    without the other trips a test rather than silently shipping a skewed
+///    report.
+///
+/// What it does **not** do is tell you the checkpoint on disk matches. Nothing in
+/// this module reads tensor data. Do not cite a green `validate_ir` as evidence
+/// about real weights.
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
     if ir.hyperparameters.d_model != GROK1_HIDDEN_DIM {
         return Err(GrokOzempicError::ArtifactValidation(format!(
