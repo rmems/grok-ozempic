@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess  # nosec B404
 import sys
@@ -131,8 +132,23 @@ def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool
 
     Never raises: provenance is best-effort, and a run outside a git checkout
     must still write its metrics rather than abort.
+
+    Runs with ``GIT_DIR``/``GIT_WORK_TREE`` stripped from the child environment.
+    ``git -C <root>`` does **not** override an inherited ``GIT_DIR``, and git
+    exports one (absolute) to every hook — so under the pre-push gate restored in
+    GH #97 this reported the *gate's* repository regardless of which
+    ``repo_root`` it was handed. That is wrong twice over: the "outside a
+    checkout" contract above silently stopped holding, and a hook-run experiment
+    would stamp provenance with a commit from a tree it never read.
     """
     root = repo_root or Path(__file__).resolve().parent.parent
+    # Inherit the environment except git's own location overrides, so that the
+    # `-C <root>` argument is authoritative.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+    }
     git = shutil.which("git")
     if git is None:
         return {"commit": None, "dirty": None}
@@ -145,7 +161,7 @@ def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
         sha = subprocess.run(  # nosec B603  # noqa: S603
             [git, "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=30, check=True,
+            capture_output=True, text=True, timeout=30, check=True, env=env,
         ).stdout.strip()
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
         status = subprocess.run(  # nosec B603  # noqa: S603
@@ -153,7 +169,7 @@ def implementation_commit(repo_root: Path | None = None) -> dict[str, str | bool
                 git, "-C", str(root), "status", "--porcelain",
                 "--untracked-files=no", "--", "scripts", "src",
             ],
-            capture_output=True, text=True, timeout=30, check=True,
+            capture_output=True, text=True, timeout=30, check=True, env=env,
         ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return {"commit": None, "dirty": None}
