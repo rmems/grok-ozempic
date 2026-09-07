@@ -1,0 +1,39 @@
+scripts/grok1_multiblock_v4_supervisor.py
+  s_50f2c79e111596::t_b98430ac607f6a 36,189
+ruff.toml
+  s_50f2c79e111596::t_95b3d673568e60 1-44
+.github/workflows/lint.yml
+  s_50f2c79e111596::t_47e186f38f8d6b 63-68,70-72
+  s_50f2c79e111596::t_dd9b6767ce1d06 54-62,69,73
+scripts/grok1_block_weights.py
+  s_50f2c79e111596::t_b98430ac607f6a 35-36
+scripts/test_export_grok1_embedding_npy.py
+  s_50f2c79e111596::t_28cffcf7eb4c55 90-96
+scripts/route_preservation_measure.py
+  s_50f2c79e111596::t_4bda41c201ac3b 342-351
+scripts/grok1_multiblock_lib.py
+  s_50f2c79e111596::t_bb2057a78ff6bc 1706-1711
+scripts/test_export_grok1_int8_npy.py
+  s_50f2c79e111596::t_b98430ac607f6a 27
+scripts/test_grok1_multiblock_v4_supervisor.py
+  s_50f2c79e111596::t_b98430ac607f6a 54,72
+justfile
+  s_50f2c79e111596::t_83568c7f8a5b18 125,137-141
+  s_50f2c79e111596::t_33c4f46e7f52db 352-356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1dbef9289b4d4a135d916f9e291ae7f265457769",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
