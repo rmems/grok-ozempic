@@ -1,8 +1,9 @@
 name: Cargo audit
 
 on:
+  # No `branches:` filter on pull_request -- it matches the *target* branch, so
+  # restricting it to main silently skipped this workflow on stacked PRs (GH #98).
   pull_request:
-    branches: [main]
   push:
     branches:
       - main
