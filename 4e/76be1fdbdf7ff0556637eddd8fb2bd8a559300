@@ -1,0 +1,28 @@
+src/bin/grok-ozempic/artifacts.rs
+  s_50f2c79e111596::t_a0218d23cc9bb0 121,125
+src/reports/tests.rs
+  s_50f2c79e111596::t_a0218d23cc9bb0 11,51,77
+  s_50f2c79e111596::t_48f60b86f067dd 80-95
+src/reports/detector.rs
+  s_50f2c79e111596::t_ccc882bde965ae 110-113
+  s_50f2c79e111596::t_eebea746c50bd4 72-95
+  s_50f2c79e111596::t_023e729066a474 27-36
+src/reports/validator.rs
+  s_50f2c79e111596::t_612f99c2c3e058 11-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "4e76be1fdbdf7ff0556637eddd8fb2bd8a559300",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
