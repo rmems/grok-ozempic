@@ -1,0 +1,20 @@
+src/core/stream.rs
+  s_50f2c79e111596::t_96c7e3a43493cd 633-637
+  s_50f2c79e111596::t_6e3768cb658f3a 1474-1491
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cc338148f8e817299d0e418dde10d88daa5dab4e",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
