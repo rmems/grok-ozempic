@@ -9,6 +9,24 @@ for required in git jq; do
 done
 
 repo_root=$(git rev-parse --show-toplevel)
+
+# Resolve repo_root above from the ambient environment, then drop every git
+# environment variable before touching the throwaway repo created below.
+#
+# This is load-bearing, not hygiene. A pre-push hook exports GIT_DIR (and
+# friends), and GIT_DIR takes precedence over `git -C <path>` when git locates a
+# repository -- so `git init "$repo"`, `git -C "$repo" commit` and everything
+# after it operate on the REAL repository instead of the temp one.
+#
+# That is not hypothetical. Running `just review` from the pre-push hook
+# committed this script's own fixtures -- tracked.txt, staged.txt, partial.txt,
+# compound.txt -- onto the project's main as "Tester <tester@example.com>",
+# carrying this file's commit messages (initial, staged, partial, compound), and
+# left core.bare=true behind from the redirected `git init`, which breaks every
+# subsequent worktree command in the real checkout.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 pre_hook="$repo_root/.codex/hooks/coauthor-record-head.sh"
 post_hook="$repo_root/.codex/hooks/coauthor-commit.sh"
 muse_pre_hook="$repo_root/.muse/hooks/coauthor-record-head.sh"

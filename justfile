@@ -35,6 +35,7 @@ _python-tests:
       scripts.test_route_preservation_surface
       scripts.test_route_preservation_io
       scripts.test_route_preservation_completeness
+      scripts.test_json_canonical
       scripts.test_grok1_multiblock_experiment
       scripts.test_grok1_multiblock_progress
       scripts.test_grok1_multiblock_v4_decision

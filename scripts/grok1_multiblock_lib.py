@@ -33,6 +33,7 @@ from grok1_block_weights import (
     NpyWeights,
     PackWeights,
 )
+from json_canonical import canonical_json  # noqa: E402
 from route_preservation_io import TENSOR_TERNARY, read_trits
 
 
@@ -783,7 +784,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     temp_path = _temp_sibling(path)
     try:
         with temp_path.open("w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, indent=2) + "\n")
+            handle.write(canonical_json(payload))
             handle.flush()
             os.fsync(handle.fileno())
         _durable_replace(temp_path, path)

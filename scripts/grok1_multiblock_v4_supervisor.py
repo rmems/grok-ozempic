@@ -37,6 +37,10 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
+# Sibling module; this script's own directory is sys.path[0] when run
+# directly, and the test modules insert scripts/ explicitly.
+from json_canonical import canonical_json
+
 try:
     import fcntl as _fcntl
 except ImportError:  # pragma: no cover - this supervisor requires POSIX.
@@ -284,7 +288,7 @@ def _atomic_write_text(path: Path, body: str) -> None:
 
 
 def _atomic_write_json(path: Path, payload: object) -> None:
-    _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    _atomic_write_text(path, canonical_json(payload))
 
 
 def _fsync_directory_strict(path: Path) -> None:

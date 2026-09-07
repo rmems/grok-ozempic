@@ -20,7 +20,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import platform
 import re
@@ -30,6 +29,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 from grok1_block0_experiment import (  # noqa: E402
     Trace,
@@ -218,7 +218,7 @@ def run(args: argparse.Namespace) -> int:
     payload = _payload(args, reference, ref, ids, rows)
     args.out.mkdir(parents=True, exist_ok=True)
     dest = args.out / "block0-forward-tau-sweep.json"
-    dest.write_text(json.dumps(payload, indent=2) + "\n")
+    dest.write_text(canonical_json(payload))
     print(f"wrote {dest}")
     return 0
 

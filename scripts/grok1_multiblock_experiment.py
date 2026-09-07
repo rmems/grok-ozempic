@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 from grok1_block0_experiment import (  # noqa: E402
     EXIT_UNRESOLVED,
@@ -158,8 +159,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, indent=2)
-            stream.write("\n")
+            stream.write(canonical_json(payload))
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp_path, path)
@@ -1327,7 +1327,7 @@ def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
     dest = args.out / "multiblock-unresolved.json"
     issue, agent = _agent_for_args(args)
     dest.write_text(
-        json.dumps(
+        canonical_json(
             {
                 "provenance": {
                     "issue": issue,
@@ -1339,9 +1339,7 @@ def _write_unresolved(args: argparse.Namespace, exc: Exception) -> int:
                 "decision_text": "Inconclusive — architectural element unresolved.",
                 "unresolved_reason": str(exc),
             },
-            indent=2,
-        )
-        + "\n"
+            )
     )
     print(f"wrote conclusion-4 report to {dest}", file=sys.stderr)
     return EXIT_UNRESOLVED
@@ -1352,7 +1350,7 @@ def _write_legacy(args: argparse.Namespace, exc: Exception) -> int:
         args.out.mkdir(parents=True, exist_ok=True)
         _, agent = _agent_for_args(args)
         (args.out / "multiblock-legacy-oracle.json").write_text(
-            json.dumps(
+            canonical_json(
                 {
                     "decision": 4,
                     "decision_text": "Inconclusive — legacy_oracle scale; rebuild v3 pack-only.",
@@ -1360,9 +1358,7 @@ def _write_legacy(args: argparse.Namespace, exc: Exception) -> int:
                     "agent": agent,
                     "arm": getattr(args, "arm", None),
                 },
-                indent=2,
-            )
-            + "\n"
+                )
         )
     return EXIT_LEGACY_ORACLE
 
