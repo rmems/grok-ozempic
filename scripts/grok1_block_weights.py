@@ -38,6 +38,7 @@ from collections.abc import Callable
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 from grok1_block_forward import ForwardError, resolve_roles  # noqa: E402
 from route_preservation_io import (  # noqa: E402
@@ -432,7 +433,7 @@ class PackWeights(WeightSource):
             "fingerprint": self._fingerprint(),
             "scales": {n: {"alpha": s.alpha, "fired": s.fired, "total": s.total, "sign_mismatches": s.sign_mismatches} for n, s in sorted(self._scales.items())},
         }
-        self._cache_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        self._cache_path.write_text(canonical_json(payload))
 
     def scale(self, name: str) -> TernaryScale:
         """Reconstruction scale for a ternary tensor.
