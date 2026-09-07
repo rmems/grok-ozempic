@@ -1,0 +1,12 @@
+scripts/grok1_block_weights.py
+  s_aaea3eb5b5737d::t_e84d1bebdba428 30
+  s_aaea3eb5b5737d::t_39d4b31f422a62 134-141,144-150
+  s_aaea3eb5b5737d::t_2e10408f860eef 163
+  s_aaea3eb5b5737d::t_cc868da360b450 171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a2a9c50e7e9e638a014ae63c2d92a19ab28242fb",
+  "prompts": {}
+}
