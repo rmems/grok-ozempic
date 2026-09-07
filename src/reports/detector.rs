@@ -21,7 +21,6 @@ const GROK1_BLOCK_NORM_BYTES: u64 = 6_291_456;
 const GROK1_ATTN_MODEL_WIDTH_BYTES: u64 = 4_831_838_208;
 const GROK1_ATTN_NARROW_BYTES: u64 = 805_306_368;
 const GROK1_MOE_DOWN_BYTES: u64 = 103_079_215_104;
-const GROK1_MOE_UNRESOLVED_BYTES: u64 = 206_158_430_208;
 const GROK1_ROUTER_BYTES: u64 = 12_582_912;
 
 /// Reject a manifest this builder cannot honour.
@@ -259,9 +258,14 @@ fn inventory_kind_counts() -> Vec<InventoryKindCount> {
             bytes: GROK1_MOE_DOWN_BYTES,
         },
         InventoryKindCount {
-            kind: "moe_expert.unresolved".to_string(),
-            count: 128,
-            bytes: GROK1_MOE_UNRESOLVED_BYTES,
+            kind: "moe_expert.gate".to_string(),
+            count: 64,
+            bytes: GROK1_MOE_DOWN_BYTES,
+        },
+        InventoryKindCount {
+            kind: "moe_expert.up".to_string(),
+            count: 64,
+            bytes: GROK1_MOE_DOWN_BYTES,
         },
         InventoryKindCount {
             kind: "router".to_string(),
@@ -295,8 +299,12 @@ fn block_kind_counts() -> Vec<InventoryBlockKind> {
             kind: "moe_expert.down".to_string(),
         },
         InventoryBlockKind {
-            count: 2,
-            kind: "moe_expert.unresolved".to_string(),
+            count: 1,
+            kind: "moe_expert.gate".to_string(),
+        },
+        InventoryBlockKind {
+            count: 1,
+            kind: "moe_expert.up".to_string(),
         },
         InventoryBlockKind {
             count: 1,
@@ -312,7 +320,7 @@ fn exemplar_block_tensors() -> Vec<InventoryTensor> {
             "quant.weight",
             "int8",
             "(8, 6144, 32768)",
-            "moe_expert.unresolved",
+            "moe_expert.gate",
             0,
         ),
         inventory_tensor(
@@ -328,7 +336,7 @@ fn exemplar_block_tensors() -> Vec<InventoryTensor> {
             "quant.weight",
             "int8",
             "(8, 6144, 32768)",
-            "moe_expert.unresolved",
+            "moe_expert.up",
             2,
         ),
         inventory_tensor(

@@ -292,3 +292,154 @@ pub const GROK1_TENSOR_INT8: usize = 448;
 pub const GROK1_TENSOR_QUANT: usize = 448;
 pub const GROK1_TENSOR_TOTAL_ELEMENTS: u64 = 315_684_820_992;
 pub const GROK1_TENSOR_TOTAL_BYTES: u64 = 318_114_914_304;
+
+/// One slot in a Grok-1 transformer block.
+///
+/// **This is the single source of truth for the 12-slot block layout.** It used
+/// to be hardcoded three times — `src/artifact.rs` (`push_block_entries`),
+/// `src/reports/detector.rs` (`exemplar_block_tensors` and the kind counts),
+/// and `src/core/grok1_data.rs` — and the copies had already drifted: slots 00
+/// and 02 were named `moe_expert.unresolved` in two of them while
+/// `dissect/grok-1/structural-manifest.json` and `grok1_data.rs` had long since
+/// resolved them to `.gate` and `.up`. `artifact.rs` even shipped a standing
+/// warning about a question the manifest had already answered (GH #106).
+///
+/// The `dtype` spelling deliberately stays per-consumer: `artifact.rs` emits
+/// `"int8"` into `artifact.index.json` while `grok1_data.rs` uses `"i8"`. Both
+/// are user-visible, so [`BlockSlot::dtype_artifact`] and
+/// [`BlockSlot::dtype_inventory`] serve them from the one `is_int8` flag rather
+/// than silently normalizing one into the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockSlot {
+    /// Slot index within the block, 0..=11.
+    pub slot: usize,
+    /// Structural kind, e.g. `"moe_expert.gate"` or `"attn_proj_i8.narrow"`.
+    pub kind: &'static str,
+    /// `true` for the int8 attention/expert tensors, `false` for f32 norms and routers.
+    pub is_int8: bool,
+    /// Bytes for **one** tensor in this slot (not the per-kind aggregate).
+    pub bytes: u64,
+    /// Tensor shape.
+    pub shape: &'static [usize],
+}
+
+impl BlockSlot {
+    /// dtype as spelled in `artifact.index.json`.
+    pub const fn dtype_artifact(&self) -> &'static str {
+        if self.is_int8 { "int8" } else { "f32" }
+    }
+
+    /// dtype as spelled by the core inventory.
+    pub const fn dtype_inventory(&self) -> &'static str {
+        if self.is_int8 { "i8" } else { "f32" }
+    }
+
+    /// `true` when this slot is preserve-tier (routers and norms).
+    pub const fn is_preserve(&self) -> bool {
+        !self.is_int8
+    }
+}
+
+const GROK1_EXPERT_BYTES: u64 = 1_610_612_736;
+const GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES: u64 = 37_748_736;
+const GROK1_ATTN_NARROW_TENSOR_BYTES: u64 = 6_291_456;
+const GROK1_BLOCK_NORM_TENSOR_BYTES: u64 = 24_576;
+const GROK1_ROUTER_TENSOR_BYTES: u64 = 196_608;
+
+const EXPERT_GATE_SHAPE: &[usize] = &[8, GROK1_HIDDEN_DIM, 32_768];
+const EXPERT_DOWN_SHAPE: &[usize] = &[8, 32_768, GROK1_HIDDEN_DIM];
+const ATTN_NARROW_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, 1024];
+const ATTN_MODEL_WIDTH_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM];
+const BLOCK_NORM_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM];
+const ROUTER_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, 8];
+
+/// The 12 slots every Grok-1 block carries, in slot order.
+///
+/// Slots 00/01/02 are the MoE expert projections, 03..=06 the attention
+/// projections, 07..=10 the block norms, and 11 the router.
+pub const GROK1_BLOCK_SLOTS: [BlockSlot; 12] = [
+    BlockSlot {
+        slot: 0,
+        kind: "moe_expert.gate",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_GATE_SHAPE,
+    },
+    BlockSlot {
+        slot: 1,
+        kind: "moe_expert.down",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_DOWN_SHAPE,
+    },
+    BlockSlot {
+        slot: 2,
+        kind: "moe_expert.up",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_GATE_SHAPE,
+    },
+    BlockSlot {
+        slot: 3,
+        kind: "attn_proj_i8.narrow",
+        is_int8: true,
+        bytes: GROK1_ATTN_NARROW_TENSOR_BYTES,
+        shape: ATTN_NARROW_SHAPE,
+    },
+    BlockSlot {
+        slot: 4,
+        kind: "attn_proj_i8.model_width",
+        is_int8: true,
+        bytes: GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES,
+        shape: ATTN_MODEL_WIDTH_SHAPE,
+    },
+    BlockSlot {
+        slot: 5,
+        kind: "attn_proj_i8.model_width",
+        is_int8: true,
+        bytes: GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES,
+        shape: ATTN_MODEL_WIDTH_SHAPE,
+    },
+    BlockSlot {
+        slot: 6,
+        kind: "attn_proj_i8.narrow",
+        is_int8: true,
+        bytes: GROK1_ATTN_NARROW_TENSOR_BYTES,
+        shape: ATTN_NARROW_SHAPE,
+    },
+    BlockSlot {
+        slot: 7,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 8,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 9,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 10,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 11,
+        kind: "router",
+        is_int8: false,
+        bytes: GROK1_ROUTER_TENSOR_BYTES,
+        shape: ROUTER_SHAPE,
+    },
+];
