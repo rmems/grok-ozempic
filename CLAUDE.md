@@ -181,7 +181,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 
 # just test (numpy required for several scripts/test_* modules)
-# These thirteen modules are `_python-tests` in the justfile and the thirteen
+# These fourteen modules are `_python-tests` in the justfile and the fourteen
 # unittest steps in .github/workflows/python-scripts.yml. Keep all three lists
 # in sync: a module omitted here is one an agent will silently skip.
 # (GH #98 added the final two and folded away `_python-tests-extra`; before it
@@ -193,6 +193,7 @@ python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
 python3 -m unittest scripts.test_route_preservation_surface -v
 python3 -m unittest scripts.test_route_preservation_io -v
+python3 -m unittest scripts.test_route_preservation_completeness -v
 python3 -m unittest scripts.test_grok1_multiblock_experiment -v
 python3 -m unittest scripts.test_grok1_multiblock_progress -v
 python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
@@ -208,7 +209,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
-# + the thirteen python3 -m unittest lines above
+# + the fourteen python3 -m unittest lines above
 for f in scripts/*.sh; do bash -n "$f"; done
 # GH #98 also made these blocking in CI (.github/workflows/lint.yml):
 shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh
