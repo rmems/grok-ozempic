@@ -23,8 +23,9 @@ just review
 
 This is the default **pre-push** recipe. It runs, in order:
 
-1. **`just ci`** — GHA parity for Rust + the **eleven** CI Python unittests +
-   `bash -n` on `scripts/*.sh` + optional `actionlint` / `shellcheck` when installed
+1. **`just ci`** — GHA parity for Rust + the **thirteen** CI Python unittests +
+   `bash -n` on `scripts/*.sh` + `actionlint` / `shellcheck` (blocking in CI via
+   `.github/workflows/lint.yml` since GH #98; still skipped locally when not installed)
 2. **`cargo audit`** — if `cargo-audit` is on `PATH` (matches
    `.github/workflows/cargo-audit.yml`); otherwise prints `skip:` and continues
 3. **Extra Python unittests** not yet in `python-scripts.yml` / `just ci`:
@@ -165,18 +166,16 @@ GHA `rust.yml` omits `--locked`; local `just` is **stricter** (intentional).
 
 ### Python
 
-CI / `just ci` run **eleven** modules. Two more (79 tests) are gated by nothing in
-CI and run only under `just review` — tracked as **GH #98**:
+`just test`, `just ci`, `just review` and `python-scripts.yml` all run the same
+**thirteen** modules. Until GH #98 the last two (79 tests) lived in a separate
+`_python-tests-extra` recipe reachable only through `just review`, and were
+gated by nothing in CI; that recipe is gone and there is now one list.
+
+Path-scoped re-runs (already inside `just test` / `just ci` — run one directly
+when you touched only its script):
 
 ```bash
 python3 -c 'import numpy; print(numpy.__version__)'   # required for all modules below
-python3 -m unittest scripts.test_grok1_block_forward -v
-python3 -m unittest scripts.test_grok1_block_weights -v
-```
-
-Path-scoped re-runs (the eleven CI modules — already inside `just test` / `just ci`):
-
-```bash
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
@@ -188,6 +187,8 @@ python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
 python3 -m unittest scripts.test_grok1_multiblock_side_table -v
 python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
 python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
+python3 -m unittest scripts.test_grok1_block_forward -v
+python3 -m unittest scripts.test_grok1_block_weights -v
 ```
 
 Manual script syntax checks (stdlib-only scripts; not unittest):

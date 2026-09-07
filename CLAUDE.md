@@ -180,9 +180,11 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 
 # just test (numpy required for several scripts/test_* modules)
-# These eleven modules are `_python-tests` in the justfile and the eleven
+# These thirteen modules are `_python-tests` in the justfile and the thirteen
 # unittest steps in .github/workflows/python-scripts.yml. Keep all three lists
 # in sync: a module omitted here is one an agent will silently skip.
+# (GH #98 added the final two and folded away `_python-tests-extra`; before it
+# landed, CI ran only the first eleven.)
 python3 -c 'import numpy; print(numpy.__version__)'
 cargo test --features cli --locked
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
@@ -196,6 +198,8 @@ python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
 python3 -m unittest scripts.test_grok1_multiblock_side_table -v
 python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
 python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
+python3 -m unittest scripts.test_grok1_block_forward -v
+python3 -m unittest scripts.test_grok1_block_weights -v
 
 # just ci (pre-PR parity; --locked is intentional and stricter than GHA)
 cargo fmt --all -- --check
@@ -203,13 +207,11 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
-# + the eleven python3 -m unittest lines above
+# + the thirteen python3 -m unittest lines above
 for f in scripts/*.sh; do bash -n "$f"; done
-
-# just review adds two more modules on top of `just ci` (`_python-tests-extra`).
-# They are gated by NOTHING in CI today -- see GH #98.
-python3 -m unittest scripts.test_grok1_block_forward -v
-python3 -m unittest scripts.test_grok1_block_weights -v
+# GH #98 also made these blocking in CI (.github/workflows/lint.yml):
+shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh
+actionlint
 
 # CLI smoke
 cargo run --features cli -- --help
