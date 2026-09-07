@@ -87,13 +87,13 @@ class WriteNpyTests(unittest.TestCase):
 
 class LayoutPolicyTests(unittest.TestCase):
     def _ns(self, **kw):
-        defaults = dict(
-            offset=None,
-            shape=None,
-            dtype=None,
-            no_dissect=True,
-            xai_dissect=None,
-        )
+        defaults = {
+            "offset": None,
+            "shape": None,
+            "dtype": None,
+            "no_dissect": True,
+            "xai_dissect": None,
+        }
         defaults.update(kw)
         return argparse_ns(**defaults)
 

@@ -33,7 +33,7 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -186,7 +186,7 @@ _LABEL_BY_ALIAS = {
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _output_lock_path(out: Path) -> Path:

@@ -31,9 +31,9 @@ import shutil
 import subprocess  # nosec B404
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
+from collections.abc import Callable
 
 import numpy as np
 

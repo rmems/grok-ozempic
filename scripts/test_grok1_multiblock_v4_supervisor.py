@@ -51,7 +51,7 @@ def _expert_scale_sources(block: int, source: str) -> dict[str, str]:
 _ARM_FIXTURES = {
     "baseline": {
         "schedule": ("int4", [], [0, 1, 2, 3], []),
-        "sources": {block: "research_int4_side" for block in (0, 1, 2, 3)},
+        "sources": dict.fromkeys((0, 1, 2, 3), "research_int4_side"),
     },
     "p1": {
         "schedule": ("int4_channel_alpha", [1, 2, 3], [0], [0]),
@@ -69,9 +69,7 @@ _ARM_FIXTURES = {
             [0, 1, 2, 3],
             [0, 1, 2, 3],
         ),
-        "sources": {
-            block: "research_int4_channel_alpha_side" for block in (0, 1, 2, 3)
-        },
+        "sources": dict.fromkeys((0, 1, 2, 3), "research_int4_channel_alpha_side"),
     },
 }
 

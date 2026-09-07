@@ -339,7 +339,16 @@ def routing_metrics(
     o_ref = np.argsort(-l_ref, axis=1)[:, :2]
     o_q = np.argsort(-l_q, axis=1)[:, :2]
     top2 = float(
-        np.mean([len(set(a.tolist()) & set(b.tolist())) == 2 for a, b in zip(o_ref, o_q)])
+        # strict=True: o_ref and o_q are same-shaped by construction, but a bare
+        # zip() would silently truncate to the shorter one if that ever stopped
+        # holding, publishing a top-k agreement computed over fewer rows than
+        # claimed. Fail loudly instead -- this figure ends up in reports.
+        np.mean(
+            [
+                len(set(a.tolist()) & set(b.tolist())) == 2
+                for a, b in zip(o_ref, o_q, strict=True)
+            ]
+        )
     )
 
     load_ref = np.bincount(top1_ref, minlength=experts).astype(np.float64) / len(top1_ref)
