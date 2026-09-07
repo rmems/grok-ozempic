@@ -618,7 +618,23 @@ fn build_manifest_safetensors(
                 .map_err(GrokOzempicError::Io)?
         };
         let tensors = SafeTensors::deserialize(&mmap).map_err(GrokOzempicError::Safetensors)?;
-        for (name, view) in tensors.tensors() {
+        // Sort by tensor name before building entries (GH #115).
+        //
+        // `SafeTensors::tensors()` walks `Metadata::index_map`, a
+        // `std::collections::HashMap<String, usize>` whose `RandomState` is
+        // seeded per instance — so iteration order differs between processes
+        // and even between two `deserialize` calls in one process. That order
+        // becomes the manifest order, which becomes the GOZ1 tensor table and
+        // the data-section layout, so two runs over the same shard produced
+        // byte-different packs.
+        //
+        // The npy path has always been deterministic (`paths.sort()` in
+        // `collect_npy_files`); sorting here makes the two documented input
+        // formats agree, and makes pack bytes and `file_size` usable as the
+        // evidence `.claude/rules/goz1-pipeline.md` treats them as.
+        let mut named = tensors.tensors();
+        named.sort_by(|(a, _), (b, _)| a.cmp(b));
+        for (name, view) in named {
             let dtype = parse_safetensors_dtype(view.dtype());
             if dtype == SourceDtype::Other {
                 // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
@@ -1514,6 +1530,57 @@ mod tests {
             "routers/norms preserved and candidates ternary, counted per shard"
         );
         assert!(out.exists(), "pack must be written");
+    }
+
+    /// Two runs over the same shard must produce byte-identical packs (GH #115).
+    ///
+    /// `SafeTensors::tensors()` iterates a randomly-seeded `HashMap`, so before
+    /// the sort in `build_manifest_safetensors` this failed — tensor order, and
+    /// therefore the GOZ1 tensor table and data layout, varied per run. The npy
+    /// path has always been deterministic via `paths.sort()`.
+    ///
+    /// Enough tensors that a random permutation is overwhelmingly unlikely to
+    /// coincide: 8! = 40320 orderings, so a regression is caught ~99.998% of
+    /// the time per run rather than being a coin flip.
+    #[test]
+    fn safetensors_packs_are_byte_reproducible() {
+        let dir = scratch_dir("st-repro-input");
+        let names = [
+            "block_000.slot_00.moe_expert.gate",
+            "block_000.slot_01.moe_expert.down",
+            "block_000.slot_02.moe_expert.up",
+            "block_000.slot_07.block_norm",
+            "block_000.slot_08.block_norm",
+            "block_000.slot_11.router",
+            "embedding.slot_00.token_embedding",
+            "final_norm.slot_00.final_norm",
+        ];
+        let payload = [0.1f32, -0.2, 0.3, -0.4];
+        let rows: Vec<(&str, &[usize], &[f32])> = names
+            .iter()
+            .map(|n| (*n, &[2usize, 2][..], &payload[..]))
+            .collect();
+        write_safetensors_f32(&dir.join("shard.safetensors"), &rows);
+
+        let out_a = scratch_dir("st-repro-a").join("a.goz1");
+        let out_b = scratch_dir("st-repro-b").join("b.goz1");
+
+        let mut cfg_a = safetensors_config(&dir, &out_a);
+        cfg_a.manifest_path = Some(in_tree_structural_manifest());
+        run_quantization(&cfg_a).expect("first pack");
+
+        // Fresh config and a fresh deserialize -- a new HashMap instance, so a
+        // new random seed. This is what makes the test meaningful.
+        let mut cfg_b = safetensors_config(&dir, &out_b);
+        cfg_b.manifest_path = Some(in_tree_structural_manifest());
+        run_quantization(&cfg_b).expect("second pack");
+
+        assert_eq!(
+            goz1_bytes(&out_a),
+            goz1_bytes(&out_b),
+            "two runs over the same safetensors shard must produce identical packs; \
+             tensor order must not depend on HashMap iteration order (GH #115)"
+        );
     }
 
     /// Fail-closed on a supported dtype through the safetensors builder. Twin
