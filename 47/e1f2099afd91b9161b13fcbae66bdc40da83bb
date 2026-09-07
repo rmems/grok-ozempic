@@ -1,0 +1,20 @@
+src/artifact.rs
+  s_1d9be5fced32b1::t_f470e6a76f91d7 1866
+  s_1d9be5fced32b1::t_3f303d595bd502 1919-1930,1934-1937,1939
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "47e1f2099afd91b9161b13fcbae66bdc40da83bb",
+  "prompts": {},
+  "sessions": {
+    "s_1d9be5fced32b1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4194afde-4978-470c-996b-9d481f95b317",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
