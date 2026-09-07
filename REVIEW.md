@@ -59,24 +59,43 @@ Hooks live in **`.githooks/`** (tracked).
 
 ⚠ **`core.hooksPath` is owned by beads, not by `.githooks`.** Beads installs its
 own hooks and points `core.hooksPath` at `.beads/hooks`. Git consults **only**
-that directory — `.git/hooks` and `.githooks` are then ignored entirely — and the
-beads `pre-push` runs `bd hooks run pre-push` **without chaining to
-`.githooks/pre-push`**. So `git config core.hooksPath .githooks` (what this file
-used to say) would silently disable beads sync, and leaving it as beads set it
-silently disables `just review`. Neither is what you want.
+that directory — `.git/hooks` and `.githooks` are then ignored entirely. So
+`git config core.hooksPath .githooks` (what this file used to say) would
+silently disable beads sync, while leaving it as beads set it silently disabled
+`just review`. Neither is what you want, which is why the two are **chained**.
 
-```console
-$ git config --get core.hooksPath
-/home/raulmc/rmems/grok-ozempic/.beads/hooks
+Since GH #97, each tracked `.beads/hooks/{pre-commit,pre-push}` runs the beads
+block first and then invokes the matching `.githooks/` script:
+
+```
+.beads/hooks/pre-push
+  ├── BEADS INTEGRATION block   → bd hooks run pre-push   (sync)
+  └── PROJECT QUALITY GATE block → .githooks/pre-push → just review
 ```
 
-Restoring the chain is tracked as **GH #97**. Until it lands, `just review` does
-**not** run automatically on push — run it yourself.
+The gate block sits **outside** the beads markers on purpose: `bd hooks install`
+preserves user content outside its markers across installs and upgrades. The one
+command that would destroy it is `bd hooks install --force`; if you ever run
+that, re-apply the block and check with `just doctor`.
 
-| Hook | Intended to run | Skip |
-|------|-----------------|------|
-| `.githooks/pre-push` | `just review` | `git push --no-verify` (escape hatch only) |
-| `.githooks/pre-commit` | `just check` | `git commit --no-verify` |
+| Hook | Runs | Skip |
+|------|------|------|
+| `.beads/hooks/pre-push` | beads sync, then `just review` | `git push --no-verify` |
+| `.beads/hooks/pre-commit` | beads export, then `just check` | `git commit --no-verify` |
+
+`BEADS_SKIP_PROJECT_GATE=1` skips only the `just` half while still running the
+beads sync — use it when you need the export but not a 2–4 minute gate.
+
+### Bootstrap (once per clone)
+
+`core.hooksPath` lives in `.git/config`, which is **not** shared by git, and
+beads writes it as an **absolute** path — so it does not survive a fresh clone
+and is wrong inside a worktree. Set it explicitly:
+
+```bash
+git config core.hooksPath "$(git rev-parse --show-toplevel)/.beads/hooks"
+just doctor    # confirms the path AND that the project gate is chained
+```
 
 Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 (`python3 -m pip install --user 'numpy>=1.26,<3'`).
@@ -84,9 +103,9 @@ Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 Verify:
 
 ```bash
-git config --get core.hooksPath   # today: .../.beads/hooks (see #97)
+git config --get core.hooksPath   # expect: <repo>/.beads/hooks
+just doctor                       # expect: "project gate chained into both hooks"
 bd github status                  # should not say "Not configured"
-just review                       # the gate itself — run it manually until #97 lands
 ```
 
 Agents: if `core.hooksPath` is unset, still run `just review` before any push.
