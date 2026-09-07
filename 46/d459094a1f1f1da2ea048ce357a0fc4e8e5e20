@@ -1,0 +1,25 @@
+CLAUDE.md
+  s_50f2c79e111596::t_f8fc35ca883d65 53-55
+.devin/blueprint.yaml
+  s_50f2c79e111596::t_5486fa8d0cd137 71-79
+.claude/commands/v2-bridge.md
+  s_50f2c79e111596::t_a30a32a925bfe5 42-49
+.codex/agents/goz1-reviewer.toml
+  s_50f2c79e111596::t_fb0b95db78af56 9,11-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "46d459094a1f1f1da2ea048ce357a0fc4e8e5e20",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
