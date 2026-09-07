@@ -50,8 +50,9 @@ bd config set github.repo grok-ozempic
 ```
 
 ⚠ The key is `github.owner`, **not** `github.org`. This file said `github.org`
-until GH #96. `bd` reads only `github.owner`, so `bd github status` reported
-"Not configured" and the GitHub half of the sync stayed idle. That is why
+until GH #96. The sync owner comes from `github.owner`; `github.org` is simply
+not a key `bd` consults, so `bd github status` reported "Not configured" and the
+GitHub half of the sync stayed idle. That is why
 `.beads/issues.jsonl` sat nine issues behind (it topped out at #85 while the repo
 was at #108). Verify with `bd github status` rather than assuming a set key took
 effect.

@@ -39,8 +39,14 @@ cargo test --features cli --locked run3_conversion_manifest_names_fully_classifi
 
 ⚠ Two known gaps, both tracked:
 
-- The fail-closed guard is **copy-pasted per input format**, and only the npy
-  copy is tested — the safetensors path has zero coverage (**GH #103**).
+- The **safetensors input path has zero test coverage** (**GH #103**). The raise
+  itself is shared, not duplicated: `ManifestV2UnmatchedTensor` is returned from
+  exactly one place, `classify_and_decide` (`src/core/stream.rs:601`), which both
+  builders call. What *is* duplicated per format is the pre-skip invocation that
+  makes fail-closed apply to unsupported dtypes before the intentional `continue`
+  (`stream.rs:628-631` safetensors vs `:666-669` npy) — and only the npy copy of
+  that block is exercised, by `v2_manifest_fails_closed_on_unmatched_other_dtype`
+  (`:1351`) via the `write_npy_i8` fixture.
 - `GROK_OZEMPIC_DISSECT_RUN` has two incompatible meanings, and the documented
   value makes the run3 oracle **silently skip while passing** (**GH #102**). If
   that test reports `skip:`, believe the skip, not the green.
