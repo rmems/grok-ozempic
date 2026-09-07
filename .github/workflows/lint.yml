@@ -60,9 +60,11 @@ jobs:
         with:
           persist-credentials: false
 
-      # Pinned image rather than `curl | bash` from a moving branch, matching the
-      # SHA-pinning convention used for actions elsewhere in this directory.
+      # Pinned by image digest, not `curl | bash` from a moving branch and not a
+      # mutable tag: `:1.7.7` can be re-pushed to different content, which is why
+      # Codacy's InsecureModulesLibraries rule rejected the tag form. The digest
+      # is immutable. Comment carries the human-readable version.
       - name: actionlint
-        uses: docker://rhysd/actionlint:1.7.7
+        uses: docker://rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 # 1.7.7
         with:
           args: -color
