@@ -211,7 +211,8 @@ cargo doc --no-deps --all-features --locked
 # + the thirteen python3 -m unittest lines above
 for f in scripts/*.sh; do bash -n "$f"; done
 # GH #98 also made these blocking in CI (.github/workflows/lint.yml):
-shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh
+shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh \
+           .beads/hooks/pre-commit .beads/hooks/pre-push
 actionlint
 
 # CLI smoke
