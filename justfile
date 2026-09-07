@@ -349,6 +349,30 @@ doctor:
       status missing "jq not on PATH (required for just ci coauthor hook tests)"
     fi
 
+    echo "=== git hooks (GH #97) ==="
+    # Nothing used to detect a broken pre-push gate. beads owns core.hooksPath,
+    # and git consults only that directory, so .githooks runs only if the beads
+    # hooks chain to it. Verify the chain, not just the path.
+    hp="$(git config --get core.hooksPath 2>/dev/null || true)"
+    if [[ -z "${hp}" ]]; then
+      status warn "core.hooksPath unset — no hook runs; see REVIEW.md bootstrap"
+    else
+      status ok "core.hooksPath=${hp}"
+      chained=0
+      for h in pre-commit pre-push; do
+        if [[ -f "${hp}/${h}" ]] && grep -q 'PROJECT QUALITY GATE' "${hp}/${h}" 2>/dev/null; then
+          chained=$((chained + 1))
+        fi
+      done
+      if [[ "${chained}" -eq 2 ]]; then
+        status ok "project gate chained into both hooks (just check / just review)"
+      elif [[ "${chained}" -eq 1 ]]; then
+        status warn "project gate chained into only 1 of 2 hooks — re-apply GH #97 block"
+      else
+        status missing "project gate NOT chained: .githooks never runs, so 'just review' does not gate pushes (GH #97)"
+      fi
+    fi
+
     echo "=== crate / CLI ==="
     if [[ -f Cargo.toml ]]; then
       status ok "Cargo.toml present"
