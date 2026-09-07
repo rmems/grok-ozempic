@@ -118,11 +118,11 @@ fn load_manifest_ir(
     )
     .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
 
-    reports::detector::build_ir_from_manifest(&dissect_manifest, actual_checkpoint, actual_shards)
+    reports::detector::build_grok1_spec_ir(&dissect_manifest, actual_checkpoint, actual_shards)
         .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))
 }
 
-/// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_ir_from_manifest`].
+/// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_grok1_spec_ir`].
 fn resolve_checkpoint_and_shards(
     weights_dir: Option<&Path>,
     checkpoint: Option<String>,
