@@ -1,0 +1,24 @@
+REVIEW.md
+  s_50f2c79e111596::t_071c1f97588504 169-172,174-175,178,190-191
+  s_50f2c79e111596::t_dcd45e24db517c 26-28
+CLAUDE.md
+  s_50f2c79e111596::t_831f9ed3971f80 210,212-214
+  s_50f2c79e111596::t_4c848157070435 183,186-187
+  s_50f2c79e111596::t_bb06608ced0e8c 201-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "60bb7c1d707e77bb7e5c3c0fdc59646fd071d59c",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
