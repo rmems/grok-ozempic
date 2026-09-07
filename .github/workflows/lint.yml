@@ -49,7 +49,7 @@ jobs:
       # Covers scripts/*.sh, the tracked git hooks, and the Codex hook scripts.
       # The hooks have no .sh suffix, so they are listed explicitly.
       - name: ShellCheck
-        run: shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh
+        run: shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh .beads/hooks/pre-commit .beads/hooks/pre-push
 
   python:
     name: ruff

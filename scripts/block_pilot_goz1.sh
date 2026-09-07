@@ -39,7 +39,17 @@ CKPT="${CKPT:-$HOME/.models/xai-grok-1/ckpt-0}"
 # Token embedding shard: block 0's real attention input (see EMBED_ARGS below).
 EMBED_SHARD="${EMBED_SHARD:-tensor00000_000}"
 DISSECT_RUN="${GROK_OZEMPIC_DISSECT_RUN:-$HOME/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN}"
-RUN3="$DISSECT_RUN/manifests/xai-grok-1-ckpt-0"
+# GROK_OZEMPIC_DISSECT_RUN accepts either the run root or the already-resolved
+# run3 dir (GH #102). Probe direct-then-nested, matching justfile:261-278 and
+# resolve_run3_conversion_manifest() in src/core/stream.rs. Before this, the
+# error message at the bottom of this block promised both shapes while the code
+# only ever appended the subdir -- so passing the resolved dir double-appended
+# and failed with a path that did not exist.
+if [[ -f "$DISSECT_RUN/conversion-manifest.json" ]]; then
+  RUN3="$DISSECT_RUN"
+else
+  RUN3="$DISSECT_RUN/manifests/xai-grok-1-ckpt-0"
+fi
 ART="${ART:-$HOME/.models/xai-grok-1/artifacts}/block-pilot"
 BIN="$REPO/target/release/grok-ozempic"
 BLOCK_LABEL="$(printf 'block_%03d' "$BLOCK")"
