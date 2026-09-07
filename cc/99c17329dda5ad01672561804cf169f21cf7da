@@ -1,0 +1,21 @@
+src/reports/detector.rs
+  s_50f2c79e111596::t_2796253d54b3b8 103-104,124-140,238,242
+  s_50f2c79e111596::t_04cd9322f1775e 142-148,184-185,187-189,199-201,240,244
+  s_50f2c79e111596::t_8feb77deb2ccc0 71-101,256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cc99c17329dda5ad01672561804cf169f21cf7da",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
