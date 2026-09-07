@@ -1863,7 +1863,7 @@ mod tests {
         if let Some(entry) = index
             .entries
             .iter_mut()
-            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_qkv")
+            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_proj_i8.narrow")
         {
             entry.structural_name = "block_002.slot_03.tampered".to_string();
         }
@@ -1916,12 +1916,27 @@ mod tests {
                 report.failures
             );
         }
+        // Target the specific tampered entry, not just any mismatch.
+        //
+        // `manifest_artifact_mismatch` is raised by a compound OR over
+        // structural_name / block / slot / kind / policy, and every branch emits
+        // the same message prefix. Asserting only `contains("expected
+        // structural_name")` was therefore satisfied by the *router* mutation
+        // above (which trips the `block` branch), so the structural_name branch
+        // itself was never actually pinned -- and until this commit the entry
+        // this block tampers with was looked up under a name the code never
+        // produces, so the mutation did not even happen. Both halves are fixed:
+        // the lookup uses the real name, and the assertion names the entry and
+        // the tampered value.
         assert!(
             report.failures.iter().any(|failure| {
                 failure.category == "manifest_artifact_mismatch"
-                    && failure.message.contains("expected structural_name")
+                    && failure.tensor.as_deref() == Some("block_002.slot_03.attn_proj_i8.narrow")
+                    && failure
+                        .message
+                        .contains("got structural_name block_002.slot_03.tampered")
             }),
-            "missing structural_name mismatch failure: {:?}",
+            "missing structural_name mismatch for the tampered attn_proj_i8.narrow entry: {:?}",
             report.failures
         );
     }
