@@ -9,12 +9,20 @@ just check
 just test
 ```
 
-Equivalent fallback if `just` is unavailable:
+Fallback if `just` is unavailable. Note `just test` also runs **thirteen**
+Python unittest modules, which the Rust commands alone do not -- so this is not
+equivalent unless you include the Python loop:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
+
+# The Python half of `just test`. Read the list from the justfile rather than
+# retyping it -- a hand-copied list is what drifted to five modules before.
+python3 -c 'import numpy; print(numpy.__version__)'
+sed -n '/^    mods=(/,/^    )/p' justfile | grep -oE 'scripts\.[a-z0-9_]+' \
+  | while read -r m; do python3 -m unittest "$m" -v || exit 1; done
 ```
 
 Optional broader check (slower) — or use `just ci`:

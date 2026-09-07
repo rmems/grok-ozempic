@@ -8,8 +8,10 @@ Prefer the root `justfile` (#62 / RM-250):
 just ci
 ```
 
-Canonical matrix fallback if `just` is unavailable (`--locked` is intentional and
-stricter than GHA; include Python + `bash -n` so the fallback matches `just ci`):
+Fallback if `just` is unavailable (`--locked` is intentional and stricter than
+GHA). **This is not a hand-maintained copy of the module list** -- that is what
+went stale before: this file listed five Python modules while `just ci` ran
+thirteen, and named no linters at all, while claiming parity.
 
 ```bash
 cargo fmt --all -- --check
@@ -17,13 +19,20 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --all-features --locked
 cargo build --all-targets --all-features --locked
 cargo doc --no-deps --all-features --locked
+
+# Python modules: read the list from the justfile rather than retyping it.
 python3 -c 'import numpy; print(numpy.__version__)'
-python3 -m unittest scripts.test_export_grok1_embedding_npy -v
-python3 -m unittest scripts.test_export_grok1_int8_npy -v
-python3 -m unittest scripts.test_export_grok1_int8_select -v
-python3 -m unittest scripts.test_route_preservation_surface -v
-python3 -m unittest scripts.test_route_preservation_io -v
+sed -n '/^    mods=(/,/^    )/p' justfile | grep -oE 'scripts\.[a-z0-9_]+' \
+  | while read -r m; do python3 -m unittest "$m" -v || exit 1; done
+
 for f in scripts/*.sh; do bash -n "$f"; done
+
+# Linters -- blocking in CI via .github/workflows/lint.yml (GH #98 / #101).
+# Omitting these is the most common way a "green" local run disagrees with CI.
+ruff check scripts/                      # pip install 'ruff==0.15.14'
+shellcheck scripts/*.sh .githooks/pre-commit .githooks/pre-push \
+           .codex/hooks/*.sh .beads/hooks/pre-commit .beads/hooks/pre-push
+actionlint
 ```
 
 Fast smoke while iterating on CLI-only edits (not sufficient alone before merge):
@@ -35,12 +44,7 @@ just test
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
-python3 -c 'import numpy; print(numpy.__version__)'
-python3 -m unittest scripts.test_export_grok1_embedding_npy -v
-python3 -m unittest scripts.test_export_grok1_int8_npy -v
-python3 -m unittest scripts.test_export_grok1_int8_select -v
-python3 -m unittest scripts.test_route_preservation_surface -v
-python3 -m unittest scripts.test_route_preservation_io -v
+# `just test` also runs all thirteen Python modules -- see the loop above.
 ```
 
 Path-scoped extras (only when those paths change; not part of `just ci`):

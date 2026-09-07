@@ -37,19 +37,20 @@ cargo test --features cli --locked v2_structural_manifest_end_to_end
 cargo test --features cli --locked run3_conversion_manifest_names_fully_classified
 ```
 
-⚠ Two known gaps, both tracked:
+⚠ Both gaps this section used to list are now **closed**:
 
-- The **safetensors input path has zero test coverage** (**GH #103**). The raise
-  itself is shared, not duplicated: `ManifestV2UnmatchedTensor` is returned from
-  exactly one place, `classify_and_decide` (`src/core/stream.rs:601`), which both
-  builders call. What *is* duplicated per format is the pre-skip invocation that
-  makes fail-closed apply to unsupported dtypes before the intentional `continue`
-  (`stream.rs:628-631` safetensors vs `:666-669` npy) — and only the npy copy of
-  that block is exercised, by `v2_manifest_fails_closed_on_unmatched_other_dtype`
-  (`:1351`) via the `write_npy_i8` fixture.
-- `GROK_OZEMPIC_DISSECT_RUN` has two incompatible meanings, and the documented
-  value makes the run3 oracle **silently skip while passing** (**GH #102**). If
-  that test reports `skip:`, believe the skip, not the green.
+- **#103** added the missing safetensors coverage, including the Other-dtype
+  pre-skip path that had none. Verified by mutation: deleting the safetensors
+  guard fails exactly one test.
+- **#102** made `GROK_OZEMPIC_DISSECT_RUN` accept the run root as well as the
+  resolved run3 dir, and made it **panic** when set but unresolvable instead of
+  skipping. A `skip:` from that test now means "not configured", never
+  "configured and ignored".
+- **#115** additionally made safetensors packs byte-reproducible; tensor order
+  no longer depends on HashMap iteration order.
+
+If that test still reports `skip:`, the run simply is not mounted -- which is
+the expected case in CI.
 
 ## Related
 

@@ -125,8 +125,9 @@ _optional-linters:
     # Optional *locally only*. Since GH #98/#101 all three run unconditionally in
     # .github/workflows/lint.yml, so a `skip:` here means "not checked on this
     # machine", not "not checked at all" — CI will still fail the PR.
-    # Local coverage is narrower than CI's: CI also lints .githooks/* and
-    # .codex/hooks/*.sh. Install both to reproduce CI exactly.
+    # The shellcheck file list below is identical to lint.yml's, so an installed
+    # local shellcheck reproduces CI's shell coverage exactly. Install all three
+    # binaries (actionlint, ruff, shellcheck) for the full local gate.
     set -euo pipefail
     if command -v actionlint >/dev/null 2>&1; then
       echo "+ actionlint"
@@ -142,7 +143,8 @@ _optional-linters:
     fi
     if command -v shellcheck >/dev/null 2>&1; then
       shopt -s nullglob
-      scripts=(scripts/*.sh .githooks/pre-commit .githooks/pre-push .codex/hooks/*.sh)
+      scripts=(scripts/*.sh .githooks/pre-commit .githooks/pre-push \
+               .codex/hooks/*.sh .beads/hooks/pre-commit .beads/hooks/pre-push)
       if [[ ${#scripts[@]} -gt 0 ]]; then
         echo "+ shellcheck ${scripts[*]}"
         shellcheck "${scripts[@]}"
