@@ -1,0 +1,19 @@
+.beads/config.yaml
+  s_50f2c79e111596::t_0311a6e872d7dd 51-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b6fe45269b091bb1e2da5e1f8346a5e8d13207e3",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
