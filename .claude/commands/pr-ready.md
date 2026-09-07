@@ -44,7 +44,13 @@ just test
 cargo fmt --all -- --check
 cargo clippy --all-targets --features cli --locked -- -D warnings
 cargo test --features cli --locked
-# `just test` also runs all thirteen Python modules -- see the loop above.
+
+# `just test` also runs every Python module. A comment pointing at the loop
+# above does not run it, so the loop is repeated here -- this block is only a
+# mirror of `just check` + `just test` if it actually executes both halves.
+python3 -c 'import numpy; print(numpy.__version__)'
+sed -n '/^    mods=(/,/^    )/p' justfile | grep -oE 'scripts\.[a-z0-9_]+' \
+  | while read -r m; do python3 -m unittest "$m" -v || exit 1; done
 ```
 
 Path-scoped extras (only when those paths change; not part of `just ci`):
