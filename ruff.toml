@@ -1,0 +1,44 @@
+# Python lint gate for scripts/ (GH #101).
+#
+# Before this, ~24k lines of Python across 34 scripts had no linter, type
+# checker or formatter of any kind: `just ci` ran `py_compile` (syntax only),
+# Qodana is `linter: qodana-rust`, and Codacy's pylint ruleset is gitignored and
+# therefore unversioned. Rust had `clippy -D warnings`; Python had nothing.
+#
+# Blocking from day one, so the rule set is chosen to be worth blocking on.
+
+target-version = "py311"          # matches .codacy/codacy.yaml runtime
+line-length = 100                 # documentation only; E501 is not enabled -- see below
+
+[lint]
+# High-signal only. Every rule here catches something that can be wrong at
+# runtime or is a latent bug, not a matter of taste.
+#
+#   F   pyflakes            undefined names, unused imports, f-string bugs
+#   B   flake8-bugbear      mutable defaults, loop-variable capture, bare zip()
+#   E4  imports             module-import-not-at-top, shadowed builtins
+#   E7  statements          comparison/lambda/type errors
+#   E9  syntax/IO           E9 is the "this will not run" class
+#   C4  comprehensions      correctness-adjacent simplifications
+#   UP  pyupgrade           deprecated stdlib imports and forms
+select = ["F", "B", "E4", "E7", "E9", "C4", "UP"]
+
+# DELIBERATELY NOT ENABLED
+#
+# E501 (line-too-long) accounts for 374 of the 376 violations a full `E,W` run
+# reports on this tree. These are research and experiment scripts carrying long
+# tensor names, structural paths and tabular literals; reflowing them would be a
+# ~374-line diff with no correctness value, and it would bury the seven findings
+# that actually matter. Enable it in a dedicated PR if you also want a formatter.
+#
+# SIM / RET are omitted for the same reason at smaller scale: they are style
+# opinions, and a blocking gate should not fail a PR over taste.
+
+[lint.per-file-ignores]
+# Test modules legitimately build closures inside a loop and consume them within
+# the same iteration (mock.patch side_effect, immediate invocation), which B023
+# cannot distinguish from a closure that escapes. Verified by hand for
+# test_grok1_multiblock_v4_supervisor.py: the loop is
+# `for signum in (SIGINT, SIGTERM)` and every closure is passed straight into
+# mock.patch.object / self._run within that iteration.
+"scripts/test_*.py" = ["B023"]

@@ -24,7 +24,7 @@ _write_shard = _sf.write_shard
 _write_quantized = _sf.write_quantized
 
 
-def _array_spec(shape: tuple[int, ...], descr: str) -> "exp.ArraySpec":
+def _array_spec(shape: tuple[int, ...], descr: str) -> exp.ArraySpec:
     """An ArraySpec with a self-consistent nbytes for `shape`/`descr`.
 
     Shared by the classes below. Argument order matches ArraySpec's own fields;

@@ -122,7 +122,7 @@ _optional-linters:
     #!/usr/bin/env bash
     # Fail-fast when an installed optional linter finds issues (just ci must not greenwash).
     #
-    # Optional *locally only*. Since GH #98 both run unconditionally in
+    # Optional *locally only*. Since GH #98/#101 all three run unconditionally in
     # .github/workflows/lint.yml, so a `skip:` here means "not checked on this
     # machine", not "not checked at all" — CI will still fail the PR.
     # Local coverage is narrower than CI's: CI also lints .githooks/* and
@@ -133,6 +133,12 @@ _optional-linters:
       actionlint
     else
       echo "skip: actionlint not installed (lint.yml enforces it in CI)"
+    fi
+    if command -v ruff >/dev/null 2>&1; then
+      echo "+ ruff check scripts/"
+      ruff check scripts/
+    else
+      echo "skip: ruff not installed (lint.yml enforces it in CI; pip install 'ruff==0.15.14')"
     fi
     if command -v shellcheck >/dev/null 2>&1; then
       shopt -s nullglob
@@ -342,6 +348,11 @@ doctor:
       status ok "shellcheck present"
     else
       status warn "shellcheck not installed (optional for just ci)"
+    fi
+    if command -v ruff >/dev/null 2>&1; then
+      status ok "ruff $(ruff --version 2>/dev/null | head -1)"
+    else
+      status warn "ruff not installed (blocking in CI since #101; pip install 'ruff==0.15.14')"
     fi
     if command -v jq >/dev/null 2>&1; then
       status ok "jq $(jq --version 2>/dev/null | head -1)"
