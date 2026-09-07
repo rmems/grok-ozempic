@@ -409,8 +409,11 @@ def _emit_result(result: dict, *, as_json: bool, json_out: Path | None) -> None:
             canonical_json(result), encoding="utf-8"
         )
     if as_json:
+        # canonical_json already ends with exactly one newline, so no print()
+        # here. Adding one emitted a trailing blank line, which made stdout
+        # disagree byte-for-byte with the --json-out file written just above --
+        # the opposite of what canonicalising the writers was for.
         sys.stdout.write(canonical_json(result))
-        print()
     else:
         _print_human(result)
 
