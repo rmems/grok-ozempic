@@ -42,6 +42,11 @@ jobs:
       - name: Unit tests (GOZ1 pack readback)
         run: python3 -m unittest scripts.test_route_preservation_io -v
 
+      # The documented under-packing guard (GH #107). Fail-closed cannot see an
+      # absent tensor, so this is the check that stands between a short pack and
+      # a published "certified" result.
+      - name: Unit tests (pack completeness gate)
+        run: python3 -m unittest scripts.test_route_preservation_completeness -v
       # Committed artifacts must stay in canonical form (GH #108) -- the guard
       # that stops three writers disagreeing on sort_keys again.
       - name: Unit tests (canonical JSON + committed artifacts)

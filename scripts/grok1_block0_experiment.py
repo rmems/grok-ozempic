@@ -21,7 +21,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import platform
 import sys
 import time
@@ -31,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 from grok1_block_forward import (  # noqa: E402
     EMBEDDING_MULTIPLIER,
@@ -462,7 +462,7 @@ def run(args: argparse.Namespace) -> int:
     }
     args.out.mkdir(parents=True, exist_ok=True)
     out_json = args.out / "block0-forward-metrics.json"
-    out_json.write_text(json.dumps(payload, indent=2) + "\n")
+    out_json.write_text(canonical_json(payload))
     print(f"wrote {out_json}")
     return 0
 
@@ -485,7 +485,7 @@ def write_unresolved_report(out: Path, reason: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     dest = out / "block0-forward-unresolved.json"
     dest.write_text(
-        json.dumps(
+        canonical_json(
             {
                 "provenance": {
                     "issue": "GH #61 / Linear RM-249",
@@ -501,9 +501,7 @@ def write_unresolved_report(out: Path, reason: str) -> Path:
                 "unresolved_reason": reason,
                 "measurements": None,
             },
-            indent=2,
-        )
-        + "\n"
+            )
     )
     return dest
 

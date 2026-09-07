@@ -15,7 +15,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use half::f16;
@@ -472,38 +472,7 @@ fn quantize_safetensors_entry(
         )));
     }
 
-    if entry.emits_fp16_bytes() {
-        let fp16_bytes = encode_fp16_bytes(dtype, view.data())?;
-        Ok(QuantizedPayload {
-            bytes: fp16_bytes,
-            ternary_sparsity: None,
-            stats: TensorRowStats::fp16(),
-        })
-    } else {
-        let qt = match dtype {
-            SourceDtype::F32 => {
-                let f32_slice = bytemuck_cast_f32(view.data());
-                quantize_f32(f32_slice, entry.gif_threshold)
-            }
-            SourceDtype::F16 => {
-                let f16_slice: &[f16] = bytemuck_cast_f16(view.data());
-                quantize_f16(f16_slice, entry.gif_threshold)
-            }
-            SourceDtype::BF16 => {
-                let f32_vals = bf16_bytes_to_f32(view.data());
-                quantize_f32(&f32_vals, entry.gif_threshold)
-            }
-            SourceDtype::Other => unreachable!(),
-        };
-        Ok(QuantizedPayload {
-            bytes: qt.packed,
-            ternary_sparsity: Some(qt.sparsity),
-            // The applied multiplier comes back from the quantizer rather than
-            // being re-read from `entry`, so the row records what the gate
-            // actually used.
-            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
-        })
-    }
+    quantize_raw(dtype, view.data(), entry)
 }
 
 fn quantize_npy_entry(
@@ -518,40 +487,55 @@ fn quantize_npy_entry(
             entry.source_path.display()
         )));
     }
-    let raw = npy.data();
+    quantize_raw(dtype, npy.data(), entry)
+}
+
+/// Turn one tensor's raw source bytes into its GOZ1 payload.
+///
+/// Format-independent by construction: everything past "give me the bytes and
+/// their dtype" was byte-identical between the safetensors and npy paths, and
+/// keeping two copies is how the GH #40 fail-closed guard ended up tested on
+/// only one of them (GH #103). The callers keep exactly what genuinely differs
+/// — how the source is opened, how its dtype is read, and their distinct
+/// unsupported-dtype messages, which are user-visible and not interchangeable.
+///
+/// `dtype` must not be [`SourceDtype::Other`]; callers reject that first so
+/// they can name the offending file in the format's own vocabulary.
+fn quantize_raw(dtype: SourceDtype, raw: &[u8], entry: &ManifestEntry) -> Result<QuantizedPayload> {
+    debug_assert_ne!(
+        dtype,
+        SourceDtype::Other,
+        "callers must reject Other before calling quantize_raw"
+    );
 
     if entry.emits_fp16_bytes() {
-        let fp16_bytes = encode_fp16_bytes(dtype, raw)?;
-        Ok(QuantizedPayload {
-            bytes: fp16_bytes,
+        return Ok(QuantizedPayload {
+            bytes: encode_fp16_bytes(dtype, raw)?,
             ternary_sparsity: None,
             stats: TensorRowStats::fp16(),
-        })
-    } else {
-        let qt = match dtype {
-            SourceDtype::F32 => {
-                let f32_slice = bytemuck_cast_f32(raw);
-                quantize_f32(f32_slice, entry.gif_threshold)
-            }
-            SourceDtype::F16 => {
-                let f16_slice: &[f16] = bytemuck_cast_f16(raw);
-                quantize_f16(f16_slice, entry.gif_threshold)
-            }
-            SourceDtype::BF16 => {
-                let f32_vals = bf16_bytes_to_f32(raw);
-                quantize_f32(&f32_vals, entry.gif_threshold)
-            }
-            SourceDtype::Other => unreachable!(),
-        };
-        Ok(QuantizedPayload {
-            bytes: qt.packed,
-            ternary_sparsity: Some(qt.sparsity),
-            // The applied multiplier comes back from the quantizer rather than
-            // being re-read from `entry`, so the row records what the gate
-            // actually used.
-            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
-        })
+        });
     }
+
+    let qt = match dtype {
+        SourceDtype::F32 => quantize_f32(bytemuck_cast_f32(raw), entry.gif_threshold),
+        SourceDtype::F16 => {
+            let f16_slice: &[f16] = bytemuck_cast_f16(raw);
+            quantize_f16(f16_slice, entry.gif_threshold)
+        }
+        SourceDtype::BF16 => {
+            let f32_vals = bf16_bytes_to_f32(raw);
+            quantize_f32(&f32_vals, entry.gif_threshold)
+        }
+        SourceDtype::Other => unreachable!("rejected by the caller"),
+    };
+    Ok(QuantizedPayload {
+        bytes: qt.packed,
+        ternary_sparsity: Some(qt.sparsity),
+        // The applied multiplier comes back from the quantizer rather than
+        // being re-read from `entry`, so the row records what the gate
+        // actually used.
+        stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
+    })
 }
 
 /// Encode raw source bytes as FP16 for tensors that emit through the
@@ -639,26 +623,8 @@ fn build_manifest_safetensors(
         named.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (name, view) in named {
             let dtype = parse_safetensors_dtype(view.dtype());
-            if dtype == SourceDtype::Other {
-                // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
-                // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
-                // Under V2 still classify the name so fail-closed applies to *all* present tensors
-                // (including unsupported dtypes) before the intentional skip — GH #40 / RM-191.
-                if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
-                    let _ = classify_and_decide(&name, dissect_manifest, config)?;
-                }
-                continue;
-            }
-            let (_class, precision, gif_threshold) =
-                classify_and_decide(&name, dissect_manifest, config)?;
             let shape: Vec<u64> = view.shape().iter().map(|&d| d as u64).collect();
-            v.push(ManifestEntry {
-                source_path: shard.clone(),
-                tensor_name: name,
-                shape,
-                precision,
-                gif_threshold,
-            });
+            push_classified_entry(&mut v, shard, name, dtype, shape, dissect_manifest, config)?;
         }
     }
     Ok(v)
@@ -677,28 +643,64 @@ fn build_manifest_npy(
             GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
         })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
-        if dtype == SourceDtype::Other {
-            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
-            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
-            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
-            // Under V2 still classify the name so fail-closed applies before the skip (GH #40 / RM-191).
-            if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
-                let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
-            }
-            continue;
-        }
-        let (_class, precision, gif_threshold) =
-            classify_and_decide(&tensor_name, dissect_manifest, config)?;
         let shape: Vec<u64> = npy.shape().iter().map(|&d| d as u64).collect();
-        v.push(ManifestEntry {
-            source_path: path.clone(),
+        push_classified_entry(
+            &mut v,
+            path,
             tensor_name,
+            dtype,
             shape,
-            precision,
-            gif_threshold,
-        });
+            dissect_manifest,
+            config,
+        )?;
     }
     Ok(v)
+}
+
+/// Classify one source tensor and append its [`ManifestEntry`], or skip it.
+///
+/// This is the single place the GH #40 / RM-191 fail-closed rule is applied to
+/// a discovered tensor. It used to be copy-pasted once per input format, which
+/// is exactly how the safetensors copy ended up exercised by nothing until
+/// GH #103 — the raise in `classify_and_decide` was shared, but the call that
+/// reaches it for unsupported dtypes was not.
+///
+/// Unsupported (`SourceDtype::Other`) tensors are skipped by the float stream:
+/// i8/Other from the xai-dissect inventory are covered by the structural
+/// manifest for alignment only (see `grok1_inventory.rs` NOTE and
+/// `structural-manifest.json` `_i8_streaming_note`) and enter through the
+/// artifact wrapping path, not here. Under a V2 manifest their names are still
+/// classified **before** that skip, so a legacy or misspelled stem cannot
+/// silently disappear past fail-closed.
+///
+/// Note this rejects on *misclassification*, never on *absence*: a tensor that
+/// is simply missing from the input produces no name to match. Completeness is
+/// enforced separately — see `.claude/rules/goz1-pipeline.md`.
+fn push_classified_entry(
+    out: &mut Vec<ManifestEntry>,
+    source_path: &Path,
+    tensor_name: String,
+    dtype: SourceDtype,
+    shape: Vec<u64>,
+    dissect_manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<()> {
+    if dtype == SourceDtype::Other {
+        if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+            let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
+        }
+        return Ok(());
+    }
+    let (_class, precision, gif_threshold) =
+        classify_and_decide(&tensor_name, dissect_manifest, config)?;
+    out.push(ManifestEntry {
+        source_path: source_path.to_path_buf(),
+        tensor_name,
+        shape,
+        precision,
+        gif_threshold,
+    });
+    Ok(())
 }
 
 fn collect_safetensor_shards(dir: &str) -> Result<Vec<PathBuf>> {

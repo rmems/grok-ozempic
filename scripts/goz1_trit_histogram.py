@@ -29,12 +29,14 @@ Stdlib-only (project convention for scripts/). Usage::
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import struct
 import sys
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 
 DATA_ALIGNMENT = 32
 META_U32 = 0
@@ -404,10 +406,10 @@ def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:
 def _emit_result(result: dict, *, as_json: bool, json_out: Path | None) -> None:
     if json_out is not None:
         json_out.expanduser().write_text(
-            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+            canonical_json(result), encoding="utf-8"
         )
     if as_json:
-        json.dump(result, sys.stdout, indent=2)
+        sys.stdout.write(canonical_json(result))
         print()
     else:
         _print_human(result)
