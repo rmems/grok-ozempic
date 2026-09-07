@@ -1,0 +1,31 @@
+.github/workflows/lint.yml
+  s_50f2c79e111596::t_40aae267d6d8d6 1-68
+.github/workflows/python-scripts.yml
+  s_50f2c79e111596::t_60082628ede20b 63-71
+.github/workflows/docker.yml
+  s_50f2c79e111596::t_15dbcbba5d6d5e 4-5,10
+.github/workflows/cargo-audit.yml
+  s_50f2c79e111596::t_15dbcbba5d6d5e 4-5
+.github/workflows/codecov.yml
+  s_50f2c79e111596::t_15dbcbba5d6d5e 4-5,10
+.github/workflows/rust.yml
+  s_50f2c79e111596::t_5ee5417c08acd1 4-7,12
+justfile
+  s_50f2c79e111596::t_7e3ada191eef89 124-129,135,139,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "97021be58cb90ec79601dd5fc6ec37a01ea1781a",
+  "prompts": {},
+  "sessions": {
+    "s_50f2c79e111596": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd1295b5-a238-442b-8120-e973cf07a8a6",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
