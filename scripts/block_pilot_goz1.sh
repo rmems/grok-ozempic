@@ -60,7 +60,7 @@ fi
 for required in conversion-manifest.json quant-plan.json pilot-selection-plan.json; do
   [ -f "$RUN3/$required" ] || {
     echo "error: run3 $required not found under $RUN3" >&2
-    echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root" >&2
+    echo "       set GROK_OZEMPIC_DISSECT_RUN to the xai-dissect run root (or the resolved .../manifests/xai-grok-1-ckpt-0 dir; both are accepted -- GH #102)" >&2
     exit 1
   }
 done

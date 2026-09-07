@@ -1633,36 +1633,142 @@ mod tests {
         assert_structural_fixture_stats(&stats);
     }
 
+    /// The two shapes `GROK_OZEMPIC_DISSECT_RUN` is written as in this repo.
+    ///
+    /// `scripts/block_pilot_goz1.sh:41`, `.claude/rules/goz1-pipeline.md` and
+    /// `reports/grok-1-block-pilot/results.md:481` all export the **run root**
+    /// (`.../LATEST_CORRECT_GROK1_RUN`), while this test historically joined
+    /// `conversion-manifest.json` directly and therefore required the
+    /// **resolved run3 dir** (`.../manifests/xai-grok-1-ckpt-0`). The justfile
+    /// already probed both (`justfile:261-278`), which is how the ambiguity
+    /// stayed invisible. Probe both here too, in the same order.
+    fn resolve_run3_conversion_manifest(base: &std::path::Path) -> Option<std::path::PathBuf> {
+        const RUN3_SUBDIR: &str = "manifests/xai-grok-1-ckpt-0";
+        let direct = base.join("conversion-manifest.json");
+        if direct.is_file() {
+            return Some(direct);
+        }
+        let nested = base.join(RUN3_SUBDIR).join("conversion-manifest.json");
+        if nested.is_file() {
+            return Some(nested);
+        }
+        None
+    }
+
+    /// Both documented shapes of `GROK_OZEMPIC_DISSECT_RUN` resolve, and a
+    /// path that is neither resolves to `None` (which the oracle turns into a
+    /// loud panic rather than a silent skip). Runs everywhere -- no mounted
+    /// xai-dissect run required, which is the point: the resolution contract
+    /// is testable even where the data is not.
+    #[test]
+    fn dissect_run_env_accepts_run_root_and_resolved_run3_dir() {
+        let root = scratch_dir("dissect-run-shapes");
+
+        // (a) already-resolved run3 dir: conversion-manifest.json sits directly
+        //     under the given path. This is the shape stream.rs required before
+        //     GH #102 -- the only one it accepted.
+        let resolved = root.join("resolved");
+        std::fs::create_dir_all(&resolved).unwrap();
+        std::fs::write(resolved.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&resolved),
+            Some(resolved.join("conversion-manifest.json")),
+            "resolved run3 dir must be accepted"
+        );
+
+        // (b) run root: the manifest is nested under manifests/xai-grok-1-ckpt-0.
+        //     This is the shape block_pilot_goz1.sh and the docs export, and the
+        //     one that used to make the oracle skip while passing.
+        let run_root = root.join("LATEST_CORRECT_GROK1_RUN");
+        let nested = run_root.join("manifests/xai-grok-1-ckpt-0");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&run_root),
+            Some(nested.join("conversion-manifest.json")),
+            "run root must be accepted (the documented value)"
+        );
+
+        // (c) neither shape -> None, so the caller can fail loudly.
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&empty),
+            None,
+            "a directory with neither layout must not resolve"
+        );
+
+        // (d) direct hit wins over nested when both exist -- deterministic order.
+        let both = root.join("both");
+        let both_nested = both.join("manifests/xai-grok-1-ckpt-0");
+        std::fs::create_dir_all(&both_nested).unwrap();
+        std::fs::write(both.join("conversion-manifest.json"), b"{}").unwrap();
+        std::fs::write(both_nested.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&both),
+            Some(both.join("conversion-manifest.json")),
+            "direct hit must win, matching the justfile probe order"
+        );
+    }
+
     /// Path-gated oracle against the latest authoritative xai-dissect run:
     /// every `structural_name` in run3's `conversion-manifest.json` must
     /// classify to an explicit rule of the in-tree structural manifest
     /// (routers/norms preserve, everything else ternary, zero Default).
     ///
-    /// Skips (passes trivially) when the run directory is absent, e.g. CI.
-    /// Override the location with `GROK_OZEMPIC_DISSECT_RUN`.
+    /// `GROK_OZEMPIC_DISSECT_RUN` may be either the run root or the resolved
+    /// run3 directory; both are accepted (GH #102).
+    ///
+    /// Skip policy, and the reason it is not uniform:
+    ///
+    /// - env **unset** and no usable default → skip. The run is multi-GiB and
+    ///   not mounted in CI; that is the expected case, not a failure.
+    /// - env **set but unresolvable** → **panic**. Before #102 this skipped,
+    ///   so exporting the documented value (the run root) made this oracle
+    ///   silently disable itself and report green. "You configured this and I
+    ///   ignored you" must not look like "not configured".
     #[test]
     fn run3_conversion_manifest_names_fully_classified() {
-        let run_dir = std::env::var("GROK_OZEMPIC_DISSECT_RUN")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .or_else(|| {
-                std::env::var("HOME").ok().map(|h| {
-                    std::path::PathBuf::from(h).join(
-                        "rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0",
+        const RUN3_SUBDIR: &str = "manifests/xai-grok-1-ckpt-0";
+        let conversion = match std::env::var("GROK_OZEMPIC_DISSECT_RUN") {
+            Ok(raw) if !raw.trim().is_empty() => {
+                let base = std::path::PathBuf::from(raw.trim());
+                resolve_run3_conversion_manifest(&base).unwrap_or_else(|| {
+                    panic!(
+                        "GROK_OZEMPIC_DISSECT_RUN={} does not resolve to a run3 \
+                         conversion-manifest.json.\n  probed: {}\n  probed: {}\n\
+                         Set it to either the xai-dissect run root or the \
+                         {RUN3_SUBDIR} directory. Unset it to skip this oracle.",
+                        base.display(),
+                        base.join("conversion-manifest.json").display(),
+                        base.join(RUN3_SUBDIR)
+                            .join("conversion-manifest.json")
+                            .display(),
                     )
                 })
-            });
-        let Some(conversion) = run_dir.map(|d| d.join("conversion-manifest.json")) else {
-            eprintln!("skip: no GROK_OZEMPIC_DISSECT_RUN and no HOME");
-            return;
+            }
+            // Unset, empty, or non-UTF-8: fall back to the conventional
+            // location under HOME and skip quietly if it is not mounted.
+            _ => {
+                let Some(home) = std::env::var("HOME").ok() else {
+                    eprintln!("skip: no GROK_OZEMPIC_DISSECT_RUN and no HOME");
+                    return;
+                };
+                let base = std::path::PathBuf::from(home)
+                    .join("rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN");
+                match resolve_run3_conversion_manifest(&base) {
+                    Some(p) => p,
+                    None => {
+                        eprintln!(
+                            "skip: no conversion-manifest.json under {} (xai-dissect run not mounted)",
+                            base.display()
+                        );
+                        return;
+                    }
+                }
+            }
         };
-        if !conversion.is_file() {
-            eprintln!(
-                "skip: {} not present (xai-dissect run not mounted)",
-                conversion.display()
-            );
-            return;
-        }
+        eprintln!("run3 oracle: using {}", conversion.display());
 
         let bytes = std::fs::read(&conversion).expect("read conversion manifest");
         let doc: serde_json::Value =
