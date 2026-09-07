@@ -1,48 +1,59 @@
-# /v2-bridge — GH #40 / Linear RM-191
+# /v2-bridge — verify the V2 structural manifest bridge (GH #40 / RM-191, **shipped**)
 
-Tracked work: GitHub **#40** / Linear **RM-191** as linked IDs only. **bd is the task tracker** when installed. Markdown below is acceptance/scope, not status.
+**This work is done.** #40 / RM-191 landed in `67034e8` ("feat: V2 structural name
+bridge for resolve_manifest (#40 / RM-191) (#55)"). This command is now a
+*verification* recipe, not a work order.
 
-## Problem
+Until GH #96 this file still described the shipped behaviour as broken —
+"`stream::resolve_manifest` **rejects** `MANIFEST_NAME_CONVENTION_V2`" — which is
+the opposite of what the code does. If you are reading this to find out what the
+manifest layer does, read `.claude/rules/manifests.md` first; it is the rule of
+record.
 
-- `dissect/grok-1/structural-manifest.json` has correct preserve/ternary rules (V2 names).
-- `stream::resolve_manifest` **rejects** `MANIFEST_NAME_CONVENTION_V2`.
-- V1 `baseline.json` has empty `ternary_candidates` and relies on default ternary — wrong for structural-named preserve tensors if names do not match.
+## What shipped
 
-## Scope (acceptance)
+`resolve_manifest` **accepts** V2 structural manifests, and V2 is **fail-closed**:
+a tensor whose name matches no explicit rule raises
+`GrokOzempicError::ManifestV2UnmatchedTensor` instead of falling through to
+`defaults`. That is the whole point — routers and norms cannot be silently
+ternary-quantized by a name-convention mismatch.
 
-1. Design checkpoint name ↔ structural name map **or** accept V2 when inputs already use structural names.
-2. Wire into `resolve_manifest` / classification **without breaking V1**.
-3. Tests: embedding ternary + router/norm **preserve** under V2 (no silent ternary).
-4. Prefer `structural-manifest` in docs for first real quant once wired.
+Classification order inside a loaded manifest is
+**preserve > fp16 > ternary_candidates > defaults**.
 
-## Touch points
+| Input names | Manifest | Behaviour |
+|---|---|---|
+| structural (`block_{NNN}.slot_{SS}.{kind}`) | `dissect/grok-1/structural-manifest.json` | V2, fail-closed |
+| legacy `blk.*` | `dissect/grok-1/baseline.json` | V1, defaults fallthrough allowed |
 
-- `src/core/stream.rs` — `resolve_manifest`
-- `src/core/manifest.rs` — `MANIFEST_NAME_CONVENTION_V1` / `V2`
-- `src/core/alignment.rs` — already exercises V2 for alignment
-- `src/core/selection.rs` / precision classification
-- `src/bin/grok-ozempic/quantize.rs` — CLI manifest path / env
+## Verify it still holds
 
-## Acceptance
+```bash
+# the fail-closed guard, both directions
+cargo test --features cli --locked v2_manifest_fails_closed
+cargo test --features cli --locked v2_structural_manifest_end_to_end
 
-- GOZ1 path can classify using structural-manifest rules
-- Routers/norms cannot fall into default ternary by name mismatch
-- V1 baseline path still works
-- `cargo test --all-targets --all-features --locked` green
+# the run3 classification oracle (skips when the dissect run is not mounted)
+cargo test --features cli --locked run3_conversion_manifest_names_fully_classified
+```
 
-## Non-goals
+⚠ Two known gaps, both tracked:
 
-- Full multi-model ModelInventory epic (#32)
-- CUDA / myelin work
+- The **safetensors input path has zero test coverage** (**GH #103**). The raise
+  itself is shared, not duplicated: `ManifestV2UnmatchedTensor` is returned from
+  exactly one place, `classify_and_decide` (`src/core/stream.rs:601`), which both
+  builders call. What *is* duplicated per format is the pre-skip invocation that
+  makes fail-closed apply to unsupported dtypes before the intentional `continue`
+  (`stream.rs:628-631` safetensors vs `:666-669` npy) — and only the npy copy of
+  that block is exercised, by `v2_manifest_fails_closed_on_unmatched_other_dtype`
+  (`:1351`) via the `write_npy_i8` fixture.
+- `GROK_OZEMPIC_DISSECT_RUN` has two incompatible meanings, and the documented
+  value makes the run3 oracle **silently skip while passing** (**GH #102**). If
+  that test reports `skip:`, believe the skip, not the green.
 
-## Done protocol
+## Related
 
-1. Quality gates (`/pr-ready` section 1 — full CI matrix including build + doc; path-scoped extras if needed)
-2. File follow-up **bd** issues for remaining work (before beads push)
-3. `bd close` for finished work / `bd update` for in-progress notes, then **`bd dolt push`** (required when bd is available)
-4. **Exception — no bd/Dolt (e.g. Claude Code cloud):** GH/Linear status only for handoff links; do not invent MEMORY.md
-5. Commit: **imperative subject**, body explains **why**, include `(#40 / RM-191)` when applicable
-6. `git pull --rebase && git push` (resolve errors, then retry) until branch is up to date and working tree is clean
-7. PR title includes `(#40 / RM-191)`; use `gh pr create` / `gh pr edit` as needed
-8. Clean temp artifacts, clear stashes, and prune remote branches; if cleanup touches tracked files, commit + push again and re-check `git status`
-9. Short handoff note (what shipped, what remains)
+- `.claude/rules/manifests.md` — V1 vs V2, classification order, delivery precedence
+- `.claude/rules/goz1-pipeline.md` — real pack recipes, and why V2 fail-closed does
+  **not** detect under-packing
+- `/quantize-embed`, `/pr-ready`

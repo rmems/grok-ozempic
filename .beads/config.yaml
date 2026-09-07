@@ -48,7 +48,10 @@
 # Non-secret keys (stored in the database):
 # - jira.url, jira.project
 # - linear.team_id
-# - github.org, github.repo
+# - github.owner, github.repo
+#   NOTE: the key is github.owner, not github.org. `bd github` reads only
+#   github.owner / GITHUB_OWNER; setting github.org leaves `bd github status`
+#   reporting "Not configured" and the GitHub sync idle (GH #96).
 #
 # Secret keys (stored in this file but prefer env vars to avoid git exposure):
 # - linear.api_key  → use LINEAR_API_KEY env var instead

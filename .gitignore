@@ -15,6 +15,13 @@
 .idea/
 .opencode/
 
+# Unreferenced duplicate of .claude/skills/ (GH #96). It is not wired to any
+# tool in this repo, nothing tracked references it, and its copy had already
+# drifted into a dangling `.Codex/rules/manifests.md` link that exists in no
+# casing. `.claude/` is the single source for skills and rules; other agent
+# surfaces (.codex/, .cursor/, .devin/) should *reference* it, not fork it.
+.agents/
+
 # Generated docs and dependencies (ignore for Codacy analysis)
 target/
 node_modules/
