@@ -68,6 +68,137 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
     Ok(())
 }
 
+/// The inventory block list: the embedding, the 64 per-block entries, and the
+/// final norm, in shard order.
+fn grok1_spec_inventory_blocks(inventory_blocks: Vec<InventoryBlock>) -> Vec<InventoryBlock> {
+    let mut blocks = Vec::with_capacity(inventory_blocks.len() + 2);
+    blocks.push(InventoryBlock {
+        label: "embedding".to_string(),
+        block: None,
+        shard_start: 0,
+        shard_end: 0,
+        tensors: 1,
+        bytes: GROK1_EMBEDDING_BYTES,
+        kinds: vec![InventoryBlockKind {
+            count: 1,
+            kind: "token_embedding".to_string(),
+        }],
+    });
+    blocks.extend(inventory_blocks);
+    blocks.push(InventoryBlock {
+        label: "final_norm".to_string(),
+        block: None,
+        shard_start: 1,
+        shard_end: 1,
+        tensors: 1,
+        bytes: GROK1_FINAL_NORM_BYTES,
+        kinds: vec![InventoryBlockKind {
+            count: 1,
+            kind: "final_norm".to_string(),
+        }],
+    });
+    blocks
+}
+
+/// Spec totals and hyperparameters. Constants, not a scan.
+fn grok1_spec_totals_and_hyperparameters() -> (TensorTotals, Hyperparameters) {
+    let totals = TensorTotals {
+        total: GROK1_TENSOR_TOTAL,
+        // Spec constants, not a scan. Deriving these from the checkpoint needs a
+        // manifest schema that carries per-tensor dtype/bytes; see this
+        // function's doc comment.
+        f32_tensors: GROK1_TENSOR_F32,
+        int8_tensors: GROK1_TENSOR_INT8,
+        quant_tensors: GROK1_TENSOR_QUANT,
+        total_elements: GROK1_TENSOR_TOTAL_ELEMENTS,
+        total_bytes: GROK1_TENSOR_TOTAL_BYTES,
+    };
+
+    let hyperparameters = Hyperparameters {
+        vocab_size: GROK1_VOCAB_SIZE,
+        d_model: GROK1_HIDDEN_DIM,
+        n_experts: GROK1_EXPERT_COUNT as usize,
+        d_ff: GROK1_FEED_FORWARD_LENGTH as usize,
+        n_blocks: GROK1_BLOCK_COUNT as usize,
+    };
+    (totals, hyperparameters)
+}
+
+/// The single SAAQ target row (the token embedding).
+fn grok1_spec_saaq_targets() -> Vec<SaaqTarget> {
+    let saaq_targets = vec![SaaqTarget {
+        rank: 1,
+        tensor: "embedding.slot_00.token_embedding".to_string(),
+        kind: "token_embedding".to_string(),
+        region: "embedding_heavy".to_string(),
+        readiness: 0.176,
+        opportunity: 0.331,
+        risk: 0.391,
+        disposition: "candidate".to_string(),
+    }];
+    saaq_targets
+}
+
+/// Per-block spec rows: one router, one expert-block descriptor and one
+/// inventory block for each of the 64 blocks.
+///
+/// Split out of [`build_grok1_spec_ir`] purely so that function stays readable
+/// (GH #106). These are still spec constants, not a scan — see that function's
+/// doc comment.
+fn grok1_spec_block_rows() -> (Vec<RouterEntry>, Vec<ExpertBlock>, Vec<InventoryBlock>) {
+    let mut routers = Vec::new();
+    let mut expert_blocks = Vec::new();
+    let mut inventory_blocks = Vec::new();
+
+    // Grok-1 architecture specific structural scan
+    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
+        routers.push(RouterEntry {
+            block: block_idx,
+            slot: 11,
+            shape: (GROK1_HIDDEN_DIM, GROK1_EXPERT_COUNT as usize),
+            orientation: "d_model_to_experts".to_string(),
+            experts: GROK1_EXPERT_COUNT as usize,
+            kind: "router".to_string(),
+            structural_name: format!("block_{:03}.routing_slot_11", block_idx),
+        });
+
+        expert_blocks.push(ExpertBlock {
+            block: block_idx,
+            experts: GROK1_EXPERT_COUNT as usize,
+            expert_tensors: 3,
+            slots: vec![0, 1, 2],
+            shapes: super::grok1_expected_expert_shape_strings().into(),
+        });
+
+        let shard_start = 2 + block_idx * GROK1_BLOCK_SHARDS;
+        inventory_blocks.push(InventoryBlock {
+            label: format!("block_{:03}", block_idx),
+            block: Some(block_idx),
+            shard_start,
+            shard_end: shard_start + GROK1_BLOCK_SHARDS - 1,
+            tensors: GROK1_BLOCK_SHARDS,
+            bytes: GROK1_BLOCK_BYTES,
+            kinds: block_kind_counts(),
+        });
+    }
+    (routers, expert_blocks, inventory_blocks)
+}
+
+/// The per-block [`SaaqCritical`] rows. Same spec-constant caveat as
+/// [`grok1_spec_block_rows`].
+fn grok1_spec_saaq_critical() -> Vec<SaaqCritical> {
+    let mut saaq_critical = Vec::new();
+    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
+        saaq_critical.push(SaaqCritical {
+            tensor: format!("block_{:03}.slot_11.router", block_idx),
+            readiness: 0.054,
+            risk: 0.651,
+            reasons: "distribution=dense_balanced<br>sampled_values=49152/49152<br>zero_fraction=0.0000<br>near_zero_fraction=0.0980<br>outlier_fraction=0.0000<br>peak_to_rms=4.729<br>linked to routing structure".to_string(),
+        });
+    }
+    saaq_critical
+}
+
 /// Build the Grok-1 **specification** IR.
 ///
 /// The name matters, because the old one (`build_ir_from_manifest`) implied a
@@ -104,82 +235,13 @@ pub fn build_grok1_spec_ir(
         .map(|s| s.to_string())
         .unwrap_or_else(|| manifest.model.source.clone());
 
-    let totals = TensorTotals {
-        total: GROK1_TENSOR_TOTAL,
-        // Spec constants, not a scan. Deriving these from the checkpoint needs a
-        // manifest schema that carries per-tensor dtype/bytes; see this
-        // function's doc comment.
-        f32_tensors: GROK1_TENSOR_F32,
-        int8_tensors: GROK1_TENSOR_INT8,
-        quant_tensors: GROK1_TENSOR_QUANT,
-        total_elements: GROK1_TENSOR_TOTAL_ELEMENTS,
-        total_bytes: GROK1_TENSOR_TOTAL_BYTES,
-    };
+    let (totals, hyperparameters) = grok1_spec_totals_and_hyperparameters();
 
-    let hyperparameters = Hyperparameters {
-        vocab_size: GROK1_VOCAB_SIZE,
-        d_model: GROK1_HIDDEN_DIM,
-        n_experts: GROK1_EXPERT_COUNT as usize,
-        d_ff: GROK1_FEED_FORWARD_LENGTH as usize,
-        n_blocks: GROK1_BLOCK_COUNT as usize,
-    };
+    let (routers, expert_blocks, inventory_blocks) = grok1_spec_block_rows();
 
-    let mut routers = Vec::new();
-    let mut expert_blocks = Vec::new();
-    let mut inventory_blocks = Vec::new();
+    let saaq_targets = grok1_spec_saaq_targets();
 
-    // Grok-1 architecture specific structural scan
-    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
-        routers.push(RouterEntry {
-            block: block_idx,
-            slot: 11,
-            shape: (GROK1_HIDDEN_DIM, GROK1_EXPERT_COUNT as usize),
-            orientation: "d_model_to_experts".to_string(),
-            experts: GROK1_EXPERT_COUNT as usize,
-            kind: "router".to_string(),
-            structural_name: format!("block_{:03}.routing_slot_11", block_idx),
-        });
-
-        expert_blocks.push(ExpertBlock {
-            block: block_idx,
-            experts: GROK1_EXPERT_COUNT as usize,
-            expert_tensors: 3,
-            slots: vec![0, 1, 2],
-            shapes: super::grok1_expected_expert_shape_strings().into(),
-        });
-
-        let shard_start = 2 + block_idx * GROK1_BLOCK_SHARDS;
-        inventory_blocks.push(InventoryBlock {
-            label: format!("block_{:03}", block_idx),
-            block: Some(block_idx),
-            shard_start,
-            shard_end: shard_start + GROK1_BLOCK_SHARDS - 1,
-            tensors: GROK1_BLOCK_SHARDS,
-            bytes: GROK1_BLOCK_BYTES,
-            kinds: block_kind_counts(),
-        });
-    }
-
-    let saaq_targets = vec![SaaqTarget {
-        rank: 1,
-        tensor: "embedding.slot_00.token_embedding".to_string(),
-        kind: "token_embedding".to_string(),
-        region: "embedding_heavy".to_string(),
-        readiness: 0.176,
-        opportunity: 0.331,
-        risk: 0.391,
-        disposition: "candidate".to_string(),
-    }];
-
-    let mut saaq_critical = Vec::new();
-    for block_idx in 0..GROK1_BLOCK_COUNT as usize {
-        saaq_critical.push(SaaqCritical {
-            tensor: format!("block_{:03}.slot_11.router", block_idx),
-            readiness: 0.054,
-            risk: 0.651,
-            reasons: "distribution=dense_balanced<br>sampled_values=49152/49152<br>zero_fraction=0.0000<br>near_zero_fraction=0.0980<br>outlier_fraction=0.0000<br>peak_to_rms=4.729<br>linked to routing structure".to_string(),
-        });
-    }
+    let saaq_critical = grok1_spec_saaq_critical();
 
     Ok(ArtifactIR {
         manifest: ArtifactManifest {
@@ -191,35 +253,7 @@ pub fn build_grok1_spec_ir(
         hyperparameters,
         totals,
         inventory_kinds: inventory_kind_counts(),
-        inventory_blocks: {
-            let mut blocks = Vec::with_capacity(inventory_blocks.len() + 2);
-            blocks.push(InventoryBlock {
-                label: "embedding".to_string(),
-                block: None,
-                shard_start: 0,
-                shard_end: 0,
-                tensors: 1,
-                bytes: GROK1_EMBEDDING_BYTES,
-                kinds: vec![InventoryBlockKind {
-                    count: 1,
-                    kind: "token_embedding".to_string(),
-                }],
-            });
-            blocks.extend(inventory_blocks);
-            blocks.push(InventoryBlock {
-                label: "final_norm".to_string(),
-                block: None,
-                shard_start: 1,
-                shard_end: 1,
-                tensors: 1,
-                bytes: GROK1_FINAL_NORM_BYTES,
-                kinds: vec![InventoryBlockKind {
-                    count: 1,
-                    kind: "final_norm".to_string(),
-                }],
-            });
-            blocks
-        },
+        inventory_blocks: grok1_spec_inventory_blocks(inventory_blocks),
         exemplar_tensors: exemplar_block_tensors(),
         routers,
         expert_blocks,
