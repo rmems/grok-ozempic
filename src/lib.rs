@@ -15,7 +15,7 @@ pub mod types;
 pub use core::HybridModel;
 pub use core::backend::{BackendKernel, LocalBackend, MyelinBackend};
 pub use core::dry_run::{
-    CoverageStatus, CoverageSummary, DryRunPlanner, DryRunReport, PlannedKernelCall,
+    CoverageStatus, CoverageSummary, DryRunPlanner, DryRunReport, OperationKind, PlannedKernelCall,
 };
 pub use core::inventory::{InventoryTensor, ModelInventory};
 pub use types::{

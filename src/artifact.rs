@@ -1,3 +1,4 @@
+use crate::core::dry_run::OperationKind;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT};
 use crate::error::{GrokOzempicError, Result};
@@ -499,11 +500,9 @@ fn push_block_entries(
     // and `.up`.
     for bs in GROK1_BLOCK_SLOTS.iter().filter(|s| s.is_int8) {
         let (slot, kind, shape, bytes) = (bs.slot, bs.kind, bs.shape.to_vec(), bs.bytes);
-        let policy = if kind.starts_with("moe_expert") {
-            "wrap_existing_int8_expert"
-        } else {
-            "wrap_existing_int8_unknown"
-        };
+        let policy = OperationKind::for_ternary_source_dtype("int8")
+            .expect("int8 expert/attn slots are already quantized")
+            .as_str();
         push_entry(
             entries,
             offset,
