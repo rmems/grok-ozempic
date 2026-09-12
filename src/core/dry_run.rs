@@ -127,7 +127,7 @@ fn plan_ternary_rules<I: ModelInventory>(
             matcher: entry.name.clone(),
             kernel_method: method,
             class,
-            precision: TensorPrecision::TernarySnN,
+            precision: TensorPrecision::TernarySnn,
             gif_threshold,
             estimated_tensor_count: estimated,
         });
@@ -316,7 +316,7 @@ impl DryRunPlanner {
                 plan.matcher.clone(),
                 serde_json::json!({
                     "kernel_method": plan.kernel_method,
-                    "precision": format!("{:?}", plan.precision),
+                    "precision": plan.precision,
                     "gif_threshold": plan.gif_threshold,
                     "estimated_tensor_count": plan.estimated_tensor_count,
                     "class": format!("{:?}", plan.class),
@@ -552,6 +552,21 @@ mod tests {
         assert!(
             json.contains_key("__coverage__"),
             "JSON output should contain __coverage__ key"
+        );
+    }
+
+    #[test]
+    fn planned_backend_calls_json_uses_serde_precision_wire_form() {
+        let report = plan_structural_manifest();
+        let json = DryRunPlanner::planned_backend_calls_json(&report);
+        let embedding = json
+            .iter()
+            .find(|(matcher, _)| matcher.contains("token_embedding"))
+            .map(|(_, value)| value)
+            .expect("embedding rule should exist");
+        assert_eq!(
+            embedding["precision"], "ternary_snn",
+            "dry-run JSON must emit the serde wire form, not Debug/PascalCase"
         );
     }
 }
