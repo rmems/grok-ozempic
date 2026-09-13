@@ -464,7 +464,7 @@ fn quantize_safetensors_entry(
     if dtype == SourceDtype::Other {
         // i8/Other tensors from xai-dissect inventory are covered by structural manifest for alignment
         // (see grok1_inventory.rs:NOTE and structural-manifest.json _i8_streaming_note); they arrive
-        // via artifact wrapping (wrap_existing_int8_*), not this float-only stream path.
+        // via artifact wrapping (OperationKind::WrapExistingQuantized), not this float-only stream path.
         // Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.
         return Err(GrokOzempicError::InvalidConfig(format!(
             "tensor {} has unsupported dtype",

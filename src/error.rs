@@ -61,6 +61,12 @@ pub enum GrokOzempicError {
     )]
     MissingDefaultPrecision,
 
+    #[error(
+        "ternary rule {pattern:?} matches mixed or unknown inventory dtypes; \
+         wrap-vs-quantize cannot be decided from dtype"
+    )]
+    MixedInventoryDtype { pattern: String },
+
     #[error("artifact validation error: {0}")]
     ArtifactValidation(String),
 
