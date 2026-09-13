@@ -1,7 +1,9 @@
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT};
 use crate::error::{GrokOzempicError, Result};
-use crate::types::{GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES};
+use crate::types::{
+    GROK1_BLOCK_SLOTS, GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -19,9 +21,6 @@ pub const GROK1_UNKNOWN_DENSE_PER_BLOCK: usize = 4;
 
 const EMBEDDING_BYTES: u64 = 3_221_225_472;
 const FINAL_NORM_BYTES: u64 = 24_576;
-const EXPERT_BYTES: u64 = 1_610_612_736;
-const ATTN_MODEL_WIDTH_BYTES: u64 = 37_748_736;
-const ATTN_NARROW_BYTES: u64 = 6_291_456;
 const NORM_BYTES: u64 = 24_576;
 const ROUTER_BYTES: u64 = 196_608;
 const CHECKSUMS_FILE: &str = "checksums.json";
@@ -494,50 +493,12 @@ fn push_block_entries(
     protect_norms: bool,
 ) {
     let prefix = format!("block_{block:03}");
-    for (slot, kind, shape, bytes) in [
-        (
-            0,
-            "moe_expert.unresolved",
-            vec![8, GROK1_HIDDEN_DIM, 32_768],
-            EXPERT_BYTES,
-        ),
-        (
-            1,
-            "moe_expert.down",
-            vec![8, 32_768, GROK1_HIDDEN_DIM],
-            EXPERT_BYTES,
-        ),
-        (
-            2,
-            "moe_expert.unresolved",
-            vec![8, GROK1_HIDDEN_DIM, 32_768],
-            EXPERT_BYTES,
-        ),
-        (
-            3,
-            "attn_proj_i8.narrow",
-            vec![GROK1_HIDDEN_DIM, 1024],
-            ATTN_NARROW_BYTES,
-        ),
-        (
-            4,
-            "attn_proj_i8.model_width",
-            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
-            ATTN_MODEL_WIDTH_BYTES,
-        ),
-        (
-            5,
-            "attn_proj_i8.model_width",
-            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
-            ATTN_MODEL_WIDTH_BYTES,
-        ),
-        (
-            6,
-            "attn_proj_i8.narrow",
-            vec![GROK1_HIDDEN_DIM, 1024],
-            ATTN_NARROW_BYTES,
-        ),
-    ] {
+    // Slots 00..=06 come from the shared table (GH #106). This used to be a
+    // hardcoded copy whose slots 00 and 02 read `moe_expert.unresolved`, while
+    // the canonical structural manifest had already resolved them to `.gate`
+    // and `.up`.
+    for bs in GROK1_BLOCK_SLOTS.iter().filter(|s| s.is_int8) {
+        let (slot, kind, shape, bytes) = (bs.slot, bs.kind, bs.shape.to_vec(), bs.bytes);
         let policy = if kind.starts_with("moe_expert") {
             "wrap_existing_int8_expert"
         } else {
@@ -1286,16 +1247,6 @@ fn failure(category: &str, tensor: Option<String>, message: impl Into<String>) -
 fn planned_warnings() -> Vec<WarningRecord> {
     vec![
         WarningRecord {
-            category: "unresolved_expert_projection".to_string(),
-            tensor: Some("*.slot_00.moe_expert.unresolved".to_string()),
-            message: "expert slot 00 is structurally preserved but projection label remains unresolved".to_string(),
-        },
-        WarningRecord {
-            category: "unresolved_expert_projection".to_string(),
-            tensor: Some("*.slot_02.moe_expert.unresolved".to_string()),
-            message: "expert slot 02 is structurally preserved but projection label remains unresolved".to_string(),
-        },
-        WarningRecord {
             category: "attn_proj_i8_slot".to_string(),
             tensor: Some("*.slot_03/04/05/06".to_string()),
             message: "attention projection slots (attn_proj_i8.*) are wrapped as existing int8 payloads unless shape/dtype/count drift occurs".to_string(),
@@ -1912,14 +1863,14 @@ mod tests {
         if let Some(entry) = index
             .entries
             .iter_mut()
-            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_qkv")
+            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_proj_i8.narrow")
         {
             entry.structural_name = "block_002.slot_03.tampered".to_string();
         }
         if let Some(entry) = index
             .entries
             .iter_mut()
-            .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.unresolved")
+            .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.gate")
         {
             entry.artifact_path = "tampered.meta".to_string();
             entry.artifact_offset += 123;
@@ -1965,12 +1916,27 @@ mod tests {
                 report.failures
             );
         }
+        // Target the specific tampered entry, not just any mismatch.
+        //
+        // `manifest_artifact_mismatch` is raised by a compound OR over
+        // structural_name / block / slot / kind / policy, and every branch emits
+        // the same message prefix. Asserting only `contains("expected
+        // structural_name")` was therefore satisfied by the *router* mutation
+        // above (which trips the `block` branch), so the structural_name branch
+        // itself was never actually pinned -- and until this commit the entry
+        // this block tampers with was looked up under a name the code never
+        // produces, so the mutation did not even happen. Both halves are fixed:
+        // the lookup uses the real name, and the assertion names the entry and
+        // the tampered value.
         assert!(
             report.failures.iter().any(|failure| {
                 failure.category == "manifest_artifact_mismatch"
-                    && failure.message.contains("expected structural_name")
+                    && failure.tensor.as_deref() == Some("block_002.slot_03.attn_proj_i8.narrow")
+                    && failure
+                        .message
+                        .contains("got structural_name block_002.slot_03.tampered")
             }),
-            "missing structural_name mismatch failure: {:?}",
+            "missing structural_name mismatch for the tampered attn_proj_i8.narrow entry: {:?}",
             report.failures
         );
     }
