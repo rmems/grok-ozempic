@@ -159,33 +159,27 @@ fn plan_default_rule<I: ModelInventory>(
     by_method: &mut BTreeMap<String, usize>,
     covered_by_rules: &mut usize,
 ) -> Result<()> {
-    let default_precision = manifest
-        .defaults
-        .precision
-        .as_deref()
-        .unwrap_or("ternary_snn");
-    let default_class = TensorClass::Default;
-    let (_precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
-    let default_method = match default_precision {
-        "ternary_snn" => "quantize_f32",
-        "fp16" => "convert_f32_to_f16_bytes",
-        "preserve" => "convert_f32_to_f16_bytes",
-        _ => "quantize_f32",
-    };
     let inventory_total = inventory.total_tensors();
     let default_estimated = inventory_total.saturating_sub(*covered_by_rules);
-    if default_estimated > 0 {
-        rule_plans.push(PlannedKernelCall {
-            matcher: "<defaults>".to_string(),
-            kernel_method: default_method,
-            class: default_class,
-            precision: _precision,
-            gif_threshold,
-            estimated_tensor_count: default_estimated,
-        });
-        *by_method.entry(default_method.to_string()).or_insert(0) += default_estimated;
-        *covered_by_rules += default_estimated;
+    if default_estimated == 0 {
+        return Ok(());
     }
+    let default_class = TensorClass::Default;
+    let (precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
+    let default_method = match precision {
+        TensorPrecision::TernarySnn => "quantize_f32",
+        TensorPrecision::Fp16 | TensorPrecision::Preserve => "convert_f32_to_f16_bytes",
+    };
+    rule_plans.push(PlannedKernelCall {
+        matcher: "<defaults>".to_string(),
+        kernel_method: default_method,
+        class: default_class,
+        precision,
+        gif_threshold,
+        estimated_tensor_count: default_estimated,
+    });
+    *by_method.entry(default_method.to_string()).or_insert(0) += default_estimated;
+    *covered_by_rules += default_estimated;
     Ok(())
 }
 

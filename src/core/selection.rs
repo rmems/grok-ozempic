@@ -36,13 +36,16 @@ pub enum TensorClass {
     /// legacy router heuristic when no manifest is present.
     Fp16 { reason: Option<String> },
     /// Tensor appeared in the manifest's `ternary_candidates` list with
-    /// optional rank and per-tensor threshold override.
+    /// optional rank and per-tensor threshold override, **or** did not
+    /// match the legacy router heuristic when no manifest is present
+    /// (explicit ternary, not a `Default` fallthrough).
     TernaryCandidate {
         rank: Option<f32>,
         gif_threshold: Option<f32>,
     },
-    /// No explicit manifest entry; falls through to manifest
-    /// `defaults.precision` or the pipeline's global default.
+    /// No explicit manifest entry. Precision is taken from
+    /// `manifest.defaults.precision`; absence of that field is a hard
+    /// error ([`crate::error::GrokOzempicError::MissingDefaultPrecision`]).
     Default,
 }
 
@@ -98,7 +101,13 @@ fn classify_legacy(name: &str, legacy_patterns: &[String]) -> TensorClass {
     if hit {
         TensorClass::Fp16 { reason: None }
     } else {
-        TensorClass::Default
+        // The no-manifest heuristic's policy is "ternary everything that is
+        // not a router". Encode that as an explicit class so `Default` stays
+        // reserved for unmatched *manifest* names, which fail closed.
+        TensorClass::TernaryCandidate {
+            rank: None,
+            gif_threshold: None,
+        }
     }
 }
 
@@ -334,17 +343,20 @@ mod tests {
     }
 
     #[test]
-    fn legacy_default_leaves_ffn_weights_as_default() {
+    fn legacy_heuristic_classifies_non_routers_as_ternary() {
+        // The no-manifest heuristic's policy is explicit ternary for
+        // everything that is not a router — not TensorClass::Default,
+        // which now fail-closes in precision::decide (GH #92 / RM-796).
         // Note: with the legacy heuristic, 'ffn_gate' false-matches
         // 'gate'. That's a known weakness — see the manifest path for
         // the fix. This test documents current legacy behavior.
         assert!(matches!(
             classify("blk.0.ffn_down.weight", None, &[]),
-            TensorClass::Default
+            TensorClass::TernaryCandidate { .. }
         ));
         assert!(matches!(
             classify("blk.0.ffn_up.weight", None, &[]),
-            TensorClass::Default
+            TensorClass::TernaryCandidate { .. }
         ));
     }
 
@@ -358,7 +370,7 @@ mod tests {
         // Default 'gate' is not consulted when a custom list is given.
         assert!(matches!(
             classify("blk.0.gate.weight", None, &patterns),
-            TensorClass::Default
+            TensorClass::TernaryCandidate { .. }
         ));
     }
 }

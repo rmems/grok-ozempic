@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// (`ternary_snn`, `fp16`, `preserve`). The variant is spelled
 /// [`Self::TernarySnn`] so `rename_all = "snake_case"` yields
 /// `ternary_snn` rather than `ternary_sn_n`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TensorPrecision {
     /// Two-bit ternary {-1, 0, +1} with saliency-gated GIF threshold.
@@ -39,6 +39,7 @@ pub enum TensorPrecision {
     /// 3. **Forward compatibility** — a future GOZ1 format version may
     ///    promote `Preserve` to true source-dtype passthrough
     ///    (F32/BF16 kept as-is) without an API rename or migration.
+    #[default]
     Preserve,
 }
 
@@ -259,6 +260,11 @@ mod quantize_goz1_config_tests {
                 tier
             );
         }
+    }
+
+    #[test]
+    fn tensor_precision_type_default_is_preserve() {
+        assert_eq!(TensorPrecision::default(), TensorPrecision::Preserve);
     }
 }
 

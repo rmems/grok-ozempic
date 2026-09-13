@@ -54,6 +54,13 @@ pub enum GrokOzempicError {
     )]
     ManifestV2UnmatchedTensor { name: String },
 
+    #[error(
+        "no explicit default precision is configured; refusing to silently ternary-quantize \
+         unclassified tensors. Set manifest defaults.precision to ternary_snn, fp16, or \
+         preserve, or list the tensor under preserve / fp16 / ternary_candidates"
+    )]
+    MissingDefaultPrecision,
+
     #[error("artifact validation error: {0}")]
     ArtifactValidation(String),
 
