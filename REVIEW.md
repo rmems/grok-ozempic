@@ -115,8 +115,8 @@ Do not disable hooks permanently; use `--no-verify` only for documented emergenc
 
 ## 3. Local Qodana CLI
 
-Config: root [`qodana.yaml`](qodana.yaml) (`linter: qodana-rust`). CI workflow:
-[`.github/workflows/qodana.yml`](.github/workflows/qodana.yml).
+Config: root [`qodana.yaml`](qodana.yaml) (`linter: qodana-python-community`).
+CI workflow: [`.github/workflows/qodana.yml`](.github/workflows/qodana.yml).
 
 ### Install
 
@@ -129,7 +129,7 @@ command -v qodana && qodana --version
 Docker is used when the CLI runs the linter in a container (`--within-docker=true`
 or default depending on environment). Native mode: `--within-docker=false`.
 
-Optional Cloud upload needs `QODANA_TOKEN` (same secret as GHA). Local reports
+Community Python does not need `QODANA_TOKEN` (no Cloud upload). Local reports
 do not require a token.
 
 ### Recipes
@@ -144,7 +144,7 @@ Equivalent manual CLI (kept for environments without the new recipes):
 ```bash
 # Full project (matches CI pr-mode: false intent — whole tree, not PR-diff-only)
 qodana scan \
-  --linter qodana-rust \
+  --linter qodana-python-community \
   --project-dir . \
   --results-dir .qodana/results \
   --report-dir .qodana/report \
@@ -156,7 +156,7 @@ qodana show --report-dir .qodana/report
 # or: qodana view --sarif .qodana/results/qodana.sarif.json
 
 # Diff-only against main (optional, faster feedback while iterating)
-qodana scan --linter qodana-rust --diff-start origin/main --print-problems
+qodana scan --linter qodana-python-community --diff-start origin/main --print-problems
 ```
 
 `.qodana/` is gitignored (local cache/results). Do not commit SARIF or HTML
@@ -279,7 +279,7 @@ python3 -m unittest scripts.test_grok1_block_forward -v
 python3 -m unittest scripts.test_grok1_block_weights -v
 
 # --- optional full ---
-qodana scan --linter qodana-rust --project-dir . \
+qodana scan --linter qodana-python-community --project-dir . \
   --results-dir .qodana/results --report-dir .qodana/report \
   --print-problems --save-report
 ```

@@ -209,7 +209,7 @@ review:
     @just _cargo-audit
     @just _py-compile
 
-# Local JetBrains Qodana (qodana-rust). Needs `qodana` on PATH; results under .qodana/
+# Local JetBrains Qodana (qodana-python-community). Needs `qodana` on PATH; results under .qodana/
 qodana:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -220,9 +220,9 @@ qodana:
       exit 1
     fi
     mkdir -p .qodana/results .qodana/report
-    echo "+ qodana scan --linter qodana-rust --print-problems (results → .qodana/)"
+    echo "+ qodana scan --linter qodana-python-community --print-problems (results → .qodana/)"
     qodana scan \
-      --linter qodana-rust \
+      --linter qodana-python-community \
       --project-dir . \
       --results-dir .qodana/results \
       --report-dir .qodana/report \

@@ -13,6 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Community Python only. qodana-python-community does not need Qodana Cloud,
+  # so this job runs without QODANA_TOKEN / QODANA_ENDPOINT (including
+  # Dependabot and fork pull requests). The rust Ultimate/EAP scanner is gone.
   qodana:
     runs-on: ubuntu-latest
     permissions:
@@ -32,10 +35,8 @@ jobs:
         # Pin third-party action to full commit SHA (Codacy / Opengrep GHA rule).
         uses: JetBrains/qodana-action@4861e015da555e86a72b862892aba6c2b93e6891 # v2026.1.3
         with:
-          args: --linter qodana-rust
+          args: --linter qodana-python-community
           # Full-project baseline (not PR-diff-only): intentional for this repo until
           # Qodana coverage is stable; re-enable pr-mode once that is useful.
           pr-mode: false
-        env:
-          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
-          QODANA_ENDPOINT: "https://qodana.cloud"
+        # No QODANA_TOKEN / QODANA_ENDPOINT: Community does not talk to Cloud.
