@@ -1,6 +1,7 @@
-# Qodana for Rust (EAP) — see https://www.jetbrains.com/help/qodana/rust.html
+# Free Community Python — no Qodana Cloud token.
+# See https://www.jetbrains.com/help/qodana/qodana-python-community.html
 version: "1.0"
-linter: qodana-rust
+linter: qodana-python-community
 
 # Skip build artifacts and local tool caches.
 exclude:
