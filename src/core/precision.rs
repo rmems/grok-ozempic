@@ -12,10 +12,10 @@
 //!   (FP16-at-rest in GOZ1 v1; semantically distinct from `Fp16`,
 //!   identical on disk — see the `TensorPrecision::Preserve` docs).
 //! - `TensorClass::Fp16`              → [`TensorPrecision::Fp16`]
-//! - `TensorClass::TernaryCandidate`  → [`TensorPrecision::TernarySnN`]
+//! - `TensorClass::TernaryCandidate`  → [`TensorPrecision::TernarySnn`]
 //! - `TensorClass::Default`           → parsed from
 //!   `manifest.defaults.precision` (if present), else
-//!   [`TensorPrecision::TernarySnN`].
+//!   [`TensorPrecision::TernarySnn`].
 //!
 //! Unknown `defaults.precision` strings are a **hard failure**
 //! ([`GrokOzempicError::ManifestInvalidPrecision`]) to match the rest of
@@ -36,7 +36,7 @@ pub fn decide(
     let precision = match class {
         TensorClass::Preserve { .. } => TensorPrecision::Preserve,
         TensorClass::Fp16 { .. } => TensorPrecision::Fp16,
-        TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnN,
+        TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnn,
         TensorClass::Default => resolve_default_precision(manifest)?,
     };
     let threshold = resolve_threshold(class, manifest, config)?;
@@ -45,10 +45,10 @@ pub fn decide(
 
 fn resolve_default_precision(manifest: Option<&DissectManifest>) -> Result<TensorPrecision> {
     let Some(m) = manifest else {
-        return Ok(TensorPrecision::TernarySnN);
+        return Ok(TensorPrecision::TernarySnn);
     };
     match m.defaults.precision.as_deref() {
-        None => Ok(TensorPrecision::TernarySnN),
+        None => Ok(TensorPrecision::TernarySnn),
         Some(s) => parse_precision_str(s),
     }
 }
@@ -83,7 +83,7 @@ fn resolve_threshold(
 /// Accepted values: `ternary_snn`, `fp16`, `preserve`.
 pub fn parse_precision_str(s: &str) -> Result<TensorPrecision> {
     match s {
-        "ternary_snn" => Ok(TensorPrecision::TernarySnN),
+        "ternary_snn" => Ok(TensorPrecision::TernarySnn),
         "fp16" => Ok(TensorPrecision::Fp16),
         "preserve" => Ok(TensorPrecision::Preserve),
         other => Err(GrokOzempicError::ManifestInvalidPrecision {
@@ -132,7 +132,7 @@ mod tests {
     fn parse_precision_accepts_known_tiers() {
         assert_eq!(
             parse_precision_str("ternary_snn").unwrap(),
-            TensorPrecision::TernarySnN
+            TensorPrecision::TernarySnn
         );
         assert_eq!(parse_precision_str("fp16").unwrap(), TensorPrecision::Fp16);
         assert_eq!(
@@ -175,7 +175,7 @@ mod tests {
             gif_threshold: None,
         };
         let (p, _) = decide(&cls, None, &config).unwrap();
-        assert_eq!(p, TensorPrecision::TernarySnN);
+        assert_eq!(p, TensorPrecision::TernarySnn);
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
     fn default_precision_falls_back_to_ternary_snn_without_manifest() {
         let config = config_with_threshold(0.05);
         let (p, _) = decide(&TensorClass::Default, None, &config).unwrap();
-        assert_eq!(p, TensorPrecision::TernarySnN);
+        assert_eq!(p, TensorPrecision::TernarySnn);
     }
 
     #[test]

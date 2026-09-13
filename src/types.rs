@@ -7,10 +7,16 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Controls which precision is applied to a given tensor.
+///
+/// Serde and [`Self::as_str`] share the manifest/CLI vocabulary
+/// (`ternary_snn`, `fp16`, `preserve`). The variant is spelled
+/// [`Self::TernarySnn`] so `rename_all = "snake_case"` yields
+/// `ternary_snn` rather than `ternary_sn_n`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorPrecision {
     /// Two-bit ternary {-1, 0, +1} with saliency-gated GIF threshold.
-    TernarySnN,
+    TernarySnn,
     /// Keep original FP16 — used for MoE routing gates.
     Fp16,
     /// Routing-critical / no-touch tier. Populated when the
@@ -34,6 +40,23 @@ pub enum TensorPrecision {
     ///    promote `Preserve` to true source-dtype passthrough
     ///    (F32/BF16 kept as-is) without an API rename or migration.
     Preserve,
+}
+
+impl TensorPrecision {
+    /// Manifest / CLI / serde wire spelling (`ternary_snn`, `fp16`, `preserve`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TernarySnn => "ternary_snn",
+            Self::Fp16 => "fp16",
+            Self::Preserve => "preserve",
+        }
+    }
+}
+
+impl std::fmt::Display for TensorPrecision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Weight container layout for [`QuantizationConfig::input_dir`].
@@ -208,6 +231,34 @@ mod quantize_goz1_config_tests {
         assert!(validate_gif_threshold(f32::NAN).is_err());
         assert!(validate_gif_threshold(f32::INFINITY).is_err());
         assert!(validate_gif_threshold(-0.1).is_err());
+    }
+
+    #[test]
+    fn tensor_precision_serde_wire_form_is_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::TernarySnn).unwrap(),
+            "\"ternary_snn\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::Fp16).unwrap(),
+            "\"fp16\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::Preserve).unwrap(),
+            "\"preserve\""
+        );
+        for tier in [
+            TensorPrecision::TernarySnn,
+            TensorPrecision::Fp16,
+            TensorPrecision::Preserve,
+        ] {
+            let json = serde_json::to_string(&tier).unwrap();
+            assert_eq!(json, format!("\"{}\"", tier.as_str()));
+            assert_eq!(
+                serde_json::from_str::<TensorPrecision>(&json).unwrap(),
+                tier
+            );
+        }
     }
 }
 
