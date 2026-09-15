@@ -1,4 +1,5 @@
 pub mod detector;
+pub mod scan;
 pub mod schema;
 pub mod templates;
 pub mod validator;

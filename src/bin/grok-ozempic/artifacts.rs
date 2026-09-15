@@ -18,7 +18,7 @@ pub(crate) enum ArtifactsCommands {
         output_dir: PathBuf,
 
         /// Optional path to the raw weights directory (e.g. ckpt-0)
-        /// Used to derive real checkpoint provenance and tensor totals.
+        /// Used to derive checkpoint provenance and observed shard count.
         #[arg(long)]
         weights_dir: Option<PathBuf>,
 
@@ -26,6 +26,11 @@ pub(crate) enum ArtifactsCommands {
         /// from the weights_dir if present, or fallback to manifest source.
         #[arg(long)]
         checkpoint: Option<String>,
+
+        /// Optional xai-dissect `inventory.json` (schema v2). When set, IR
+        /// totals are derived from that scan instead of `GROK1_*` constants.
+        #[arg(long)]
+        inventory: Option<PathBuf>,
     },
     /// Validate generated reports in a directory against the dissect manifest
     Validate {
@@ -44,6 +49,10 @@ pub(crate) enum ArtifactsCommands {
         /// Optional checkpoint name override, same semantics as `generate`
         #[arg(long)]
         checkpoint: Option<String>,
+
+        /// Optional xai-dissect `inventory.json` (schema v2). Same semantics as `generate`.
+        #[arg(long)]
+        inventory: Option<PathBuf>,
     },
 }
 
@@ -54,13 +63,15 @@ pub(crate) fn cmd_artifacts(cmd: ArtifactsCommands) -> anyhow::Result<()> {
             output_dir,
             weights_dir,
             checkpoint,
-        } => cmd_artifacts_generate(manifest, output_dir, weights_dir, checkpoint),
+            inventory,
+        } => cmd_artifacts_generate(manifest, output_dir, weights_dir, checkpoint, inventory),
         ArtifactsCommands::Validate {
             report_dir,
             manifest,
             weights_dir,
             checkpoint,
-        } => cmd_artifacts_validate(report_dir, manifest, weights_dir, checkpoint),
+            inventory,
+        } => cmd_artifacts_validate(report_dir, manifest, weights_dir, checkpoint, inventory),
     }
 }
 
@@ -69,6 +80,7 @@ fn cmd_artifacts_generate(
     output_dir: PathBuf,
     weights_dir: Option<PathBuf>,
     checkpoint: Option<String>,
+    inventory: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     println!(
         "Generating artifacts to {} using manifest {}",
@@ -77,7 +89,12 @@ fn cmd_artifacts_generate(
     );
     let (actual_checkpoint, actual_shards) =
         resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, true)?;
-    let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
+    let ir = load_manifest_ir(
+        &manifest,
+        inventory.as_deref(),
+        actual_checkpoint.as_deref(),
+        actual_shards,
+    )?;
     reports::validator::validate_ir(&ir)
         .map_err(|e| anyhow::anyhow!("Artifact validation failed: {}", e))?;
     reports::writer::write_reports(&ir, &output_dir)
@@ -91,6 +108,7 @@ fn cmd_artifacts_validate(
     manifest: PathBuf,
     weights_dir: Option<PathBuf>,
     checkpoint: Option<String>,
+    inventory: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     println!(
         "Validating reports in {} using manifest {}",
@@ -99,7 +117,12 @@ fn cmd_artifacts_validate(
     );
     let (actual_checkpoint, actual_shards) =
         resolve_checkpoint_and_shards(weights_dir.as_deref(), checkpoint, false)?;
-    let ir = load_manifest_ir(&manifest, actual_checkpoint.as_deref(), actual_shards)?;
+    let ir = load_manifest_ir(
+        &manifest,
+        inventory.as_deref(),
+        actual_checkpoint.as_deref(),
+        actual_shards,
+    )?;
     reports::writer::validate_report_dir_against_ir(&report_dir, &ir)
         .map_err(|e| anyhow::anyhow!("Artifact report validation failed: {}", e))?;
     println!("Report directory matches manifest and passes IR validation.");
@@ -108,6 +131,7 @@ fn cmd_artifacts_validate(
 
 fn load_manifest_ir(
     manifest: &Path,
+    inventory: Option<&Path>,
     actual_checkpoint: Option<&str>,
     actual_shards: Option<usize>,
 ) -> anyhow::Result<ArtifactIR> {
@@ -118,11 +142,24 @@ fn load_manifest_ir(
     )
     .map_err(|e| anyhow::anyhow!("Failed to parse manifest: {}", e))?;
 
-    reports::detector::build_grok1_spec_ir(&dissect_manifest, actual_checkpoint, actual_shards)
-        .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))
+    let scan = match inventory {
+        Some(path) => Some(
+            reports::scan::load_inventory_scan(path)
+                .map_err(|e| anyhow::anyhow!("Failed to load inventory scan: {}", e))?,
+        ),
+        None => None,
+    };
+
+    reports::detector::build_artifact_ir(
+        &dissect_manifest,
+        scan.as_ref(),
+        actual_checkpoint,
+        actual_shards,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to build IR: {}", e))
 }
 
-/// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_grok1_spec_ir`].
+/// Returns `(checkpoint_override, shard_count)` for [`reports::detector::build_artifact_ir`].
 fn resolve_checkpoint_and_shards(
     weights_dir: Option<&Path>,
     checkpoint: Option<String>,

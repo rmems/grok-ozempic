@@ -1,6 +1,7 @@
 use crate::core::manifest::ManifestBlock;
 use crate::core::manifest::embedded_grok1_baseline;
 use crate::reports::detector;
+use crate::reports::scan::{ScanDtype, grok1_spec_inventory_scan};
 use crate::reports::schema::ArtifactIR;
 use crate::reports::templates;
 use crate::reports::validator;
@@ -255,4 +256,48 @@ fn detector_global_kind_counts_are_the_slot_table_scaled() {
         "whole-model kind counts must be the per-slot table scaled by n_blocks \
          plus the embedding and final norm"
     );
+}
+
+#[test]
+fn scan_backed_ir_derives_totals_and_validate_ir_is_not_a_tautology() {
+    let manifest = embedded_grok1_baseline().expect("baseline");
+    let scan = grok1_spec_inventory_scan();
+    let ir = detector::build_artifact_ir(manifest, Some(&scan), None, None)
+        .expect("Grok-1-shaped scan should build");
+    assert_eq!(ir.totals.total, 770);
+    assert_eq!(ir.totals.total_bytes, 318_114_914_304);
+    assert!(validator::validate_ir(&ir).is_ok());
+
+    // Producer summed the tensors; validator still reads GROK1_*. Flip one
+    // dtype and the two sources disagree.
+    let mut bad = scan;
+    bad.tensors[0].dtype = ScanDtype::I8;
+    bad.tensors[0].nbytes = 131_072u64 * 6_144; // numel * i8 itemsize
+    bad.totals.f32_tensors -= 1;
+    bad.totals.int8_tensors += 1;
+    let ir = detector::build_artifact_ir(manifest, Some(&bad), None, None)
+        .expect("internally consistent wrong scan still builds");
+    let err =
+        validator::validate_ir(&ir).expect_err("spec constants must reject a non-Grok-1 scan");
+    assert!(
+        err.to_string().contains("f32 tensor count mismatch"),
+        "got {err}"
+    );
+}
+
+#[test]
+fn scan_backed_ir_keeps_policy_manifest_block_count_advisory() {
+    let mut manifest = embedded_grok1_baseline().expect("baseline").clone();
+    manifest.blocks = vec![ManifestBlock {
+        index: 3,
+        experts: Some(8),
+        role: Some("moe".to_string()),
+    }];
+    let scan = grok1_spec_inventory_scan();
+    let ir = detector::build_artifact_ir(&manifest, Some(&scan), None, None)
+        .expect("advisory blocks remain accepted with a scan");
+    assert_eq!(manifest.blocks.len(), 1);
+    assert_eq!(ir.hyperparameters.n_blocks, 64);
+    assert_eq!(ir.routers.len(), 64);
+    assert!(validator::validate_ir(&ir).is_ok());
 }

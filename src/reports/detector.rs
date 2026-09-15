@@ -1,6 +1,7 @@
 use crate::core::manifest::DissectManifest;
 use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH};
 use crate::error::GrokOzempicError;
+use crate::reports::scan::InventoryScan;
 use crate::reports::schema::{
     ArtifactIR, ArtifactManifest, ExpertBlock, Hyperparameters, InventoryBlock, InventoryBlockKind,
     InventoryKindCount, InventoryTensor, RouterEntry, SaaqCritical, SaaqTarget, TensorTotals,
@@ -101,12 +102,13 @@ fn grok1_spec_inventory_blocks(inventory_blocks: Vec<InventoryBlock>) -> Vec<Inv
 }
 
 /// Spec totals and hyperparameters. Constants, not a scan.
+///
+/// Used only when no xai-dissect `inventory.json` is supplied. When a scan is
+/// present, [`build_artifact_ir`] takes totals from
+/// [`crate::reports::scan::InventoryScan`] instead.
 fn grok1_spec_totals_and_hyperparameters() -> (TensorTotals, Hyperparameters) {
     let totals = TensorTotals {
         total: GROK1_TENSOR_TOTAL,
-        // Spec constants, not a scan. Deriving these from the checkpoint needs a
-        // manifest schema that carries per-tensor dtype/bytes; see this
-        // function's doc comment.
         f32_tensors: GROK1_TENSOR_F32,
         int8_tensors: GROK1_TENSOR_INT8,
         quant_tensors: GROK1_TENSOR_QUANT,
@@ -199,31 +201,40 @@ fn grok1_spec_saaq_critical() -> Vec<SaaqCritical> {
     saaq_critical
 }
 
-/// Build the Grok-1 **specification** IR.
+/// Build the Grok-1 **specification** IR (no inventory scan).
 ///
-/// The name matters, because the old one (`build_ir_from_manifest`) implied a
-/// detector reading structure out of the manifest. It does not, and cannot: a
-/// [`ManifestBlock`](crate::core::manifest::ManifestBlock) carries only `index`,
-/// `experts` and `role` — no shapes, no dtypes, no byte counts — so there is
-/// nothing to derive from. Every structural figure below comes from the
-/// `GROK1_*` constants; the manifest contributes `model.source` (only when
-/// `checkpoint` is `None`) and is otherwise used to *reject* incompatible input
-/// via [`validate_supported_manifest`].
-///
-/// Consequences worth knowing before trusting the output:
-///
-/// - The IR describes the Grok-1 architecture as this crate understands it, not
-///   the checkpoint on disk. `actual_shards` is the one observed quantity, and
-///   it is passed in by the caller rather than read here.
-/// - [`super::validator::validate_ir`] asserts the same constants this function
-///   writes, so it is a schema/self-consistency check, not verification. It can
-///   only fail on an IR that something else has mutated — which is exactly what
-///   `src/reports/tests.rs` does.
-///
-/// Deriving real totals from a checkpoint scan needs a manifest schema that
-/// carries them; tracked separately rather than faked here.
+/// Equivalent to [`build_artifact_ir`] with `scan = None`. The policy
+/// manifest still cannot supply totals — a [`ManifestBlock`](crate::core::manifest::ManifestBlock)
+/// carries only `index`, `experts` and `role`. Pass an xai-dissect
+/// `inventory.json` through [`build_artifact_ir`] to derive totals from a
+/// real scan.
 pub fn build_grok1_spec_ir(
     manifest: &DissectManifest,
+    checkpoint: Option<&str>,
+    actual_shards: Option<usize>,
+) -> Result<ArtifactIR, GrokOzempicError> {
+    build_artifact_ir(manifest, None, checkpoint, actual_shards)
+}
+
+/// Build the artifact IR, optionally taking **totals from an xai-dissect scan**.
+///
+/// The policy manifest is still only a reject-list (family, in-range unique
+/// block indexes, expert count). Per-tensor dtype and byte counts come from
+/// [`InventoryScan`] when provided — that is `inventory.json`, the existing
+/// xai-dissect catalog, not a field invented on `xai-dissect.manifest`.
+///
+/// When `scan` is `Some`, `totals` are the sums of that document's `tensors`
+/// array (already checked against its declared `totals` at parse time).
+/// [`super::validator::validate_ir`] then re-asserts the `GROK1_*` spec
+/// constants, so a scan that does not describe Grok-1 fails rather than
+/// being a tautology.
+///
+/// When `scan` is `None`, totals fall back to the spec constants. Block
+/// *count* on the policy manifest remains advisory; partial and unordered
+/// `blocks` still yield a 64-block architecture IR.
+pub fn build_artifact_ir(
+    manifest: &DissectManifest,
+    scan: Option<&InventoryScan>,
     checkpoint: Option<&str>,
     actual_shards: Option<usize>,
 ) -> Result<ArtifactIR, GrokOzempicError> {
@@ -233,9 +244,14 @@ pub fn build_grok1_spec_ir(
     let model_family = manifest.model.family.clone();
     let checkpoint = checkpoint
         .map(|s| s.to_string())
+        .or_else(|| {
+            scan.filter(|s| !s.checkpoint_path.is_empty())
+                .map(|s| s.checkpoint_path.clone())
+        })
         .unwrap_or_else(|| manifest.model.source.clone());
 
-    let (totals, hyperparameters) = grok1_spec_totals_and_hyperparameters();
+    let (spec_totals, hyperparameters) = grok1_spec_totals_and_hyperparameters();
+    let totals = scan.map(|s| s.totals.clone()).unwrap_or(spec_totals);
 
     let (routers, expert_blocks, inventory_blocks) = grok1_spec_block_rows();
 
@@ -247,7 +263,9 @@ pub fn build_grok1_spec_ir(
         manifest: ArtifactManifest {
             model_family,
             checkpoint,
-            shards: actual_shards.unwrap_or(GROK1_TENSOR_TOTAL),
+            shards: actual_shards
+                .or_else(|| scan.map(|s| s.shard_count))
+                .unwrap_or(GROK1_TENSOR_TOTAL),
             schema_version: INVENTORY_SCHEMA_VERSION,
         },
         hyperparameters,

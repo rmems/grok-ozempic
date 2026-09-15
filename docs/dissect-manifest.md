@@ -18,6 +18,26 @@ GitHub #40 / RM-191, with a fail-closed rule for unmatched tensors (see below).
 - `grok-ozempic` **never writes manifests** and never depends on
   `xai-dissect` as a Cargo crate.
 
+## Inventory scan vs policy manifest (reports)
+
+The policy document described below (`xai-dissect.manifest`) is a
+classification contract. Its `blocks` entries carry only `index` /
+`experts` / `role` — no shapes, dtypes, or byte counts — and that block
+*count* is advisory.
+
+Per-tensor dtype and byte counts already live in a **different**
+xai-dissect document: `exports/<slug>/inventory.json` (`ModelInventory`
+schema v2; see xai-dissect `docs/tensor-schema.md` and
+`docs/export-contracts.md`). `grok-ozempic artifacts generate --inventory`
+feeds that catalog to `reports::scan`, derives IR totals from the
+`tensors` array, and hard-errors if declared `totals` (or block
+summaries) disagree with that sum. `validate_ir` still asserts the
+`GROK1_*` spec constants, so a scan that is not Grok-1 fails instead of
+the detector and validator reading the same constants.
+
+Do not add those fields to in-tree `dissect/grok-1/*.json`. Those files
+are policy-manifest fallbacks, not inventory scans.
+
 ## Delivery
 
 Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):
