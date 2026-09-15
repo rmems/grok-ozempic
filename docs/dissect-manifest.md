@@ -115,6 +115,27 @@ remains supported only when no manifest is resolved.
 | `fp16`         | Force FP16 passthrough (current router behavior).       |
 | `ternary_snn` | Ternary {-1, 0, +1} with GIF saliency threshold.         |
 
+### Precision → backend mapping
+
+Classification is an orchestration decision. The planned kernel verb lives
+on `DryRunPlanner` / `OperationKind` in [`src/core/dry_run.rs`](../src/core/dry_run.rs);
+the deployable kernel interface is the `BackendKernel` trait in
+[`src/core/backend.rs`](../src/core/backend.rs). Full ownership table:
+[`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+| Manifest tier | `OperationKind` | `BackendKernel` method (when the live path dispatches) |
+| ------------- | --------------- | ------------------------------------------------------- |
+| `preserve`    | `convert_fp16`  | `convert_f32_to_f16_bytes` / `passthrough_f16` (GOZ1 still stores `TENSOR_F16`) |
+| `fp16`        | `convert_fp16`  | same |
+| `ternary_snn` on float source | `quantize_ternary` | `quantize_f32` / `quantize_f16` then `pack_ternary` |
+| `ternary_snn` on already-quantized `i8`/`int8`/`u8` | `wrap_existing_quantized` | none — wrap the payload; do not re-quantize |
+
+`quantize-goz1` today calls `quantizer.rs` directly rather than
+`LocalBackend` / `MyelinBackend`. The mapping above is what a backend-switched
+pack would invoke; `MyelinBackend` is still a stub. A name mismatch that
+ternary-quantizes a router or norm is a **matcher bug** — fix the glob, do not
+paper over it with `defaults`.
+
 ### Per-tensor fields
 
 - `rank` — optional hint in `[0, 1]`. Higher = stronger ternary candidate.
@@ -152,3 +173,10 @@ entry points (`alignment.rs`).
 Future schema versions bump `schema_version`. Loaders must refuse any
 version they do not explicitly understand. This prevents silent drift
 between `xai-dissect` and `grok-ozempic`.
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — manifest → selection → `BackendKernel` → myelin
+- [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) — copyable ingest / pack commands
+- [`artifact-compatibility-plan.md`](./artifact-compatibility-plan.md) — inventory IR and `DryRunPlanner` coverage JSON
+- [`first-quantization-target.md`](./first-quantization-target.md) — first real-weight embedding contract

@@ -140,6 +140,47 @@ recorded separately in the canonical
 is claimed by either report. A new v3 pack is a reproduction of the workflow,
 not a promise of byte identity with that v1 file.
 
+This command runs on **CPU** via `run_quantization` → `quantizer.rs`. It does
+not call `BackendKernel`, `LocalBackend`, or `MyelinBackend`. CUDA kernels
+belong in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator);
+see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+## Backend kernel call flow
+
+Three different “dry-run / plan” surfaces exist. They are not interchangeable.
+
+```
+manifest (structural V2 or V1 baseline)
+    │
+    ├─► stream::resolve_manifest + selection/precision
+    │         live classify for quantize-goz1
+    │
+    ├─► DryRunPlanner::plan  (src/core/dry_run.rs)
+    │         OperationKind per rule
+    │         CoverageSummary vs 770-tensor inventory
+    │         JSON: planned_backend_calls_json, key __coverage__
+    │         no weight payloads
+    │
+    ├─► smoke-grok1 / convert-grok1 --dry-run
+    │         saaq-g1-v0 metadata indexes + plan_fingerprint
+    │         not DryRunPlanner, not a GOZ1 pack
+    │
+    └─► quantize-goz1 --verify
+              CPU quantizer.rs (same math as LocalBackend)
+              future: BackendKernel → MyelinBackend FFI
+```
+
+| Surface | Reads weights? | Backend? |
+|---------|----------------|----------|
+| `DryRunPlanner` | No | Plans `OperationKind` that *would* map to `BackendKernel` methods |
+| SAAQ CLI `--dry-run` | No (may hash shards named by `checksums.json`) | None |
+| `quantize-goz1` | Yes | CPU `quantizer.rs` today; `MyelinBackend` is a stub |
+
+Precision → kernel mapping is tabulated in
+[`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
+Coverage JSON shape is in
+[`artifact-compatibility-plan.md`](./artifact-compatibility-plan.md#dryrunplanner-coverage).
+
 ## 6. Inspect the result and understand the boundary
 
 `--verify` reopens the container and validates its header, tensor table,
@@ -179,3 +220,16 @@ or [GitHub #36](https://github.com/rmems/grok-ozempic/issues/36), run full-model
 inference, quantize routers or norms, provision cloud resources, or rerun the
 multi-hour [GitHub #85](https://github.com/rmems/grok-ozempic/issues/85)
 experiment.
+
+It is not a cloud-credit or GPU-instance sprint runbook. There is no
+2026-05-28 cutoff, no serverless-inference burn plan, and no GPU
+provisioning section. Kernel CUDA work belongs in `myelin-accelerator`; a
+green metadata report is not a weight-fidelity experiment.
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — ownership boundary and five-minute trace
+- [`dissect-manifest.md`](./dissect-manifest.md) — schema and precision mapping
+- [`first-quantization-target.md`](./first-quantization-target.md) — first embedding contract
+- [`goz1-format.md`](./goz1-format.md) — container layout
+- [README](../README.md#backend-and-kernel-boundary) — backend trait and measured status

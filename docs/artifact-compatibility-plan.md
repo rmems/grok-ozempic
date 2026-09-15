@@ -210,3 +210,50 @@ grok-ozempic artifacts validate \
 ## 10. Open Questions
 
 - Should `stats.md` compute real RMS values from the `.goz1` tensor payloads or proxy dummy values for structural compatibility if payloads aren't fully read during artifact generation? For now, we will pass through `xai-dissect` values if parsing an upstream manifest, or compute naive estimates if processing a raw checkpoint.
+
+## DryRunPlanner coverage
+
+Markdown inventory / routing reports (sections 5–8) are the xai-dissect-shaped
+artifact surface. Backend **planning** coverage is a separate, already-landed
+output from `DryRunPlanner` in [`src/core/dry_run.rs`](../src/core/dry_run.rs)
+([PR #25](https://github.com/rmems/grok-ozempic/pull/25), typed
+`OperationKind` in [#93](https://github.com/rmems/grok-ozempic/issues/93) /
+PR #132).
+
+`DryRunPlanner::plan` walks `preserve` / `fp16` / `ternary_candidates` /
+`defaults` against a `ModelInventory` (770 tensors for Grok-1) and returns a
+`DryRunReport`. `DryRunPlanner::planned_backend_calls_json` is the
+machine-readable form:
+
+- one object per manifest matcher: `operation`, `precision`, `gif_threshold`,
+  `estimated_tensor_count`, `class`
+- reserved key `__coverage__`:
+
+```json
+{
+  "by_operation": { "quantize_ternary": 0, "convert_fp16": 0, "wrap_existing_quantized": 0 },
+  "covered_by_rules": 770,
+  "inventory_total": 770,
+  "coverage": "Full",
+  "backend_handled_total": 770
+}
+```
+
+`coverage` is the `Debug` spelling of `CoverageStatus` (`Full`,
+`Partial { missing: N }`, `OverComplete { extra: N }`). Structural-manifest
+alignment tests in `src/core/alignment.rs` assert `CoverageStatus::Full` for
+the embedded V2 fixture.
+
+This JSON is **not** a GOZ1 pack, not a `plan_fingerprint`, and not a payload
+digest. It answers “would every inventory tensor map to a backend verb?”
+before `quantize-goz1` runs. The live pack path still calls `quantizer.rs`
+directly; `MyelinBackend` remains a stub. See
+[`ARCHITECTURE.md`](./ARCHITECTURE.md) and the precision table in
+[`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — `BackendKernel` trait and ownership
+- [`dissect-manifest.md`](./dissect-manifest.md) — schema and matching rules
+- [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) — runbook
+- [README](../README.md#backend-and-kernel-boundary) — entry-point boundary
