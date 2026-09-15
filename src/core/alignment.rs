@@ -84,6 +84,45 @@ impl AlignmentReport {
     }
 }
 
+#[derive(Default)]
+struct ClassCounts {
+    preserve: usize,
+    fp16: usize,
+    ternary: usize,
+    default: usize,
+}
+
+impl ClassCounts {
+    fn bump(&mut self, class: &TensorClass) {
+        match class {
+            TensorClass::Preserve { .. } => self.preserve += 1,
+            TensorClass::Fp16 { .. } => self.fp16 += 1,
+            TensorClass::TernaryCandidate { .. } => self.ternary += 1,
+            TensorClass::Default => self.default += 1,
+        }
+    }
+}
+
+fn record_mismatch(
+    mismatches: &mut Vec<TensorAlignment>,
+    boundary_summary: &mut BTreeMap<String, usize>,
+    structural_name: String,
+    expected: TensorClass,
+    actual: TensorClass,
+) {
+    let boundary_key = format!("{expected:?} -> {actual:?}");
+    *boundary_summary.entry(boundary_key).or_insert(0) += 1;
+    mismatches.push(TensorAlignment {
+        structural_name,
+        expected_class: expected.clone(),
+        actual_class: actual.clone(),
+        match_status: ClassMatch::Mismatch {
+            got: actual,
+            expected,
+        },
+    });
+}
+
 /// Compare inventory expected classes against a [`TensorClassifier`].
 ///
 /// Manifest glob matching is the default classifier; a model plugin can
@@ -94,64 +133,40 @@ where
     C: TensorClassifier,
 {
     let mut matched = 0;
-    let mut mismatched = 0;
-    let mut preserve_exp = 0;
-    let mut fp16_exp = 0;
-    let mut ternary_exp = 0;
-    let mut default_exp = 0;
-    let mut preserve_act = 0;
-    let mut fp16_act = 0;
-    let mut ternary_act = 0;
-    let mut default_act = 0;
+    let mut expected_counts = ClassCounts::default();
+    let mut actual_counts = ClassCounts::default();
     let mut mismatches = Vec::new();
     let mut boundary_summary: BTreeMap<String, usize> = BTreeMap::new();
 
     for t in inventory.tensors() {
         let actual = classifier.classify_name(&t.structural_name);
-        let expected = &t.expected_class;
-
-        match expected {
-            TensorClass::Preserve { .. } => preserve_exp += 1,
-            TensorClass::Fp16 { .. } => fp16_exp += 1,
-            TensorClass::TernaryCandidate { .. } => ternary_exp += 1,
-            TensorClass::Default => default_exp += 1,
-        }
-        match &actual {
-            TensorClass::Preserve { .. } => preserve_act += 1,
-            TensorClass::Fp16 { .. } => fp16_act += 1,
-            TensorClass::TernaryCandidate { .. } => ternary_act += 1,
-            TensorClass::Default => default_act += 1,
-        }
-
-        if std::mem::discriminant(expected) == std::mem::discriminant(&actual) {
+        expected_counts.bump(&t.expected_class);
+        actual_counts.bump(&actual);
+        if std::mem::discriminant(&t.expected_class) == std::mem::discriminant(&actual) {
             matched += 1;
         } else {
-            mismatched += 1;
-            let boundary_key = format!("{expected:?} -> {actual:?}");
-            *boundary_summary.entry(boundary_key).or_insert(0) += 1;
-            let got = actual.clone();
-            let expected = expected.clone();
-            mismatches.push(TensorAlignment {
-                structural_name: t.structural_name.clone(),
-                expected_class: expected.clone(),
-                actual_class: got.clone(),
-                match_status: ClassMatch::Mismatch { got, expected },
-            });
+            record_mismatch(
+                &mut mismatches,
+                &mut boundary_summary,
+                t.structural_name.clone(),
+                t.expected_class.clone(),
+                actual,
+            );
         }
     }
 
     AlignmentReport {
         total_inventory_tensors: inventory.total_tensors(),
         matched,
-        mismatched,
-        preserve_expected_count: preserve_exp,
-        fp16_expected_count: fp16_exp,
-        ternary_expected_count: ternary_exp,
-        default_expected_count: default_exp,
-        preserve_actual_count: preserve_act,
-        fp16_actual_count: fp16_act,
-        ternary_actual_count: ternary_act,
-        default_actual_count: default_act,
+        mismatched: mismatches.len(),
+        preserve_expected_count: expected_counts.preserve,
+        fp16_expected_count: expected_counts.fp16,
+        ternary_expected_count: expected_counts.ternary,
+        default_expected_count: expected_counts.default,
+        preserve_actual_count: actual_counts.preserve,
+        fp16_actual_count: actual_counts.fp16,
+        ternary_actual_count: actual_counts.ternary,
+        default_actual_count: actual_counts.default,
         mismatches,
         boundary_summary,
     }

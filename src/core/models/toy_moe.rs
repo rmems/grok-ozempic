@@ -141,6 +141,68 @@ fn ternary() -> TensorClass {
     }
 }
 
+fn push_layer(tensors: &mut Vec<InventoryTensor>, layer: u32) {
+    tensors.push(tensor(
+        format!("model.layers.{layer}.input_layernorm.weight"),
+        preserve("norm"),
+        "f32",
+        Some(layer),
+        None,
+        "input_norm",
+    ));
+    for (proj, kind) in [
+        ("q_proj", "attn_q"),
+        ("k_proj", "attn_k"),
+        ("v_proj", "attn_v"),
+        ("o_proj", "attn_o"),
+    ] {
+        tensors.push(tensor(
+            format!("model.layers.{layer}.self_attn.{proj}.weight"),
+            ternary(),
+            "f32",
+            Some(layer),
+            None,
+            kind,
+        ));
+    }
+    tensors.push(tensor(
+        format!("model.layers.{layer}.post_attention_layernorm.weight"),
+        preserve("norm"),
+        "f32",
+        Some(layer),
+        None,
+        "post_attn_norm",
+    ));
+    tensors.push(tensor(
+        format!("model.layers.{layer}.block_sparse_moe.gate.weight"),
+        preserve("moe-router"),
+        "f32",
+        Some(layer),
+        None,
+        "router",
+    ));
+    push_experts(tensors, layer);
+}
+
+fn push_experts(tensors: &mut Vec<InventoryTensor>, layer: u32) {
+    for expert in 0..TOY_MOE_EXPERTS {
+        for (proj, kind) in [
+            ("w1", "moe_expert.w1"),
+            ("w2", "moe_expert.w2"),
+            ("w3", "moe_expert.w3"),
+        ] {
+            tensors.push(tensor(
+                format!("model.layers.{layer}.block_sparse_moe.experts.{expert}.{proj}.weight"),
+                ternary(),
+                "f32",
+                Some(layer),
+                Some(expert),
+                kind,
+            ));
+        }
+    }
+}
+
 fn build_toy_moe_tensors() -> Vec<InventoryTensor> {
     let mut tensors = Vec::with_capacity(TOY_MOE_TENSOR_TOTAL);
     tensors.push(tensor(
@@ -151,65 +213,9 @@ fn build_toy_moe_tensors() -> Vec<InventoryTensor> {
         None,
         "embed",
     ));
-
     for layer in 0..TOY_MOE_LAYERS {
-        tensors.push(tensor(
-            format!("model.layers.{layer}.input_layernorm.weight"),
-            preserve("norm"),
-            "f32",
-            Some(layer),
-            None,
-            "input_norm",
-        ));
-        for (proj, kind) in [
-            ("q_proj", "attn_q"),
-            ("k_proj", "attn_k"),
-            ("v_proj", "attn_v"),
-            ("o_proj", "attn_o"),
-        ] {
-            tensors.push(tensor(
-                format!("model.layers.{layer}.self_attn.{proj}.weight"),
-                ternary(),
-                "f32",
-                Some(layer),
-                None,
-                kind,
-            ));
-        }
-        tensors.push(tensor(
-            format!("model.layers.{layer}.post_attention_layernorm.weight"),
-            preserve("norm"),
-            "f32",
-            Some(layer),
-            None,
-            "post_attn_norm",
-        ));
-        tensors.push(tensor(
-            format!("model.layers.{layer}.block_sparse_moe.gate.weight"),
-            preserve("moe-router"),
-            "f32",
-            Some(layer),
-            None,
-            "router",
-        ));
-        for expert in 0..TOY_MOE_EXPERTS {
-            for (proj, kind) in [
-                ("w1", "moe_expert.w1"),
-                ("w2", "moe_expert.w2"),
-                ("w3", "moe_expert.w3"),
-            ] {
-                tensors.push(tensor(
-                    format!("model.layers.{layer}.block_sparse_moe.experts.{expert}.{proj}.weight"),
-                    ternary(),
-                    "f32",
-                    Some(layer),
-                    Some(expert),
-                    kind,
-                ));
-            }
-        }
+        push_layer(&mut tensors, layer);
     }
-
     tensors.push(tensor(
         "model.norm.weight".into(),
         preserve("final-norm"),
