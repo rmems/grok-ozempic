@@ -316,22 +316,7 @@ fn reject_block_mismatch(
     if blocks.is_empty() {
         return Ok(());
     }
-    let mut tensor_count = 0u64;
-    let mut nbytes = 0u64;
-    for block in blocks {
-        tensor_count = tensor_count
-            .checked_add(u64::from(block.tensor_count))
-            .ok_or_else(|| {
-                GrokOzempicError::ArtifactValidation(format!(
-                    "{label}: inventory scan block tensor_count overflows u64"
-                ))
-            })?;
-        nbytes = nbytes.checked_add(block.total_nbytes).ok_or_else(|| {
-            GrokOzempicError::ArtifactValidation(format!(
-                "{label}: inventory scan block total_nbytes overflows u64"
-            ))
-        })?;
-    }
+    let (tensor_count, nbytes) = sum_block_summaries(label, blocks)?;
     if tensor_count != derived.total as u64 {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "{label}: inventory scan block summaries count {tensor_count} tensors, tensors array has {}",
@@ -345,4 +330,30 @@ fn reject_block_mismatch(
         )));
     }
     Ok(())
+}
+
+fn sum_block_summaries(label: &str, blocks: &[BlockSummaryDoc]) -> Result<(u64, u64)> {
+    let mut tensor_count = 0u64;
+    let mut nbytes = 0u64;
+    for block in blocks {
+        tensor_count = add_u64(
+            tensor_count,
+            u64::from(block.tensor_count),
+            label,
+            "block tensor_count overflows u64",
+        )?;
+        nbytes = add_u64(
+            nbytes,
+            block.total_nbytes,
+            label,
+            "block total_nbytes overflows u64",
+        )?;
+    }
+    Ok((tensor_count, nbytes))
+}
+
+fn add_u64(acc: u64, n: u64, label: &str, what: &str) -> Result<u64> {
+    acc.checked_add(n).ok_or_else(|| {
+        GrokOzempicError::ArtifactValidation(format!("{label}: inventory scan {what}"))
+    })
 }
