@@ -137,15 +137,18 @@ Reject with typed errors rather than best-effort parse:
 
 Unknown top-level fields are **tolerated** for forward compatibility.
 
-### Runtime GOZ1 stream (V2 fail-closed classification)
+### Runtime GOZ1 stream (fail-closed classification)
 
-`stream::resolve_manifest` accepts both V1 and V2 manifests (#40 / RM-191).
-Under a **V2** manifest, classification is fail-closed: any input tensor that
-matches no `preserve` / `fp16` / `ternary_candidates` rule aborts the run with
-`GrokOzempicError::ManifestV2UnmatchedTensor` naming the tensor. V2 manifests
-are authored for full explicit coverage, so an unmatched name means the inputs
-do not follow the structural convention (or a rule is missing) — the exact
-scenario that would otherwise ternary-quantize a router/norm via `defaults`.
+`stream::resolve_manifest` accepts V1, V2, and other registered conventions
+(#40 / RM-191, #32 / RM-65). Under any **non-V1** manifest, classification is
+fail-closed: any input tensor that matches no `preserve` / `fp16` /
+`ternary_candidates` rule aborts the run with
+`GrokOzempicError::ManifestV2UnmatchedTensor` naming the tensor. Those
+manifests are authored for full explicit coverage, so an unmatched name means
+the inputs do not follow the declared convention (or a rule is missing) — the
+exact scenario that would otherwise ternary-quantize a router/norm via
+`defaults`. V1 manifests keep defaults fallthrough.
+
 Alignment and dry-run continue to load embedded V2 fixtures via their own
 entry points (`alignment.rs`).
 

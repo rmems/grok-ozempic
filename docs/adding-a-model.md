@@ -21,7 +21,8 @@ unchanged in v1.
 2. **Inventory** — a `VecInventory` (or a dedicated type implementing
    `ModelInventory`) listing every tensor name, expected class, dtype, and
    optional block/slot.
-3. **`ModelProfile`** — family id, source, convention, `inventory()`,
+3. **`ModelProfile`** — associated type `Inventory: ModelInventory`, plus
+   `family()`, `source()`, `tensor_name_convention()`, `inventory()`,
    `manifest()`, and optional `default_gif_threshold()`.
 4. **Manifest** — a dissect-schema JSON (schema v1) with preserve / fp16 /
    ternary globs in **this family's names**. Prefer `parse_manifest_bytes` so
@@ -48,7 +49,9 @@ unchanged in v1.
   `use_embedded_baseline`) until a follow-up adds a generic arch-metadata hook
 
 `run_quantization` still writes Grok-1 architecture keys into GOZ1 metadata.
-Dry-run and alignment are the plugin surface for new families in this slice.
+Unmatched tensor names **fail closed** for every non-V1 convention (same
+`ManifestV2UnmatchedTensor` error as structural V2). V1 `blk.*` keeps
+defaults fallthrough.
 
 ## Classification
 

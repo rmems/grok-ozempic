@@ -59,7 +59,7 @@ grok-ozempic (orchestration)
     │       └── MyelinBackend      — FFI to myelin-accelerator (future, stubbed)
     │
     ├── DryRunPlanner (src/core/dry_run.rs)
-    │       — maps each inventory tensor to its planned backend call
+    │       — maps each manifest rule to its planned backend call
     │
     └── Existing: stream.rs, weight_pack.rs, manifest.rs, ...
 ```

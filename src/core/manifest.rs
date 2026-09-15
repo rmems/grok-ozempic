@@ -126,12 +126,18 @@ pub struct DissectManifest {
 impl DissectManifest {
     /// True when this manifest declares the V2 structural naming convention
     /// ([`MANIFEST_NAME_CONVENTION_V2`], `block_{NNN}.slot_{SS}.{kind}`).
-    ///
-    /// Runtime classification treats V2 manifests fail-closed: a tensor that
-    /// matches no explicit rule is a hard error instead of falling through to
-    /// `defaults` (see `crate::core::stream`).
     pub fn is_structural_v2(&self) -> bool {
         self.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2
+    }
+
+    /// True when unmatched tensors must hard-error instead of `defaults`
+    /// fallthrough.
+    ///
+    /// Legacy V1 keeps defaults fallthrough. Every other accepted convention
+    /// (V2 and HuggingFace-style MoE plugins) is authored for full explicit
+    /// coverage, so a name that matches no rule is [`GrokOzempicError::ManifestV2UnmatchedTensor`].
+    pub fn unmatched_tensors_fail_closed(&self) -> bool {
+        uses_exact_inventory_counts(&self.model.tensor_name_convention)
     }
 }
 
@@ -474,6 +480,37 @@ mod tests {
         assert!(!uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_V1));
         assert!(uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_V2));
         assert!(uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_HF_MOE));
+    }
+
+    #[test]
+    fn unmatched_tensors_fail_closed_is_v1_only_opt_out() {
+        let v1 = parse_manifest_bytes(
+            br#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "grok-1",
+                    "tensor_name_convention": "blk.{L}.{role}.weight"
+                }
+            }"#,
+            "<v1>",
+        )
+        .expect("v1");
+        let hf = parse_manifest_bytes(
+            br#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "toy-moe",
+                    "tensor_name_convention": "model.layers.{L}.{module}.{param}"
+                }
+            }"#,
+            "<hf>",
+        )
+        .expect("hf");
+        assert!(!v1.unmatched_tensors_fail_closed());
+        assert!(hf.unmatched_tensors_fail_closed());
+        assert!(!hf.is_structural_v2());
     }
 
     #[test]
