@@ -390,7 +390,7 @@ mod tests {
                 "quant_tensors": 1,
                 "f32_tensors": 1,
                 "i8_tensors": 1,
-                "total_nbytes": 20,
+                "total_nbytes": 21,
                 "total_elements": 9
             }"#,
         );
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(scan.totals.int8_tensors, 1);
         assert_eq!(scan.totals.quant_tensors, 1);
         assert_eq!(scan.totals.total_elements, 9);
-        assert_eq!(scan.totals.total_bytes, 20);
+        assert_eq!(scan.totals.total_bytes, 21);
         assert_eq!(scan.shard_count, 2);
     }
 
@@ -475,7 +475,7 @@ mod tests {
                 "quant_tensors": 1,
                 "f32_tensors": 1,
                 "i8_tensors": 1,
-                "total_nbytes": 20,
+                "total_nbytes": 21,
                 "total_elements": 9
             }"#,
         ));
