@@ -242,17 +242,10 @@ pub fn build_artifact_ir(
 
     // Basic structural information
     let model_family = manifest.model.family.clone();
-    let checkpoint = checkpoint
-        .map(|s| s.to_string())
-        .or_else(|| {
-            scan.filter(|s| !s.checkpoint_path.is_empty())
-                .map(|s| s.checkpoint_path.clone())
-        })
-        .unwrap_or_else(|| manifest.model.source.clone());
-
+    let checkpoint = resolve_checkpoint(checkpoint, scan, &manifest.model.source);
     let (spec_totals, hyperparameters) = grok1_spec_totals_and_hyperparameters();
     let totals = scan.map(|s| s.totals.clone()).unwrap_or(spec_totals);
-
+    let shards = resolve_shard_count(actual_shards, scan)?;
     let (routers, expert_blocks, inventory_blocks) = grok1_spec_block_rows();
 
     let saaq_targets = grok1_spec_saaq_targets();
@@ -263,9 +256,7 @@ pub fn build_artifact_ir(
         manifest: ArtifactManifest {
             model_family,
             checkpoint,
-            shards: actual_shards
-                .or_else(|| scan.map(|s| s.shard_count))
-                .unwrap_or(GROK1_TENSOR_TOTAL),
+            shards,
             schema_version: INVENTORY_SCHEMA_VERSION,
         },
         hyperparameters,
@@ -280,6 +271,43 @@ pub fn build_artifact_ir(
         stats: vec![],
         mean_rms: 19.762282,
     })
+}
+
+/// Checkpoint provenance. `--checkpoint` / weights-dir wins; otherwise a
+/// nonempty scan `checkpoint_path`; otherwise the policy-manifest source.
+///
+/// Scan `checkpoint_path` is an export-time filesystem path and is **not**
+/// string-compared to the CLI's short provenance name (`parent/leaf`). Those
+/// conventions disagree even for the same checkpoint. Shard counts *are*
+/// comparable and [`resolve_shard_count`] hard-errors on a mismatch.
+fn resolve_checkpoint(
+    explicit: Option<&str>,
+    scan: Option<&InventoryScan>,
+    manifest_source: &str,
+) -> String {
+    if let Some(name) = explicit {
+        return name.to_string();
+    }
+    scan.map(|s| s.checkpoint_path.as_str())
+        .filter(|path| !path.is_empty())
+        .unwrap_or(manifest_source)
+        .to_string()
+}
+
+fn resolve_shard_count(
+    actual_shards: Option<usize>,
+    scan: Option<&InventoryScan>,
+) -> Result<usize, GrokOzempicError> {
+    match (actual_shards, scan.map(|s| s.shard_count)) {
+        (Some(actual), Some(scanned)) if actual != scanned => {
+            Err(GrokOzempicError::ArtifactValidation(format!(
+                "weights-dir shard count {actual} does not match inventory scan shard_count {scanned}"
+            )))
+        }
+        (Some(actual), _) => Ok(actual),
+        (None, Some(scanned)) => Ok(scanned),
+        (None, None) => Ok(GROK1_TENSOR_TOTAL),
+    }
 }
 
 fn inventory_kind_counts() -> Vec<InventoryKindCount> {

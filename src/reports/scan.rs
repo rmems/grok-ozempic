@@ -134,53 +134,14 @@ pub fn parse_inventory_scan_bytes(bytes: &[u8], label: &str) -> Result<Inventory
             path: label.to_string(),
             source: e,
         })?;
+    validate_scan_header(&doc, label)?;
 
-    if doc.schema_version != INVENTORY_SCAN_SCHEMA_VERSION {
-        return Err(GrokOzempicError::ManifestSchemaVersion {
-            got: doc.schema_version,
-            expected: INVENTORY_SCAN_SCHEMA_VERSION,
-        });
-    }
-
-    if doc.model_family != GROK1_FAMILY {
-        return Err(GrokOzempicError::InvalidConfig(format!(
-            "{label}: inventory scan currently supports only {GROK1_FAMILY}; got {}",
-            doc.model_family
-        )));
-    }
-
-    if doc.tensors.is_empty() {
-        return Err(GrokOzempicError::ArtifactValidation(format!(
-            "{label}: inventory scan `tensors` array is empty"
-        )));
-    }
-
-    let mut tensors = Vec::with_capacity(doc.tensors.len());
-    for (i, t) in doc.tensors.iter().enumerate() {
-        let numel = numel(&t.shape).ok_or_else(|| {
-            GrokOzempicError::ArtifactValidation(format!(
-                "{label}: tensors[{i}] shape {:?} overflows u64 element count",
-                t.shape
-            ))
-        })?;
-        let expected_nbytes = numel.checked_mul(t.dtype.itemsize()).ok_or_else(|| {
-            GrokOzempicError::ArtifactValidation(format!(
-                "{label}: tensors[{i}] nbytes overflows u64"
-            ))
-        })?;
-        if t.nbytes != expected_nbytes {
-            return Err(GrokOzempicError::ArtifactValidation(format!(
-                "{label}: tensors[{i}] nbytes {} does not match shape {:?} dtype {:?} (expected {expected_nbytes})",
-                t.nbytes, t.shape, t.dtype
-            )));
-        }
-        tensors.push(ScanTensor {
-            dtype: t.dtype,
-            shape: t.shape.clone(),
-            nbytes: t.nbytes,
-            role: t.role,
-        });
-    }
+    let tensors = doc
+        .tensors
+        .iter()
+        .enumerate()
+        .map(|(i, t)| scan_tensor_from_doc(t, i, label))
+        .collect::<Result<Vec<_>>>()?;
 
     let derived = totals_from_tensors(&tensors)?;
     reject_totals_mismatch(label, &doc.totals, &derived)?;
@@ -192,6 +153,58 @@ pub fn parse_inventory_scan_bytes(bytes: &[u8], label: &str) -> Result<Inventory
         shard_count: doc.shard_count as usize,
         tensors,
         totals: derived,
+    })
+}
+
+fn validate_scan_header(doc: &InventoryScanDoc, label: &str) -> Result<()> {
+    if doc.schema_version != INVENTORY_SCAN_SCHEMA_VERSION {
+        return Err(GrokOzempicError::ManifestSchemaVersion {
+            got: doc.schema_version,
+            expected: INVENTORY_SCAN_SCHEMA_VERSION,
+        });
+    }
+    if doc.model_family != GROK1_FAMILY {
+        return Err(GrokOzempicError::InvalidConfig(format!(
+            "{label}: inventory scan currently supports only {GROK1_FAMILY}; got {}",
+            doc.model_family
+        )));
+    }
+    if doc.tensors.is_empty() {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "{label}: inventory scan `tensors` array is empty"
+        )));
+    }
+    if doc.shard_count == 0 {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "{label}: inventory scan shard_count is 0 but tensors is nonempty"
+        )));
+    }
+    Ok(())
+}
+
+fn scan_tensor_from_doc(t: &ScanTensorDoc, index: usize, label: &str) -> Result<ScanTensor> {
+    let numel = numel(&t.shape).ok_or_else(|| {
+        GrokOzempicError::ArtifactValidation(format!(
+            "{label}: tensors[{index}] shape {:?} overflows u64 element count",
+            t.shape
+        ))
+    })?;
+    let expected_nbytes = numel.checked_mul(t.dtype.itemsize()).ok_or_else(|| {
+        GrokOzempicError::ArtifactValidation(format!(
+            "{label}: tensors[{index}] nbytes overflows u64"
+        ))
+    })?;
+    if t.nbytes != expected_nbytes {
+        return Err(GrokOzempicError::ArtifactValidation(format!(
+            "{label}: tensors[{index}] nbytes {} does not match shape {:?} dtype {:?} (expected {expected_nbytes})",
+            t.nbytes, t.shape, t.dtype
+        )));
+    }
+    Ok(ScanTensor {
+        dtype: t.dtype,
+        shape: t.shape.clone(),
+        nbytes: t.nbytes,
+        role: t.role,
     })
 }
 
@@ -214,11 +227,8 @@ fn totals_from_tensors(tensors: &[ScanTensor]) -> Result<TensorTotals> {
         if t.role.is_quant() {
             quant_tensors += 1;
         }
-        let n = numel(&t.shape).ok_or_else(|| {
-            GrokOzempicError::ArtifactValidation(
-                "inventory scan element count overflows u64".to_string(),
-            )
-        })?;
+        // `scan_tensor_from_doc` already proved nbytes == numel * itemsize.
+        let n = t.nbytes / t.dtype.itemsize();
         total_elements = total_elements.checked_add(n).ok_or_else(|| {
             GrokOzempicError::ArtifactValidation(
                 "inventory scan total_elements overflows u64".to_string(),
@@ -306,8 +316,22 @@ fn reject_block_mismatch(
     if blocks.is_empty() {
         return Ok(());
     }
-    let tensor_count: u64 = blocks.iter().map(|b| u64::from(b.tensor_count)).sum();
-    let nbytes: u64 = blocks.iter().map(|b| b.total_nbytes).sum();
+    let mut tensor_count = 0u64;
+    let mut nbytes = 0u64;
+    for block in blocks {
+        tensor_count = tensor_count
+            .checked_add(u64::from(block.tensor_count))
+            .ok_or_else(|| {
+                GrokOzempicError::ArtifactValidation(format!(
+                    "{label}: inventory scan block tensor_count overflows u64"
+                ))
+            })?;
+        nbytes = nbytes.checked_add(block.total_nbytes).ok_or_else(|| {
+            GrokOzempicError::ArtifactValidation(format!(
+                "{label}: inventory scan block total_nbytes overflows u64"
+            ))
+        })?;
+    }
     if tensor_count != derived.total as u64 {
         return Err(GrokOzempicError::ArtifactValidation(format!(
             "{label}: inventory scan block summaries count {tensor_count} tensors, tensors array has {}",
@@ -321,208 +345,4 @@ fn reject_block_mismatch(
         )));
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) fn grok1_spec_inventory_scan() -> InventoryScan {
-    use crate::core::stream::GROK1_BLOCK_COUNT;
-    use crate::types::{
-        GROK1_BLOCK_SLOTS, GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL_BYTES, GROK1_VOCAB_SIZE,
-    };
-
-    let mut tensors = Vec::with_capacity(770);
-    tensors.push(ScanTensor {
-        dtype: ScanDtype::F32,
-        shape: vec![GROK1_VOCAB_SIZE as u64, GROK1_HIDDEN_DIM as u64],
-        nbytes: (GROK1_VOCAB_SIZE * GROK1_HIDDEN_DIM * 4) as u64,
-        role: ScanRole::Tensor,
-    });
-    for _ in 0..GROK1_BLOCK_COUNT {
-        for slot in GROK1_BLOCK_SLOTS.iter() {
-            let dtype = if slot.is_int8 {
-                ScanDtype::I8
-            } else {
-                ScanDtype::F32
-            };
-            let role = if slot.is_int8 {
-                ScanRole::QuantWeight
-            } else {
-                ScanRole::Tensor
-            };
-            tensors.push(ScanTensor {
-                dtype,
-                shape: slot.shape.iter().map(|d| *d as u64).collect(),
-                nbytes: slot.bytes,
-                role,
-            });
-        }
-    }
-    tensors.push(ScanTensor {
-        dtype: ScanDtype::F32,
-        shape: vec![GROK1_HIDDEN_DIM as u64],
-        nbytes: (GROK1_HIDDEN_DIM * 4) as u64,
-        role: ScanRole::Tensor,
-    });
-
-    let totals = totals_from_tensors(&tensors).expect("spec scan totals");
-    assert_eq!(totals.total_bytes, GROK1_TENSOR_TOTAL_BYTES);
-    InventoryScan {
-        model_family: GROK1_FAMILY.to_string(),
-        checkpoint_path: "grok-1-official/ckpt-0".to_string(),
-        shard_count: tensors.len(),
-        tensors,
-        totals,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::{
-        GROK1_TENSOR_F32, GROK1_TENSOR_INT8, GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL,
-        GROK1_TENSOR_TOTAL_BYTES, GROK1_TENSOR_TOTAL_ELEMENTS,
-    };
-
-    fn mini_inventory_json(totals_override: Option<&str>) -> String {
-        let totals = totals_override.unwrap_or(
-            r#"{
-                "tensors": 2,
-                "quant_tensors": 1,
-                "f32_tensors": 1,
-                "i8_tensors": 1,
-                "total_nbytes": 21,
-                "total_elements": 9
-            }"#,
-        );
-        format!(
-            r#"{{
-                "model_family": "grok-1",
-                "checkpoint_path": "/fixtures/ckpt-0",
-                "shard_count": 2,
-                "inferred": {{ "d_model": 4 }},
-                "tensors": [
-                    {{
-                        "shard_path": "/fixtures/t0",
-                        "shard_ordinal": 0,
-                        "in_shard_index": 0,
-                        "role": "tensor",
-                        "dtype": "f32",
-                        "shape": [4],
-                        "offset": 0,
-                        "nbytes": 16,
-                        "kind": {{ "kind": "block_norm" }},
-                        "block_index": null,
-                        "block_slot": null
-                    }},
-                    {{
-                        "shard_path": "/fixtures/t1",
-                        "shard_ordinal": 1,
-                        "in_shard_index": 0,
-                        "role": "quant_weight",
-                        "dtype": "i8",
-                        "shape": [5],
-                        "offset": 0,
-                        "nbytes": 5,
-                        "kind": {{ "kind": "moe_expert_projection", "detail": {{ "projection": "gate" }} }},
-                        "block_index": 0,
-                        "block_slot": 0
-                    }}
-                ],
-                "blocks": [
-                    {{
-                        "block_index": null,
-                        "label": "embedding",
-                        "shard_range": {{ "start": 0, "end_inclusive": 0 }},
-                        "tensor_count": 1,
-                        "total_nbytes": 16,
-                        "dtypes": ["f32"],
-                        "kinds": [{{ "kind_label": "block_norm", "count": 1, "nbytes": 16 }}]
-                    }},
-                    {{
-                        "block_index": 0,
-                        "label": "block_000",
-                        "shard_range": {{ "start": 1, "end_inclusive": 1 }},
-                        "tensor_count": 1,
-                        "total_nbytes": 5,
-                        "dtypes": ["i8"],
-                        "kinds": [{{ "kind_label": "moe_expert.gate", "count": 1, "nbytes": 5 }}]
-                    }}
-                ],
-                "totals": {totals},
-                "schema_version": 2
-            }}"#
-        )
-    }
-
-    #[test]
-    fn parses_inventory_json_and_derives_totals_from_tensors() {
-        let scan = parse_inventory_scan_bytes(mini_inventory_json(None).as_bytes(), "<mini>")
-            .expect("mini inventory should parse");
-        assert_eq!(scan.totals.total, 2);
-        assert_eq!(scan.totals.f32_tensors, 1);
-        assert_eq!(scan.totals.int8_tensors, 1);
-        assert_eq!(scan.totals.quant_tensors, 1);
-        assert_eq!(scan.totals.total_elements, 9);
-        assert_eq!(scan.totals.total_bytes, 21);
-        assert_eq!(scan.shard_count, 2);
-    }
-
-    #[test]
-    fn rejects_declared_totals_that_do_not_match_tensors() {
-        let json = mini_inventory_json(Some(
-            r#"{
-                "tensors": 99,
-                "quant_tensors": 1,
-                "f32_tensors": 1,
-                "i8_tensors": 1,
-                "total_nbytes": 21,
-                "total_elements": 9
-            }"#,
-        ));
-        let err = parse_inventory_scan_bytes(json.as_bytes(), "<lie>").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("do not match the `tensors` array"),
-            "got {msg}"
-        );
-        assert!(msg.contains("tensors: declared 99, derived 2"), "got {msg}");
-    }
-
-    #[test]
-    fn rejects_nbytes_inconsistent_with_shape_and_dtype() {
-        let json = mini_inventory_json(None).replace("\"nbytes\": 16", "\"nbytes\": 15");
-        let err = parse_inventory_scan_bytes(json.as_bytes(), "<bad-nbytes>").unwrap_err();
-        assert!(
-            err.to_string().contains("nbytes 15 does not match"),
-            "got {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_unsupported_schema_version() {
-        let json =
-            mini_inventory_json(None).replace("\"schema_version\": 2", "\"schema_version\": 1");
-        let err = parse_inventory_scan_bytes(json.as_bytes(), "<v1>").unwrap_err();
-        assert!(
-            matches!(
-                err,
-                GrokOzempicError::ManifestSchemaVersion {
-                    got: 1,
-                    expected: 2
-                }
-            ),
-            "got {err:?}"
-        );
-    }
-
-    #[test]
-    fn grok1_spec_scan_matches_crate_constants() {
-        let scan = grok1_spec_inventory_scan();
-        assert_eq!(scan.totals.total, GROK1_TENSOR_TOTAL);
-        assert_eq!(scan.totals.f32_tensors, GROK1_TENSOR_F32);
-        assert_eq!(scan.totals.int8_tensors, GROK1_TENSOR_INT8);
-        assert_eq!(scan.totals.quant_tensors, GROK1_TENSOR_QUANT);
-        assert_eq!(scan.totals.total_elements, GROK1_TENSOR_TOTAL_ELEMENTS);
-        assert_eq!(scan.totals.total_bytes, GROK1_TENSOR_TOTAL_BYTES);
-    }
 }

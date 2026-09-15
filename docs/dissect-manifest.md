@@ -35,6 +35,13 @@ summaries) disagree with that sum. `validate_ir` still asserts the
 `GROK1_*` spec constants, so a scan that is not Grok-1 fails instead of
 the detector and validator reading the same constants.
 
+When `--weights-dir` and `--inventory` are both set, their shard counts
+must agree; a mismatch is a hard error rather than mixing two
+checkpoints. Checkpoint provenance still prefers `--checkpoint` / the
+weights-directory name over `inventory.json`'s `checkpoint_path`,
+because the latter is an export-time filesystem path and is not
+comparable as a string to the CLI's short provenance name.
+
 Do not add those fields to in-tree `dissect/grok-1/*.json`. Those files
 are policy-manifest fallbacks, not inventory scans.
 

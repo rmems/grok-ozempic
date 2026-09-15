@@ -248,3 +248,242 @@ fn is_xai_tensor_shard_name(name: &str) -> bool {
         && major.bytes().all(|byte| byte.is_ascii_digit())
         && minor.bytes().all(|byte| byte.is_ascii_digit())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use grok_ozempic::GROK1_BASELINE_JSON;
+    use grok_ozempic::core::stream::GROK1_BLOCK_COUNT;
+    use grok_ozempic::types::{
+        GROK1_BLOCK_SLOTS, GROK1_HIDDEN_DIM, GROK1_TENSOR_F32, GROK1_TENSOR_INT8,
+        GROK1_TENSOR_QUANT, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES,
+        GROK1_TENSOR_TOTAL_ELEMENTS, GROK1_VOCAB_SIZE,
+    };
+    use std::fs;
+    use std::sync::OnceLock;
+
+    fn fixture_dir() -> PathBuf {
+        let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("artifacts-cli-tests")
+            .join(format!(
+                "{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write_baseline_manifest(dir: &Path) -> PathBuf {
+        let path = dir.join("baseline.json");
+        fs::write(&path, GROK1_BASELINE_JSON).unwrap();
+        path
+    }
+
+    fn slot_json(slot: &grok_ozempic::types::BlockSlot) -> String {
+        let (role, dtype) = if slot.is_int8 {
+            ("quant_weight", "i8")
+        } else {
+            ("tensor", "f32")
+        };
+        let shape = slot
+            .shape
+            .iter()
+            .map(|d| d.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            r#"{{"role":"{role}","dtype":"{dtype}","shape":[{shape}],"nbytes":{}}}"#,
+            slot.bytes
+        )
+    }
+
+    fn grok1_inventory_json() -> &'static str {
+        static JSON: OnceLock<String> = OnceLock::new();
+        JSON.get_or_init(|| {
+            let mut tensors = Vec::with_capacity(GROK1_TENSOR_TOTAL);
+            tensors.push(format!(
+                r#"{{"role":"tensor","dtype":"f32","shape":[{}, {}],"nbytes":{}}}"#,
+                GROK1_VOCAB_SIZE,
+                GROK1_HIDDEN_DIM,
+                GROK1_VOCAB_SIZE * GROK1_HIDDEN_DIM * 4
+            ));
+            for _ in 0..GROK1_BLOCK_COUNT {
+                tensors.extend(GROK1_BLOCK_SLOTS.iter().map(slot_json));
+            }
+            tensors.push(format!(
+                r#"{{"role":"tensor","dtype":"f32","shape":[{}],"nbytes":{}}}"#,
+                GROK1_HIDDEN_DIM,
+                GROK1_HIDDEN_DIM * 4
+            ));
+            format!(
+                r#"{{"model_family":"grok-1","checkpoint_path":"grok-1-official/ckpt-0","shard_count":{GROK1_TENSOR_TOTAL},"tensors":[{}],"totals":{{"tensors":{GROK1_TENSOR_TOTAL},"quant_tensors":{GROK1_TENSOR_QUANT},"f32_tensors":{GROK1_TENSOR_F32},"i8_tensors":{GROK1_TENSOR_INT8},"total_nbytes":{GROK1_TENSOR_TOTAL_BYTES},"total_elements":{GROK1_TENSOR_TOTAL_ELEMENTS}}},"schema_version":2}}"#,
+                tensors.join(",")
+            )
+        })
+    }
+
+    fn mini_inventory_json() -> &'static str {
+        r#"{"model_family":"grok-1","checkpoint_path":"/fixtures/ckpt-0","shard_count":2,"tensors":[{"role":"tensor","dtype":"f32","shape":[4],"nbytes":16},{"role":"quant_weight","dtype":"i8","shape":[5],"nbytes":5}],"totals":{"tensors":2,"quant_tensors":1,"f32_tensors":1,"i8_tensors":1,"total_nbytes":21,"total_elements":9},"schema_version":2}"#
+    }
+
+    #[test]
+    fn load_manifest_ir_spec_path_without_inventory() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let ir = load_manifest_ir(&manifest, None, None, None).expect("spec IR");
+        assert_eq!(ir.totals.total, GROK1_TENSOR_TOTAL);
+        assert_eq!(ir.manifest.shards, GROK1_TENSOR_TOTAL);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_ir_derives_totals_from_inventory() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let inventory = dir.join("inventory.json");
+        fs::write(&inventory, grok1_inventory_json()).unwrap();
+        let ir = load_manifest_ir(&manifest, Some(&inventory), Some("cli-ckpt"), None)
+            .expect("scan-backed IR");
+        assert_eq!(ir.totals.total, GROK1_TENSOR_TOTAL);
+        assert_eq!(ir.manifest.checkpoint, "cli-ckpt");
+        assert_eq!(ir.manifest.shards, GROK1_TENSOR_TOTAL);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_ir_rejects_missing_inventory() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let err = load_manifest_ir(&manifest, Some(&dir.join("missing.json")), None, None)
+            .expect_err("missing inventory");
+        assert!(
+            err.to_string().contains("Failed to load inventory scan"),
+            "got {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_ir_rejects_bad_inventory_json() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let inventory = dir.join("inventory.json");
+        fs::write(&inventory, "{ not json").unwrap();
+        let err = load_manifest_ir(&manifest, Some(&inventory), None, None)
+            .expect_err("malformed inventory");
+        assert!(
+            err.to_string().contains("Failed to load inventory scan"),
+            "got {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cmd_artifacts_generate_and_validate_without_inventory() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let out = dir.join("reports");
+        cmd_artifacts(ArtifactsCommands::Generate {
+            manifest: manifest.clone(),
+            output_dir: out.clone(),
+            weights_dir: None,
+            checkpoint: Some("from-cli".into()),
+            inventory: None,
+        })
+        .expect("generate spec reports");
+        assert!(out.join("inventory.md").is_file());
+        cmd_artifacts(ArtifactsCommands::Validate {
+            report_dir: out,
+            manifest,
+            weights_dir: None,
+            checkpoint: Some("from-cli".into()),
+            inventory: None,
+        })
+        .expect("validate spec reports");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cmd_artifacts_generate_and_validate_with_inventory() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let inventory = dir.join("inventory.json");
+        fs::write(&inventory, grok1_inventory_json()).unwrap();
+        let out = dir.join("reports");
+        cmd_artifacts(ArtifactsCommands::Generate {
+            manifest: manifest.clone(),
+            output_dir: out.clone(),
+            weights_dir: None,
+            checkpoint: None,
+            inventory: Some(inventory.clone()),
+        })
+        .expect("generate scan-backed reports");
+        cmd_artifacts(ArtifactsCommands::Validate {
+            report_dir: out,
+            manifest,
+            weights_dir: None,
+            checkpoint: None,
+            inventory: Some(inventory),
+        })
+        .expect("validate scan-backed reports");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cmd_artifacts_generate_rejects_non_grok1_inventory_totals() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let inventory = dir.join("inventory.json");
+        fs::write(&inventory, mini_inventory_json()).unwrap();
+        let err = cmd_artifacts(ArtifactsCommands::Generate {
+            manifest,
+            output_dir: dir.join("reports"),
+            weights_dir: None,
+            checkpoint: None,
+            inventory: Some(inventory),
+        })
+        .expect_err("mini scan must fail IR validation");
+        assert!(
+            err.to_string().contains("Artifact validation failed"),
+            "got {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cmd_artifacts_generate_rejects_weights_dir_inventory_shard_mismatch() {
+        let dir = fixture_dir();
+        let manifest = write_baseline_manifest(&dir);
+        let inventory = dir.join("inventory.json");
+        fs::write(&inventory, grok1_inventory_json()).unwrap();
+        let weights = dir.join("ckpt-0");
+        fs::create_dir_all(&weights).unwrap();
+        fs::write(weights.join("tensor00000_000"), b"x").unwrap();
+        let err = cmd_artifacts(ArtifactsCommands::Generate {
+            manifest,
+            output_dir: dir.join("reports"),
+            weights_dir: Some(weights),
+            checkpoint: None,
+            inventory: Some(inventory),
+        })
+        .expect_err("1 discovered shard vs 770 in the scan");
+        assert!(
+            err.to_string()
+                .contains("does not match inventory scan shard_count"),
+            "got {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shard_name_helper_accepts_xai_dissect_pattern() {
+        assert!(is_xai_tensor_shard_name("tensor00000_000"));
+        assert!(!is_xai_tensor_shard_name("tensor0_0"));
+        assert!(!is_xai_tensor_shard_name("weights.bin"));
+    }
+}

@@ -1,7 +1,8 @@
 use crate::core::manifest::ManifestBlock;
 use crate::core::manifest::embedded_grok1_baseline;
 use crate::reports::detector;
-use crate::reports::scan::{ScanDtype, grok1_spec_inventory_scan};
+use crate::reports::scan::ScanDtype;
+use crate::reports::scan_tests::grok1_spec_inventory_scan;
 use crate::reports::schema::ArtifactIR;
 use crate::reports::templates;
 use crate::reports::validator;
@@ -269,12 +270,15 @@ fn scan_backed_ir_derives_totals_and_validate_ir_is_not_a_tautology() {
     assert!(validator::validate_ir(&ir).is_ok());
 
     // Producer summed the tensors; validator still reads GROK1_*. Flip one
-    // dtype and the two sources disagree.
+    // dtype and the two sources disagree. Keep totals internally consistent
+    // with the mutated tensor (f32 → i8 drops 3 bytes per element).
     let mut bad = scan;
+    let old_nbytes = bad.tensors[0].nbytes;
     bad.tensors[0].dtype = ScanDtype::I8;
     bad.tensors[0].nbytes = 131_072u64 * 6_144; // numel * i8 itemsize
     bad.totals.f32_tensors -= 1;
     bad.totals.int8_tensors += 1;
+    bad.totals.total_bytes = bad.totals.total_bytes - old_nbytes + bad.tensors[0].nbytes;
     let ir = detector::build_artifact_ir(manifest, Some(&bad), None, None)
         .expect("internally consistent wrong scan still builds");
     let err =
@@ -300,4 +304,40 @@ fn scan_backed_ir_keeps_policy_manifest_block_count_advisory() {
     assert_eq!(ir.hyperparameters.n_blocks, 64);
     assert_eq!(ir.routers.len(), 64);
     assert!(validator::validate_ir(&ir).is_ok());
+}
+
+#[test]
+fn scan_backed_ir_uses_scan_checkpoint_and_shard_count() {
+    let manifest = embedded_grok1_baseline().expect("baseline");
+    let ir = detector::build_artifact_ir(manifest, Some(&grok1_spec_inventory_scan()), None, None)
+        .expect("scan-backed IR");
+    assert_eq!(ir.manifest.checkpoint, "grok-1-official/ckpt-0");
+    assert_eq!(ir.manifest.shards, 770);
+}
+
+#[test]
+fn scan_backed_ir_rejects_weights_dir_shard_mismatch() {
+    let manifest = embedded_grok1_baseline().expect("baseline");
+    let err =
+        detector::build_artifact_ir(manifest, Some(&grok1_spec_inventory_scan()), None, Some(42))
+            .expect_err("mismatched shard counts must not be mixed");
+    assert!(
+        err.to_string()
+            .contains("does not match inventory scan shard_count"),
+        "got {err}"
+    );
+}
+
+#[test]
+fn scan_backed_ir_accepts_matching_weights_dir_shard_count() {
+    let manifest = embedded_grok1_baseline().expect("baseline");
+    let ir = detector::build_artifact_ir(
+        manifest,
+        Some(&grok1_spec_inventory_scan()),
+        Some("cli-ckpt"),
+        Some(770),
+    )
+    .expect("matching shard counts should combine");
+    assert_eq!(ir.manifest.shards, 770);
+    assert_eq!(ir.manifest.checkpoint, "cli-ckpt");
 }
