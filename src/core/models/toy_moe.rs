@@ -271,7 +271,14 @@ mod tests {
     #[test]
     fn embedded_manifest_uses_hf_moe_convention() {
         let m = ToyMoeProfile::embedded_manifest();
+        assert_eq!(ToyMoeProfile.family(), TOY_MOE_FAMILY);
+        assert_eq!(ToyMoeProfile.source(), "grok-ozempic/toy-moe");
+        assert_eq!(
+            ToyMoeProfile.tensor_name_convention(),
+            MANIFEST_NAME_CONVENTION_HF_MOE
+        );
         assert_eq!(m.model.family, TOY_MOE_FAMILY);
+        assert_eq!(m.model.source, "grok-ozempic/toy-moe");
         assert_eq!(
             m.model.tensor_name_convention,
             MANIFEST_NAME_CONVENTION_HF_MOE

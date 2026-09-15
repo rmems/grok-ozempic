@@ -234,7 +234,80 @@ pub(crate) use crate::core::test_support::plan_structural_manifest;
 mod tests {
     use super::*;
     use crate::core::grok1_inventory::Grok1Inventory;
+    use crate::core::inventory::{InventoryTensor, VecInventory};
     use crate::types::GROK1_TENSOR_TOTAL;
+
+    fn class_tensor(name: &str, expected: TensorClass) -> InventoryTensor {
+        InventoryTensor {
+            structural_name: name.into(),
+            expected_class: expected,
+            dtype: "f32",
+            block: None,
+            slot: None,
+            kind: "fixture",
+        }
+    }
+
+    /// Returns Fp16/Ternary/Default/Preserve for preserve/fp16/ternary/default
+    /// so every [`ClassCounts::bump`] arm and [`record_mismatch`] run.
+    struct CycleClassifier;
+
+    impl TensorClassifier for CycleClassifier {
+        fn classify_name(&self, name: &str) -> TensorClass {
+            match name {
+                "preserve" => TensorClass::Fp16 { reason: None },
+                "fp16" => TensorClass::TernaryCandidate {
+                    rank: None,
+                    gif_threshold: None,
+                },
+                "ternary" => TensorClass::Default,
+                _ => TensorClass::Preserve { reason: None },
+            }
+        }
+    }
+
+    #[test]
+    fn check_alignment_with_records_class_mismatches() {
+        let inv = VecInventory::from(vec![
+            class_tensor("preserve", TensorClass::Preserve { reason: None }),
+            class_tensor("fp16", TensorClass::Fp16 { reason: None }),
+            class_tensor(
+                "ternary",
+                TensorClass::TernaryCandidate {
+                    rank: None,
+                    gif_threshold: None,
+                },
+            ),
+            class_tensor("default", TensorClass::Default),
+        ]);
+        let report = check_alignment_with(&inv, &CycleClassifier);
+        assert!(!report.is_aligned());
+        assert_eq!((report.matched, report.mismatched), (0, 4));
+        assert_eq!(
+            (
+                report.preserve_expected_count,
+                report.fp16_expected_count,
+                report.ternary_expected_count,
+                report.default_expected_count
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(
+            (
+                report.preserve_actual_count,
+                report.fp16_actual_count,
+                report.ternary_actual_count,
+                report.default_actual_count
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(report.boundary_summary.len(), 4);
+        assert!(report.summary().contains("MISALIGNED"));
+        assert!(matches!(
+            report.mismatches[0].match_status,
+            ClassMatch::Mismatch { .. }
+        ));
+    }
 
     #[test]
     fn full_inventory_has_770_tensors() {

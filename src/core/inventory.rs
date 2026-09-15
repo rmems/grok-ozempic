@@ -93,3 +93,43 @@ impl ModelInventory for VecInventory {
         &self.tensors
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tensor(name: &str, class: TensorClass) -> InventoryTensor {
+        InventoryTensor {
+            structural_name: name.into(),
+            expected_class: class,
+            dtype: "f32",
+            block: None,
+            slot: None,
+            kind: "fixture",
+        }
+    }
+
+    #[test]
+    fn from_vec_classifies_and_counts() {
+        let inv = VecInventory::from(vec![
+            tensor("keep", TensorClass::Preserve { reason: None }),
+            tensor("half", TensorClass::Fp16 { reason: None }),
+            tensor(
+                "tri",
+                TensorClass::TernaryCandidate {
+                    rank: None,
+                    gif_threshold: None,
+                },
+            ),
+            tensor("other", TensorClass::Default),
+        ]);
+        assert_eq!(inv.total_tensors(), 4);
+        assert_eq!(
+            inv.classify_tensor("half"),
+            Some(TensorClass::Fp16 { reason: None })
+        );
+        assert_eq!(inv.classify_tensor("missing"), None);
+        assert_eq!(inv.count_matching("half"), 1);
+        assert_eq!(inv.count_by_expected_class(), (1, 1, 1, 1));
+    }
+}

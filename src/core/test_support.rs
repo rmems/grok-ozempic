@@ -31,7 +31,6 @@ pub(crate) fn align_profile<P: ModelProfile>(profile: &P) -> AlignmentReport {
 }
 
 /// Dry-run an arbitrary inventory + manifest with default config.
-#[allow(dead_code)]
 pub(crate) fn plan_for<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,

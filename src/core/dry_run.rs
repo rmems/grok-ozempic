@@ -695,10 +695,9 @@ mod tests {
 
     #[test]
     fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
-        let inv = VecInventory::new(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
+        let inv = VecInventory::from(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
         let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
-        let report = DryRunPlanner::plan(&inv, &m, &QuantizationConfig::default())
-            .expect("plan should succeed");
+        let report = crate::core::test_support::plan_for(&inv, &m);
         let plan = report
             .rule_plans
             .iter()

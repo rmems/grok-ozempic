@@ -44,6 +44,8 @@ mod tests {
     fn profile_matches_structural_harness() {
         let profile = Grok1Profile;
         assert_eq!(profile.family(), "grok-1");
+        assert_eq!(profile.source(), "xai-org/grok-1");
+        assert_eq!(profile.default_gif_threshold(), 0.05);
         assert_eq!(
             profile.tensor_name_convention(),
             MANIFEST_NAME_CONVENTION_V2

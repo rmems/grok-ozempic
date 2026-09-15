@@ -29,6 +29,7 @@ mod tests {
         assert_eq!(grok.coverage.inventory_coverage, CoverageStatus::Full);
         assert_eq!(toy.coverage.inventory_coverage, CoverageStatus::Full);
         assert_ne!(Grok1Profile.family(), ToyMoeProfile.family());
+        assert_ne!(Grok1Profile.source(), ToyMoeProfile.source());
         assert_ne!(
             Grok1Profile.tensor_name_convention(),
             ToyMoeProfile.tensor_name_convention()
