@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::core::inventory::ModelInventory;
-use crate::core::manifest::{DissectManifest, MANIFEST_NAME_CONVENTION_V2};
+use crate::core::manifest::{DissectManifest, uses_exact_inventory_counts};
 use crate::core::selection::TensorClass;
 use crate::error::{GrokOzempicError, Result};
 use crate::types::{QuantizationConfig, TensorPrecision};
@@ -81,18 +81,19 @@ pub struct PlannedKernelCall {
     pub precision: TensorPrecision,
     /// Effective GIF threshold (meaningful for ternary).
     pub gif_threshold: f32,
-    /// Estimated tensor count this rule covers (based on Grok-1 inventory).
+    /// Estimated tensor count this rule covers (from the provided
+    /// [`crate::core::inventory::ModelInventory`]).
     pub estimated_tensor_count: usize,
 }
 
-/// Coverage analysis against the known Grok-1 tensor inventory.
+/// Coverage analysis against the provided [`crate::core::inventory::ModelInventory`].
 #[derive(Debug, Clone)]
 pub struct CoverageSummary {
     /// How many tensors each operation is planned to handle.
     pub by_operation: BTreeMap<OperationKind, usize>,
     /// Total tensors covered by manifest rules.
     pub covered_by_rules: usize,
-    /// Total tensors in the Grok-1 baseline inventory.
+    /// Total tensors in the supplied inventory.
     pub inventory_total: usize,
     /// Match status.
     pub inventory_coverage: CoverageStatus,
@@ -296,11 +297,11 @@ impl DryRunReport {
 
 /// Plans which orchestration verbs each manifest rule would produce.
 ///
-/// The planner reads the xai-dissect manifest, classifies every rule
+/// The planner reads a dissect-style manifest, classifies every rule
 /// (preserve / fp16 / ternary_candidates / defaults) through the existing
 /// selection pipeline, and maps each to an [`OperationKind`]. Wrap vs
 /// re-quantize is decided from inventory dtype, not glob substrings.
-/// The result can be validated against the xai-dissect tensor inventory
+/// The result can be validated against the caller's [`ModelInventory`]
 /// to ensure full coverage.
 pub struct DryRunPlanner;
 
@@ -309,9 +310,9 @@ impl DryRunPlanner {
     /// `DryRunReport` mapping each rule to its planned operation.
     ///
     /// The `inventory` parameter provides model-specific tensor counts for
-    /// accurate per-rule estimates. For V2 structural manifests, counts are
-    /// taken exactly from the inventory; for legacy V1 manifests, a heuristic
-    /// is used.
+    /// accurate per-rule estimates. For any convention other than legacy V1
+    /// `blk.*`, counts are taken exactly from the inventory; V1 still uses a
+    /// wildcard heuristic.
     pub fn plan<I: ModelInventory>(
         inventory: &I,
         manifest: &DissectManifest,
@@ -432,25 +433,19 @@ fn resolve_precision(
 }
 
 /// Heuristically estimate how many concrete tensors a single glob pattern
-/// matches in the Grok-1 inventory (legacy V1 `blk.*` naming convention).
+/// matches under the legacy V1 `blk.*` naming convention.
 ///
-/// For the xai-dissect structural manifest (V2 `block_*.slot_*` convention)
-/// the planner uses exact counts from [`ModelInventory::count_matching`]
-/// instead, so that dry-run coverage reports are accurate for the 770-tensor
-/// inventory (e.g. 64 for `block_*.slot_11.router`).
-///
+/// For every other accepted convention the planner uses exact counts from
+/// [`ModelInventory::count_matching`] instead.
 fn estimate_tensor_count<I: ModelInventory>(inventory: &I, pattern: &str) -> usize {
-    // Wildcard patterns like "blk.*.ffn_up.weight" could match up to
-    // GROK1_BLOCK_COUNT tensors (one per block).  Exact names count as 1.
-    // This is the legacy V1 heuristic. For structural V2 manifests the
-    // planner uses exact counts from Grok1Inventory instead (see
-    // estimate_tensor_count_for_manifest).
+    // Wildcard patterns like "blk.*.ffn_up.weight" could match one tensor
+    // per block. Exact names count as 1. Scale the wildcard multiplier from
+    // unique block ids on the inventory (Grok-1's 64 blocks → 64/8 = 8,
+    // matching the historical heuristic).
     let star_count = pattern.matches('*').count();
     match star_count {
         0 => 1,
         _ => {
-            // Scale the wildcard multiplier dynamically based on the number of blocks in the inventory.
-            // For Grok-1 (64 blocks), this results in 64 / 8 = 8, matching the legacy heuristic.
             let mut unique_blocks = std::collections::HashSet::new();
             for t in inventory.tensors() {
                 if let Some(b) = t.block {
@@ -473,7 +468,7 @@ fn estimate_tensor_count_for_manifest<I: ModelInventory>(
     manifest: &DissectManifest,
     pattern: &str,
 ) -> usize {
-    if manifest.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
+    if uses_exact_inventory_counts(&manifest.model.tensor_name_convention) {
         inventory.count_matching(pattern)
     } else {
         estimate_tensor_count(inventory, pattern)
@@ -486,7 +481,7 @@ mod tests {
     use crate::core::alignment::embedded_grok1_structural_manifest;
     use crate::core::alignment::plan_structural_manifest;
     use crate::core::grok1_inventory::Grok1Inventory;
-    use crate::core::inventory::{InventoryTensor, ModelInventory};
+    use crate::core::inventory::{InventoryTensor, VecInventory};
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::{GROK1_TENSOR_TOTAL, QuantizationConfig};
 
@@ -656,17 +651,6 @@ mod tests {
         }
     }
 
-    struct TinyInv(Vec<InventoryTensor>);
-
-    impl ModelInventory for TinyInv {
-        fn total_tensors(&self) -> usize {
-            self.0.len()
-        }
-        fn tensors(&self) -> &[InventoryTensor] {
-            &self.0
-        }
-    }
-
     fn tiny_tensor(name: &str, dtype: &'static str) -> InventoryTensor {
         InventoryTensor {
             structural_name: name.into(),
@@ -689,8 +673,8 @@ mod tests {
             schema: "xai-dissect.manifest".into(),
             schema_version: MANIFEST_SCHEMA_VERSION,
             model: ManifestModel {
-                family: "grok-1".into(),
-                source: "xai-org/grok-1".into(),
+                family: "test-model".into(),
+                source: "grok-ozempic/test".into(),
                 tensor_name_convention: MANIFEST_NAME_CONVENTION_V2.into(),
             },
             produced_by: None,
@@ -711,7 +695,7 @@ mod tests {
 
     #[test]
     fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
-        let inv = TinyInv(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
+        let inv = VecInventory::new(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
         let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
         let report = DryRunPlanner::plan(&inv, &m, &QuantizationConfig::default())
             .expect("plan should succeed");
@@ -725,7 +709,7 @@ mod tests {
 
     #[test]
     fn glob_containing_moe_expert_does_not_force_wrap_on_f32() {
-        let inv = TinyInv(vec![tiny_tensor(
+        let inv = VecInventory::new(vec![tiny_tensor(
             "block_000.slot_00.moe_expert.floaty",
             "f32",
         )]);
@@ -746,7 +730,7 @@ mod tests {
 
     #[test]
     fn mixed_inventory_dtypes_fail_closed() {
-        let inv = TinyInv(vec![
+        let inv = VecInventory::new(vec![
             tiny_tensor("block_000.slot_00.mixed", "i8"),
             tiny_tensor("block_001.slot_00.mixed", "f32"),
         ]);

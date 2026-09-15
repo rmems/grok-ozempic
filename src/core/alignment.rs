@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
-use crate::core::selection::{TensorClass, classify};
+use crate::core::selection::{TensorClass, TensorClassifier, classify};
 use crate::types::QuantizationConfig;
 
 pub const GROK1_STRUCTURAL_MANIFEST_JSON: &str =
@@ -84,11 +84,15 @@ impl AlignmentReport {
     }
 }
 
-pub fn check_alignment<I: ModelInventory>(
-    inventory: &I,
-    manifest: &DissectManifest,
-    config: &QuantizationConfig,
-) -> AlignmentReport {
+/// Compare inventory expected classes against a [`TensorClassifier`].
+///
+/// Manifest glob matching is the default classifier; a model plugin can
+/// supply its own type without forking this function.
+pub fn check_alignment_with<I, C>(inventory: &I, classifier: &C) -> AlignmentReport
+where
+    I: ModelInventory,
+    C: TensorClassifier,
+{
     let mut matched = 0;
     let mut mismatched = 0;
     let mut preserve_exp = 0;
@@ -103,7 +107,7 @@ pub fn check_alignment<I: ModelInventory>(
     let mut boundary_summary: BTreeMap<String, usize> = BTreeMap::new();
 
     for t in inventory.tensors() {
-        let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
+        let actual = classifier.classify_name(&t.structural_name);
         let expected = &t.expected_class;
 
         match expected {
@@ -153,6 +157,20 @@ pub fn check_alignment<I: ModelInventory>(
     }
 }
 
+/// Compare inventory expected classes against a dissect manifest.
+///
+/// `config.router_patterns` are unused while a manifest is supplied
+/// (manifest globs win). The argument is kept so existing call sites stay
+/// stable; plugins that need a non-manifest classifier should call
+/// [`check_alignment_with`].
+pub fn check_alignment<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    _config: &QuantizationConfig,
+) -> AlignmentReport {
+    check_alignment_with(inventory, manifest)
+}
+
 pub struct ConcreteCoverage {
     pub by_class: BTreeMap<String, usize>,
     pub total_classified: usize,
@@ -195,17 +213,7 @@ pub fn classify_full_inventory<I: ModelInventory>(
 }
 
 #[cfg(test)]
-/// Helper to create a standard test setup: load structural manifest + default config + run plan
-pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
-    let m = embedded_grok1_structural_manifest();
-    let config = QuantizationConfig::default();
-    crate::core::dry_run::DryRunPlanner::plan(
-        &crate::core::grok1_inventory::Grok1Inventory::full(),
-        m,
-        &config,
-    )
-    .expect("plan should succeed")
-}
+pub(crate) use crate::core::test_support::plan_structural_manifest;
 
 #[cfg(test)]
 mod tests {
@@ -221,10 +229,8 @@ mod tests {
 
     #[test]
     fn alignment_against_structural_manifest() {
-        let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = check_alignment(&inv, manifest, &config);
+        let report =
+            crate::core::test_support::align_profile(&crate::core::models::grok1::Grok1Profile);
 
         eprintln!("{}", report.summary());
         for (boundary, count) in &report.boundary_summary {
@@ -241,10 +247,8 @@ mod tests {
 
     #[test]
     fn preserve_tensors_are_not_ternary() {
-        let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = check_alignment(&inv, manifest, &config);
+        let report =
+            crate::core::test_support::align_profile(&crate::core::models::grok1::Grok1Profile);
 
         let preserve_leaked_to_ternary = report
             .mismatches
@@ -281,9 +285,11 @@ mod tests {
     #[test]
     fn concrete_coverage_has_no_unclassified_tensors() {
         let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let coverage = classify_full_inventory(&inv, manifest, &config);
+        let coverage = classify_full_inventory(
+            &inv,
+            embedded_grok1_structural_manifest(),
+            &QuantizationConfig::default(),
+        );
 
         assert_eq!(
             coverage.total_classified,
@@ -504,11 +510,11 @@ mod tests {
     fn no_router_tensor_classified_as_ternary() {
         let inv = Grok1Inventory::full();
         let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
+        let classifier = manifest;
 
         for t in &inv.tensors {
             if t.kind == "router" {
-                let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
+                let actual = classifier.classify_name(&t.structural_name);
                 assert!(
                     !matches!(actual, TensorClass::TernaryCandidate { .. }),
                     "router tensor '{}' must not be TernaryCandidate, got {:?}",

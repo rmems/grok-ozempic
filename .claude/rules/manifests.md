@@ -9,6 +9,11 @@
 
 V2 requires **structural-named inputs** (export-script npy stems, `__` → `.`). Under a V2 manifest, a tensor matching no explicit rule is a **hard error** (`ManifestV2UnmatchedTensor`) — never a `defaults` fallthrough. That is the #40 guarantee: routers/norms cannot be silently ternary-quantized by a name-convention mismatch. V2 also remains valid for **alignment / dry-run** (`src/core/alignment.rs`, embedded structural fixture).
 
+Additional conventions (currently HuggingFace-style MoE
+`model.layers.{L}.{module}.{param}`) are accepted by the **loader and planner**.
+`run_quantization` fail-closed unmatched-tensor behavior stays V2-only until
+a follow-up; see `docs/adding-a-model.md`.
+
 ## Classification order
 
 Inside a loaded manifest: **preserve > fp16 > ternary_candidates > defaults**.

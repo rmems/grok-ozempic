@@ -5,13 +5,17 @@ This document defines the dependency boundary between `grok-ozempic` and
 [rmems/grok-ozempic#21](https://github.com/rmems/grok-ozempic/issues/21) /
 [MET-101](https://linear.app/saaq-spiking-adaptive-activity/issue/MET-101).
 
+Model plugins (GH #32 / RM-65) are documented in
+[`docs/adding-a-model.md`](adding-a-model.md).
+
 ## Principle
 
-`grok-ozempic` is the **Grok-1-specific quantization and orchestration layer**.
-It must not grow its own duplicated CUDA kernel stack unless a kernel is truly
-Grok-specific. Kernel ownership lives in `myelin-accelerator` so that
-binary/ternary/SAAQ kernels, bitpacking, benchmarks, and FFI remain reusable
-across `corinth-canal`, Grok-1 experiments, and future Metis/Spikenaut work.
+`grok-ozempic` is the **quantization and orchestration engine**, with Grok-1 as
+the reference [`ModelProfile`](../src/core/models/grok1.rs). It must not grow
+its own duplicated CUDA kernel stack unless a kernel is truly family-specific.
+Kernel ownership lives in `myelin-accelerator` so that binary/ternary/SAAQ
+kernels, bitpacking, benchmarks, and FFI remain reusable across `corinth-canal`,
+Grok-1 experiments, and future Metis/Spikenaut work.
 
 ---
 
@@ -20,11 +24,11 @@ across `corinth-canal`, Grok-1 experiments, and future Metis/Spikenaut work.
 | Area | Owner | Reason |
 |------|-------|--------|
 | Grok-1 checkpoint / shard handling | `grok-ozempic` | Grok-1 shard naming, safetensors layout |
-| Tensor inventory and mapping | `grok-ozempic` | Manifest-driven precision classification |
-| Router/expert-aware quantization planning | `grok-ozempic` | Grok-1 MoE structure |
-| Per-expert quantization manifests | `grok-ozempic` | xai-dissect integration |
-| Validation against xai-dissect artifacts | `grok-ozempic` | Grok-1 artifact contract |
-| Dry-run quantization reports | `grok-ozempic` | Orchestration concern |
+| Tensor inventory and mapping | `grok-ozempic` | `ModelInventory` + per-family plugins; Grok-1 is the reference |
+| Router/expert-aware quantization planning | `grok-ozempic` | Manifest globs + `DryRunPlanner` (model-agnostic) |
+| Per-expert quantization manifests | `grok-ozempic` | dissect-schema v1; extra conventions via `ACCEPTED_NAME_CONVENTIONS` |
+| Validation against xai-dissect artifacts | `grok-ozempic` | Grok-1 artifact contract (`convert-grok1` / `saaq-g1-v0`) |
+| Dry-run quantization reports | `grok-ozempic` | Orchestration concern; coverage vs any `ModelInventory` |
 | High-level experiment orchestration | `grok-ozempic` | Pipeline entry points |
 | GOZ1 binary container format | `grok-ozempic` | Grok-specific output format |
 | Ternary bitpacking (`pack_trits`, `encode_trit`) | **`myelin-accelerator`** | Reusable across projects (moved in progress) |
@@ -45,13 +49,17 @@ operations.
 ```
 grok-ozempic (orchestration)
     │
+    ├── ModelProfile (src/core/model.rs)
+    │       ├── Grok1Profile        — reference 770-tensor plugin
+    │       └── ToyMoeProfile       — Mixtral-style second family
+    │
     ├── BackendKernel trait (src/core/backend.rs)
     │       │
     │       ├── LocalBackend       — delegates to quantizer.rs (CPU, current)
     │       └── MyelinBackend      — FFI to myelin-accelerator (future, stubbed)
     │
     ├── DryRunPlanner (src/core/dry_run.rs)
-    │       — maps each tensor to its planned backend call
+    │       — maps each inventory tensor to its planned backend call
     │
     └── Existing: stream.rs, weight_pack.rs, manifest.rs, ...
 ```
@@ -72,9 +80,9 @@ offloads kernel calls to CUDA.
 
 ## Dry-run planner
 
-The `DryRunPlanner` reads the xai-dissect manifest and produces a
-`DryRunReport` that maps each Grok-1 tensor to the backend kernel call it
-would invoke. This serves two purposes:
+The `DryRunPlanner` reads a dissect-schema manifest and a [`ModelInventory`]
+and produces a `DryRunReport` that maps each tensor to the backend kernel call
+it would invoke. This serves two purposes:
 
 1. **Validation** — the planned calls can be compared against the tensor
    inventory to catch misclassification or missing coverage.

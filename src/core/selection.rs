@@ -49,6 +49,22 @@ pub enum TensorClass {
     Default,
 }
 
+/// Pluggable classification used by alignment.
+///
+/// The default implementation is manifest glob matching ([`classify`]).
+/// A family that cannot be expressed as dissect globs can supply its own
+/// type instead of forking [`crate::core::alignment::check_alignment`].
+pub trait TensorClassifier {
+    /// Classify one tensor name.
+    fn classify_name(&self, name: &str) -> TensorClass;
+}
+
+impl TensorClassifier for DissectManifest {
+    fn classify_name(&self, name: &str) -> TensorClass {
+        classify(name, Some(self), &[])
+    }
+}
+
 /// Classify `name` against the manifest (if any), otherwise fall back to
 /// the legacy substring-router heuristic.
 ///
@@ -259,6 +275,23 @@ mod tests {
         assert!(glob_match(
             "block_*.slot_00.moe_expert.gate",
             "block_000.slot_00.moe_expert.gate"
+        ));
+    }
+
+    #[test]
+    fn dissect_manifest_implements_tensor_classifier() {
+        let mut m = empty_manifest();
+        m.preserve.push(PreserveEntry {
+            name: "blk.*.attn_router.weight".into(),
+            reason: Some("routing-critical".into()),
+        });
+        assert!(matches!(
+            m.classify_name("blk.0.attn_router.weight"),
+            TensorClass::Preserve { .. }
+        ));
+        assert!(matches!(
+            m.classify_name("blk.0.ffn_up.weight"),
+            TensorClass::Default
         ));
     }
 

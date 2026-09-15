@@ -2,7 +2,10 @@
 
 **SNN-inspired quantization for Grok-scale Mixture-of-Experts models** — thin down the weights without compromising routing accuracy.
 
-This crate turns heavyweight Grok checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 passthrough where necessary.
+This crate turns heavyweight MoE checkpoints into a spiking-friendly
+representation using a ternary SNN encoding and FP16 passthrough where
+necessary. **Grok-1 is the reference family**; the planner and alignment engine
+are reusable — see [`docs/adding-a-model.md`](docs/adding-a-model.md).
 
 **Think of it as Ozempic for Grok — less bulk, same routing story.**
 
@@ -186,11 +189,11 @@ all five `scripts.test_*` modules and `bash -n` for shell scripts).
 ## CUDA kernel ownership
 
 CUDA kernel ownership lives in the **`myelin-accelerator`** project, not in
-`grok-ozempic`. This repo is the Grok-1-specific quantization and orchestration
-layer, not a generic CUDA backend.
+`grok-ozempic`. This repo is the quantization and orchestration engine (Grok-1
+is the reference plugin), not a generic CUDA backend.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full dependency
-boundary and backend integration plan.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the kernel boundary and
+[`docs/adding-a-model.md`](docs/adding-a-model.md) for how to add a family.
 
 ## Repository
 

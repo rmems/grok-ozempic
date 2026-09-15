@@ -235,17 +235,20 @@ Slash shortcuts (Claude Code): `/smoke`, `/quantize-embed`, `/v2-bridge`, `/pr-r
 
 ## Architecture Overview
 
-**grok-ozempic** = Grok-1-specific SNN-style quantization and GOZ1 packing orchestration.
+**grok-ozempic** = SNN-style quantization engine + GOZ1 packing. Grok-1 is the
+reference [`ModelProfile`](src/core/models/grok1.rs); add a family via
+[`docs/adding-a-model.md`](docs/adding-a-model.md).
 
 | Layer | Role |
 |-------|------|
-| Manifests | xai-dissect JSON → preserve / fp16 / ternary_snn |
-| Stream | Out-of-core three-pass quant (`src/core/stream.rs`) |
-| GOZ1 | Binary weight pack (`weight_pack*`) |
+| ModelProfile | Per-family inventory, convention, GIF defaults (`src/core/model.rs`) |
+| Manifests | dissect JSON → preserve / fp16 / ternary_snn |
+| Stream | Out-of-core three-pass quant (`src/core/stream.rs`); Grok-1 arch metadata still |
+| GOZ1 | Binary weight pack (`weight_pack*`) — format unchanged in v1 |
 | Backend | `LocalBackend` CPU today; `MyelinBackend` FFI later |
 | Kernels | **Not here** — `myelin-accelerator` owns CUDA |
 
-Key docs: `docs/ARCHITECTURE.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-artifact-flow.md`, `README.md`.
+Key docs: `docs/ARCHITECTURE.md`, `docs/adding-a-model.md`, `docs/dissect-manifest.md`, `docs/grok1-saaq-artifact-flow.md`, `README.md`.
 
 ### Critical pipeline facts
 

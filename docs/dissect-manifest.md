@@ -128,8 +128,10 @@ remains supported only when no manifest is resolved.
 Reject with typed errors rather than best-effort parse:
 
 - `schema_version` other than `1`.
-- `model.tensor_name_convention` other than V1 `"blk.{L}.{role}.weight"` **or**
-  V2 `"block_{NNN}.slot_{SS}.{kind}"` (both parse; unknown conventions fail).
+- `model.tensor_name_convention` other than an entry in
+  `ACCEPTED_NAME_CONVENTIONS` (currently V1 `"blk.{L}.{role}.weight"`, V2
+  `"block_{NNN}.slot_{SS}.{kind}"`, and HuggingFace-style MoE
+  `"model.layers.{L}.{module}.{param}"`). Unknown conventions fail.
 - Non-existent / unreadable manifest file.
 - Malformed JSON / invalid precision strings.
 
