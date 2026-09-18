@@ -123,12 +123,17 @@ the deployable kernel interface is the `BackendKernel` trait in
 [`src/core/backend.rs`](../src/core/backend.rs). Full ownership table:
 [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
-| Manifest tier | `OperationKind` | `BackendKernel` method (when the live path dispatches) |
-| ------------- | --------------- | ------------------------------------------------------- |
+| Manifest tier | JSON operation | `BackendKernel` method (when the live path dispatches) |
+| ------------- | -------------- | ------------------------------------------------------- |
 | `preserve`    | `convert_fp16`  | `convert_f32_to_f16_bytes` / `passthrough_f16` (GOZ1 still stores `TENSOR_F16`) |
 | `fp16`        | `convert_fp16`  | same |
-| `ternary_snn` on float source | `quantize_ternary` | `quantize_f32` / `quantize_f16` then `pack_ternary` |
+| `ternary_snn` on float source | `quantize_ternary` | `quantize_f32` or `quantize_f16` (already returns packed `QuantizedTensor`) |
 | `ternary_snn` on already-quantized `i8`/`int8`/`u8` | `wrap_existing_quantized` | none — wrap the payload; do not re-quantize |
+
+`JSON operation` is the serde / `OperationKind::as_str` wire form
+(`quantize_ternary` ↔ `OperationKind::QuantizeTernary`). Do not call
+`pack_ternary` after `quantize_f32` / `quantize_f16`; that method accepts an
+uncompressed `&[f32]` ternary slice, not a `QuantizedTensor`.
 
 `quantize-goz1` today calls `quantizer.rs` directly rather than
 `LocalBackend` / `MyelinBackend`. The mapping above is what a backend-switched

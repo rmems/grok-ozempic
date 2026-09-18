@@ -2,7 +2,7 @@
 
 **Experimental out-of-core Grok-1 quantization with measured routing and residual-fidelity tradeoffs.**
 
-This crate turns Grok-1 checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 passthrough where routing-critical tensors must stay untouched. It is the Grok-1 **orchestration** layer. Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator), reached here through the `BackendKernel` trait.
+This crate turns Grok-1 checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 passthrough where routing-critical tensors must stay untouched. It is the Grok-1 **orchestration** layer. Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
 
 **Think of it as Ozempic for Grok — less bulk, with a measured routing tradeoff rather than a guaranteed free lunch.**
 
@@ -182,7 +182,8 @@ The canonical four-block result is GitHub [#85](https://github.com/rmems/grok-oz
 and [`metrics.json`](reports/grok-1-expert-precision-remedy-v4/metrics.json).
 **Option 2** — stacked INT4 + channel-α on experts — improved on the same-budget
 INT4 baseline but missed the approximately 0.95 top-1 band (best tested
-candidate **P1** `expert_int4_channel_alpha_123`, block-3 top-1 **0.887329**).
+candidate **P1** `expert_int4_channel_alpha_123`: INT4 + channel-α on block 0,
+FP16 experts on blocks 1–3, block-3 top-1 **0.887329**).
 Those INT4 code/scale **side tables are research caches**, not a shipped GOZ1
 INT4 payload and not full-model generation.
 

@@ -198,14 +198,20 @@ grok-ozempic artifacts validate \
 
 ## 9. Exact Cursor Patch Checklist
 
-- [ ] 1. Add `clap` CLI entrypoint in `src/bin/grok-ozempic.rs` (or equivalent binary target) exposing the `artifacts` subcommand.
-- [ ] 2. Create `src/reports/mod.rs` to expose the new reporting module.
-- [ ] 3. Create `src/reports/schema.rs` with the `ArtifactManifest`, `Hyperparameters`, `RouterEntry`, and other structs defined in Section 1.
-- [ ] 4. Create `src/reports/detector.rs` that reads a `GOZ1` stream or manifest, applies the classification rules (Section 2/3/4), and constructs the IR structs.
-- [ ] 5. Create `src/reports/templates.rs` providing `format!()` macros for `inventory.md`, `routing-report.md`, `experts.md`, `saaq-readiness.md`, and `stats.md` matching Section 5 exactly.
-- [ ] 6. Create `src/reports/writer.rs` that writes the interpolated templates to the `--output-dir`.
-- [ ] 7. Create `src/reports/validator.rs` implementing strict invariant checks (770 tensors, shapes, block counts) that either panic or return `Err` if the generated IR violates the schema.
-- [ ] 8. Add unit tests in `src/reports/tests.rs` covering the requirements in Section 6.
+**Historical.** The Artifacts CLI, `src/reports` modules, validator, writer,
+detector, templates, schema, and tests listed below are already in tree
+(`src/bin/grok-ozempic/` + `src/reports/`). Kept as a landed record, not a
+todo. The `DryRunPlanner` contract in the next section is separately marked
+as already landed.
+
+- [x] 1. Add `clap` CLI entrypoint in `src/bin/grok-ozempic.rs` (or equivalent binary target) exposing the `artifacts` subcommand.
+- [x] 2. Create `src/reports/mod.rs` to expose the new reporting module.
+- [x] 3. Create `src/reports/schema.rs` with the `ArtifactManifest`, `Hyperparameters`, `RouterEntry`, and other structs defined in Section 1.
+- [x] 4. Create `src/reports/detector.rs` that reads a `GOZ1` stream or manifest, applies the classification rules (Section 2/3/4), and constructs the IR structs.
+- [x] 5. Create `src/reports/templates.rs` providing `format!()` macros for `inventory.md`, `routing-report.md`, `experts.md`, `saaq-readiness.md`, and `stats.md` matching Section 5 exactly.
+- [x] 6. Create `src/reports/writer.rs` that writes the interpolated templates to the `--output-dir`.
+- [x] 7. Create `src/reports/validator.rs` implementing strict invariant checks (770 tensors, shapes, block counts) that either panic or return `Err` if the generated IR violates the schema.
+- [x] 8. Add unit tests in `src/reports/tests.rs` covering the requirements in Section 6.
 
 ## 10. Open Questions
 
@@ -231,7 +237,7 @@ machine-readable form:
 
 ```json
 {
-  "by_operation": { "quantize_ternary": 0, "convert_fp16": 0, "wrap_existing_quantized": 0 },
+  "by_operation": { "quantize_ternary": 1, "convert_fp16": 321, "wrap_existing_quantized": 448 },
   "covered_by_rules": 770,
   "inventory_total": 770,
   "coverage": "Full",
@@ -239,15 +245,25 @@ machine-readable form:
 }
 ```
 
+Those `by_operation` counts are the embedded V2 structural fixture, not
+placeholders: `backend_handled_total` is the sum of the map (1 float
+embedding quantized + 321 preserve/`convert_fp16` + 448 already-quantized
+wraps = 770). Alignment tests lock the class split as 321 preserve / 0 fp16
+/ 449 ternary (1 `token_embedding` + 192 MoE expert + 256 `attn_proj_i8`) /
+0 default (`src/core/alignment.rs`).
+
 `coverage` is the `Debug` spelling of `CoverageStatus` (`Full`,
 `Partial { missing: N }`, `OverComplete { extra: N }`). Structural-manifest
 alignment tests in `src/core/alignment.rs` assert `CoverageStatus::Full` for
 the embedded V2 fixture.
 
 This JSON is **not** a GOZ1 pack, not a `plan_fingerprint`, and not a payload
-digest. It answers “would every inventory tensor map to a backend verb?”
-before `quantize-goz1` runs. The live pack path still calls `quantizer.rs`
-directly; `MyelinBackend` remains a stub. See
+digest. It answers “would every inventory tensor map to a planner verb?”
+A green `__coverage__` is **not** a live-pack preflight: `DryRunPlanner`
+still assigns uncovered inventory to `manifest.defaults` (and can report
+`CoverageStatus::Full`), while `stream::classify_and_decide` rejects an
+unmatched V2 name with `ManifestV2UnmatchedTensor`. The live pack path still
+calls `quantizer.rs` directly; `MyelinBackend` remains a stub. See
 [`ARCHITECTURE.md`](./ARCHITECTURE.md) and the precision table in
 [`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
 
