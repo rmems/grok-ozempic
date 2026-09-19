@@ -244,7 +244,7 @@ reference [`ModelProfile`](src/core/models/grok1.rs); add a family via
 | ModelProfile | Per-family inventory, convention, GIF defaults (`src/core/model.rs`) |
 | Manifests | dissect JSON → preserve / fp16 / ternary_snn |
 | Stream | Out-of-core three-pass quant (`src/core/stream.rs`); Grok-1 arch metadata still |
-| GOZ1 | Binary weight pack (`weight_pack*`) — format unchanged in v1 |
+| GOZ1 | Binary weight pack (`weight_pack*`) — on-disk layout unchanged |
 | Backend | `LocalBackend` CPU today; `MyelinBackend` FFI later |
 | Kernels | **Not here** — `myelin-accelerator` owns CUDA |
 

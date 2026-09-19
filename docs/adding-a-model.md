@@ -8,7 +8,7 @@ plan and align without forking the crate.
 
 `magere-brug` is the registry / recipes / experiment-tracking layer. It should
 **consume** these plugins, not reimplement packing. GOZ1 on-disk layout is
-unchanged in v1.
+unchanged.
 
 ## What you implement
 

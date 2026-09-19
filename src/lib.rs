@@ -3,7 +3,7 @@
 //! Turns a massive Mixture-of-Experts into a sparse, membrane-driven, ternary
 //! spiking system. Grok-1 is the reference [`core::model::ModelProfile`]; the
 //! planner, alignment, and `BackendKernel` seams are model-agnostic. The GOZ1
-//! pack format is unchanged in v1.
+//! on-disk layout is unchanged.
 //!
 //! The batch pipeline writes a **GOZ1** packed checkpoint (see [`core::weight_pack`]);
 //! weights are expected from JAX/NumPy (`.npy`) or safetensors — see the README.

@@ -59,7 +59,7 @@ grok-ozempic (orchestration)
     │       └── MyelinBackend      — FFI to myelin-accelerator (future, stubbed)
     │
     ├── DryRunPlanner (src/core/dry_run.rs)
-    │       — maps each manifest rule to its planned backend call
+    │       — one PlannedKernelCall per manifest rule, with a tensor count
     │
     └── Existing: stream.rs, weight_pack.rs, manifest.rs, ...
 ```
@@ -81,8 +81,14 @@ offloads kernel calls to CUDA.
 ## Dry-run planner
 
 The `DryRunPlanner` reads a dissect-schema manifest and a [`ModelInventory`]
-and produces a `DryRunReport` that maps each tensor to the backend kernel call
-it would invoke. This serves two purposes:
+and produces a `DryRunReport` with **one `PlannedKernelCall` per manifest
+rule**, not per tensor. `estimated_tensor_count` is how many inventory
+tensors that rule wins after preserve > fp16 > ternary precedence.
+Coverage compares that unique claimed total to the inventory size so a
+plugin author can see holes (`Partial`) without mistaking a rule plan for
+a per-tensor kernel list.
+
+This serves two purposes:
 
 1. **Validation** — the planned calls can be compared against the tensor
    inventory to catch misclassification or missing coverage.
