@@ -17,7 +17,7 @@ pub struct Hyperparameters {
     pub n_blocks: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TensorTotals {
     pub total: usize,
     pub f32_tensors: usize,
