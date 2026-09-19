@@ -715,7 +715,10 @@ mod tests {
         );
         assert_eq!(report.coverage.covered_by_rules, 1);
         assert!(
-            report.rule_plans.iter().all(|plan| plan.matcher != "<defaults>"),
+            report
+                .rule_plans
+                .iter()
+                .all(|plan| plan.matcher != "<defaults>"),
             "fail-closed manifests must not synthesize defaults for unmatched tensors"
         );
     }
