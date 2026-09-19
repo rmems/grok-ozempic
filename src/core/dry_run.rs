@@ -156,7 +156,12 @@ fn plan_fp16_rules<I: ModelInventory>(
         };
         let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
         let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        let estimated = estimate_tensor_count_for_manifest(
+            inventory,
+            manifest,
+            &entry.name,
+            claimed_exact_names,
+        );
         rule_plans.push(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
