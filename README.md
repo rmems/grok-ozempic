@@ -2,7 +2,7 @@
 
 **Experimental out-of-core Grok-1 quantization with measured routing and residual-fidelity tradeoffs.**
 
-This crate turns Grok-1 checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 passthrough where routing-critical tensors must stay untouched. It is the Grok-1 **orchestration** layer. Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
+This crate turns Grok-1 checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. It is the Grok-1 **orchestration** layer. Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
 
 **Think of it as Ozempic for Grok — less bulk, with a measured routing tradeoff rather than a guaranteed free lunch.**
 
