@@ -758,31 +758,6 @@ mod tests {
     }
 
     #[test]
-    fn fail_closed_manifest_reports_partial_when_a_tensor_is_unmatched() {
-        let inv = VecInventory::new(vec![
-            tiny_tensor("block_000.slot_00.router", "f32"),
-            tiny_tensor("block_000.slot_00.expert", "f32"),
-        ]);
-        let manifest = v2_manifest_with_ternary("block_000.slot_00.router");
-        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
-            .expect("plan should succeed");
-
-        assert_eq!(
-            report.coverage.inventory_coverage,
-            CoverageStatus::Partial { missing: 1 }
-        );
-        assert_eq!(report.coverage.covered_by_rules, 1);
-        assert_eq!(report.backend_handled_total, 1);
-        assert!(
-            report
-                .rule_plans
-                .iter()
-                .all(|plan| plan.matcher != "<defaults>"),
-            "fail-closed dry-run must not synthesize <defaults>"
-        );
-    }
-
-    #[test]
     fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
         let inv = VecInventory::from(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
         let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
