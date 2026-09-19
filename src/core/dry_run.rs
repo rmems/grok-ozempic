@@ -694,6 +694,38 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_rules_count_each_exact_inventory_tensor_once_by_precedence() {
+        let inv = VecInventory::new(vec![
+            tiny_tensor("block_000.slot_00.router", "f32"),
+            tiny_tensor("block_000.slot_00.expert", "f32"),
+        ]);
+        let mut manifest = v2_manifest_with_ternary("block_000.slot_00.*");
+        manifest.preserve.push(crate::core::manifest::PreserveEntry {
+            name: "block_000.slot_00.router".into(),
+            reason: Some("routing-critical".into()),
+        });
+
+        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
+            .expect("plan should succeed");
+
+        assert_eq!(report.coverage.inventory_coverage, CoverageStatus::Full);
+        assert_eq!(report.coverage.covered_by_rules, 2);
+        assert_eq!(report.backend_handled_total, 2);
+        let preserve = report
+            .rule_plans
+            .iter()
+            .find(|plan| plan.matcher == "block_000.slot_00.router")
+            .expect("preserve rule");
+        assert_eq!(preserve.estimated_tensor_count, 1);
+        let ternary = report
+            .rule_plans
+            .iter()
+            .find(|plan| plan.matcher == "block_000.slot_00.*")
+            .expect("ternary rule");
+        assert_eq!(ternary.estimated_tensor_count, 1);
+    }
+
+    #[test]
     fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
         let inv = VecInventory::from(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
         let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
