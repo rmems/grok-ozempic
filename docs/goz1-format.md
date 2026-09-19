@@ -203,6 +203,8 @@ alone.
 
 ## See also
 
-- `.claude/rules/goz1-pipeline.md` — pipeline invariants and pack recipes
-- `docs/ARCHITECTURE.md` — layer ownership
-- GH #65 / RM-251 — the issue this version answers
+- [`.claude/rules/goz1-pipeline.md`](../.claude/rules/goz1-pipeline.md) — pipeline invariants and pack recipes
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — kernel ownership; packing math is CPU `quantizer.rs` / `LocalBackend` today, CUDA GEMV in `myelin-accelerator`
+- [`first-quantization-target.md`](./first-quantization-target.md) — first real-weight embedding contract
+- [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) — copyable `quantize-goz1` commands
+- GH #65 / RM-251 — the issue version 2 answers
