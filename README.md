@@ -2,7 +2,7 @@
 
 **Experimental out-of-core Grok-1 quantization with measured routing and residual-fidelity tradeoffs.**
 
-This crate turns Grok-1 checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. It is the Grok-1 **orchestration** layer. Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
+This crate turns heavyweight MoE checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. **Grok-1 is the reference family**; the planner and alignment engine are reusable—see [`docs/adding-a-model.md`](docs/adding-a-model.md). Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
 
 **Think of it as Ozempic for Grok — less bulk, with a measured routing tradeoff rather than a guaranteed free lunch.**
 
@@ -232,6 +232,7 @@ the `_python-tests` modules from the justfile, kept in sync with
 - [`docs/first-quantization-target.md`](docs/first-quantization-target.md) — first embedding contract
 - [`docs/artifact-compatibility-plan.md`](docs/artifact-compatibility-plan.md) — inventory IR and `DryRunPlanner` coverage
 - [`docs/goz1-format.md`](docs/goz1-format.md) — GOZ1 container layout
+- [`docs/adding-a-model.md`](docs/adding-a-model.md) — adding a model family through `ModelProfile`
 
 ## Repository
 

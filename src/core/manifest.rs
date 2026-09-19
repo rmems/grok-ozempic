@@ -43,6 +43,40 @@ pub const MANIFEST_NAME_CONVENTION_V1: &str = "blk.{L}.{role}.weight";
 /// Accepted alongside V1 so manifests can target the actual checkpoint tensor names.
 pub const MANIFEST_NAME_CONVENTION_V2: &str = "block_{NNN}.slot_{SS}.{kind}";
 
+/// HuggingFace-style MoE naming (Mixtral, Llama-3 MoE, Qwen2-MoE, and the
+/// in-tree [`crate::core::models::toy_moe`] plugin).
+///
+/// Register a new family here **and** on [`ACCEPTED_NAME_CONVENTIONS`] when
+/// adding a [`crate::core::model::ModelProfile`]. Unknown conventions still
+/// hard-fail at parse time.
+pub const MANIFEST_NAME_CONVENTION_HF_MOE: &str = "model.layers.{L}.{module}.{param}";
+
+/// Conventions the loader accepts. V1 keeps the legacy wildcard-count
+/// heuristic in dry-run; every other entry uses exact
+/// [`crate::core::inventory::ModelInventory::count_matching`].
+pub const ACCEPTED_NAME_CONVENTIONS: &[&str] = &[
+    MANIFEST_NAME_CONVENTION_V1,
+    MANIFEST_NAME_CONVENTION_V2,
+    MANIFEST_NAME_CONVENTION_HF_MOE,
+];
+
+/// True when `convention` is in [`ACCEPTED_NAME_CONVENTIONS`].
+pub fn is_accepted_name_convention(convention: &str) -> bool {
+    ACCEPTED_NAME_CONVENTIONS.contains(&convention)
+}
+
+/// True when dry-run coverage should count inventory matches exactly.
+///
+/// Only the legacy V1 `blk.*` convention keeps the wildcard heuristic; V2 and
+/// HuggingFace-style plugins use the inventory.
+pub fn uses_exact_inventory_counts(convention: &str) -> bool {
+    convention != MANIFEST_NAME_CONVENTION_V1
+}
+
+fn accepted_name_conventions_expected() -> String {
+    ACCEPTED_NAME_CONVENTIONS.join(" or ")
+}
+
 /// Top-level manifest document.
 ///
 /// Unknown top-level fields are tolerated for forward compatibility.
@@ -92,12 +126,18 @@ pub struct DissectManifest {
 impl DissectManifest {
     /// True when this manifest declares the V2 structural naming convention
     /// ([`MANIFEST_NAME_CONVENTION_V2`], `block_{NNN}.slot_{SS}.{kind}`).
-    ///
-    /// Runtime classification treats V2 manifests fail-closed: a tensor that
-    /// matches no explicit rule is a hard error instead of falling through to
-    /// `defaults` (see `crate::core::stream`).
     pub fn is_structural_v2(&self) -> bool {
         self.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2
+    }
+
+    /// True when unmatched tensors must hard-error instead of `defaults`
+    /// fallthrough.
+    ///
+    /// Legacy V1 keeps defaults fallthrough. Every other accepted convention
+    /// (V2 and HuggingFace-style MoE plugins) is authored for full explicit
+    /// coverage, so a name that matches no rule is [`GrokOzempicError::ManifestV2UnmatchedTensor`].
+    pub fn unmatched_tensors_fail_closed(&self) -> bool {
+        uses_exact_inventory_counts(&self.model.tensor_name_convention)
     }
 }
 
@@ -188,8 +228,8 @@ pub struct ManifestBlock {
 /// - the JSON is malformed ([`GrokOzempicError::ManifestParse`]),
 /// - `schema_version` is not [`MANIFEST_SCHEMA_VERSION`]
 ///   ([`GrokOzempicError::ManifestSchemaVersion`]),
-/// - `model.tensor_name_convention` is neither
-///   [`MANIFEST_NAME_CONVENTION_V1`] nor [`MANIFEST_NAME_CONVENTION_V2`]
+/// - `model.tensor_name_convention` is not in
+///   [`ACCEPTED_NAME_CONVENTIONS`]
 ///   ([`GrokOzempicError::ManifestNameConventionMismatch`]).
 ///
 /// Unknown top-level fields are tolerated.
@@ -220,15 +260,10 @@ pub fn parse_manifest_bytes(bytes: &[u8], label: &str) -> Result<DissectManifest
         });
     }
 
-    if manifest.model.tensor_name_convention != MANIFEST_NAME_CONVENTION_V1
-        && manifest.model.tensor_name_convention != MANIFEST_NAME_CONVENTION_V2
-    {
+    if !is_accepted_name_convention(&manifest.model.tensor_name_convention) {
         return Err(GrokOzempicError::ManifestNameConventionMismatch {
             got: manifest.model.tensor_name_convention.clone(),
-            expected: format!(
-                "{} or {}",
-                MANIFEST_NAME_CONVENTION_V1, MANIFEST_NAME_CONVENTION_V2
-            ),
+            expected: accepted_name_conventions_expected(),
         });
     }
 
@@ -410,6 +445,72 @@ mod tests {
             "expected ManifestNameConventionMismatch, got {err:?}"
         );
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn hf_moe_name_convention_is_accepted() {
+        let json = r#"{
+            "schema": "xai-dissect.manifest",
+            "schema_version": 1,
+            "model": {
+                "family": "toy-moe",
+                "tensor_name_convention": "model.layers.{L}.{module}.{param}"
+            },
+            "defaults": { "precision": "ternary_snn" }
+        }"#;
+        let manifest = parse_manifest_bytes(json.as_bytes(), "<hf-moe>").expect("hf moe");
+        assert_eq!(
+            manifest.model.tensor_name_convention,
+            MANIFEST_NAME_CONVENTION_HF_MOE
+        );
+        assert!(is_accepted_name_convention(
+            &manifest.model.tensor_name_convention
+        ));
+        assert!(uses_exact_inventory_counts(
+            &manifest.model.tensor_name_convention
+        ));
+    }
+
+    #[test]
+    fn accepted_conventions_include_v1_v2_and_hf_moe() {
+        assert_eq!(ACCEPTED_NAME_CONVENTIONS.len(), 3);
+        assert!(is_accepted_name_convention(MANIFEST_NAME_CONVENTION_V1));
+        assert!(is_accepted_name_convention(MANIFEST_NAME_CONVENTION_V2));
+        assert!(is_accepted_name_convention(MANIFEST_NAME_CONVENTION_HF_MOE));
+        assert!(!uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_V1));
+        assert!(uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_V2));
+        assert!(uses_exact_inventory_counts(MANIFEST_NAME_CONVENTION_HF_MOE));
+    }
+
+    #[test]
+    fn unmatched_tensors_fail_closed_is_v1_only_opt_out() {
+        let v1 = parse_manifest_bytes(
+            br#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "grok-1",
+                    "tensor_name_convention": "blk.{L}.{role}.weight"
+                }
+            }"#,
+            "<v1>",
+        )
+        .expect("v1");
+        let hf = parse_manifest_bytes(
+            br#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "toy-moe",
+                    "tensor_name_convention": "model.layers.{L}.{module}.{param}"
+                }
+            }"#,
+            "<hf>",
+        )
+        .expect("hf");
+        assert!(!v1.unmatched_tensors_fail_closed());
+        assert!(hf.unmatched_tensors_fail_closed());
+        assert!(!hf.is_structural_v2());
     }
 
     #[test]

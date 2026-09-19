@@ -574,13 +574,14 @@ fn classify_and_decide(
         &config.router_patterns
     };
     let class = classify(name, dissect_manifest, legacy_patterns);
-    // V2 structural manifests are fail-closed: they are authored for full
-    // explicit coverage, so a Default classification means the input name
-    // does not follow the structural convention (or a rule is missing).
+    // V2 and other non-V1 conventions are fail-closed: they are authored for
+    // full explicit coverage, so a Default classification means the input name
+    // does not follow the declared convention (or a rule is missing).
     // Falling through to defaults here is how routers/norms would get
-    // silently ternary-quantized — hard-error instead (GH #40 / RM-191).
+    // silently ternary-quantized — hard-error instead (GH #40 / RM-191,
+    // GH #32 / RM-65).
     if matches!(class, TensorClass::Default)
-        && dissect_manifest.is_some_and(|m| m.is_structural_v2())
+        && dissect_manifest.is_some_and(|m| m.unmatched_tensors_fail_closed())
     {
         return Err(GrokOzempicError::ManifestV2UnmatchedTensor { name: name.into() });
     }
@@ -669,9 +670,9 @@ fn build_manifest_npy(
 /// i8/Other from the xai-dissect inventory are covered by the structural
 /// manifest for alignment only (see `grok1_inventory.rs` NOTE and
 /// `structural-manifest.json` `_i8_streaming_note`) and enter through the
-/// artifact wrapping path, not here. Under a V2 manifest their names are still
-/// classified **before** that skip, so a legacy or misspelled stem cannot
-/// silently disappear past fail-closed.
+/// artifact wrapping path, not here. Under a fail-closed (non-V1) manifest
+/// their names are still classified **before** that skip, so a legacy or
+/// misspelled stem cannot silently disappear past fail-closed.
 ///
 /// Note this rejects on *misclassification*, never on *absence*: a tensor that
 /// is simply missing from the input produces no name to match. Completeness is
@@ -686,7 +687,7 @@ fn push_classified_entry(
     config: &QuantizationConfig,
 ) -> Result<()> {
     if dtype == SourceDtype::Other {
-        if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
+        if dissect_manifest.is_some_and(|m| m.unmatched_tensors_fail_closed()) {
             let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
         }
         return Ok(());
@@ -1439,6 +1440,47 @@ mod tests {
         }
     }
 
+    /// HF MoE plugins share fail-closed unmatched handling with V2
+    /// (CodeAnt on PR #138 / GH #32).
+    #[test]
+    fn hf_moe_manifest_fails_closed_on_unmatched_name() {
+        let dir = scratch_dir("hf-moe-fail-closed-input");
+        write_npy_f32(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[2, 2],
+            &[0.1f32, -0.2, 0.3, -0.4],
+        );
+        let manifest_path = scratch_dir("hf-moe-fail-closed-manifest").join("m.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "toy-moe",
+                    "tensor_name_convention": "model.layers.{L}.{module}.{param}"
+                },
+                "defaults": { "precision": "ternary_snn" },
+                "preserve": [
+                    { "name": "model.layers.*.block_sparse_moe.gate.weight" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let out = scratch_dir("hf-moe-fail-closed-out").join("bad.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(manifest_path);
+        let err = run_quantization(&config)
+            .expect_err("legacy name under an HF MoE manifest must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
     /// Unsupported dtypes are skipped by the float stream, but under V2 their
     /// names must still be classified so a legacy/misspelled stem cannot
     /// silently disappear past fail-closed (Codex/CodeAnt on PR #55).
@@ -1626,8 +1668,8 @@ mod tests {
     /// tensor is skipped by the float stream, but under V2 its name must still
     /// be classified first, so a legacy stem cannot vanish past fail-closed.
     ///
-    /// Deleting the `is_structural_v2()` pre-check in the safetensors builder
-    /// makes this test fail and leaves every other test green.
+    /// Deleting the `unmatched_tensors_fail_closed()` pre-check in the
+    /// safetensors builder makes this test fail and leaves every other test green.
     #[test]
     fn v2_manifest_fails_closed_on_unmatched_other_dtype_safetensors() {
         let dir = scratch_dir("v2-st-fail-closed-other-input");

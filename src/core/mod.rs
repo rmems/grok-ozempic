@@ -5,6 +5,8 @@ pub(crate) mod grok1_data;
 pub mod grok1_inventory;
 pub mod inventory;
 pub mod manifest;
+pub mod model;
+pub mod models;
 pub mod npy;
 pub mod ozempic;
 pub mod precision;
@@ -14,6 +16,9 @@ pub mod selection;
 pub mod stream;
 pub mod weight_pack;
 pub mod weight_pack_read;
+
+#[cfg(test)]
+pub(crate) mod test_support;
 
 use crate::{
     error::Result,

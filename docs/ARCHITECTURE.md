@@ -9,9 +9,10 @@ Docs that walk a new reader through it are tracked as
 [#20](https://github.com/rmems/grok-ozempic/issues/20) /
 [RM-64](https://linear.app/rpd-34/issue/RM-64).
 
-`grok-ozempic` is the **Grok-1-specific quantization and orchestration layer**.
+`grok-ozempic` is the **quantization and orchestration engine**, with Grok-1 as
+the reference `ModelProfile`; see [`adding-a-model.md`](./adding-a-model.md).
 It must not grow a duplicated CUDA kernel stack unless a kernel is truly
-Grok-specific. Kernel ownership lives in `myelin-accelerator` so that
+family-specific. Kernel ownership lives in `myelin-accelerator` so that
 binary/ternary/SAAQ kernels, bitpacking, benchmarks, and FFI stay reusable
 across `corinth-canal`, Grok-1 experiments, and future Metis/Spikenaut work.
 
@@ -63,11 +64,11 @@ CUDA as the backend for a GOZ1 pack. See
 | Area | Owner | Reason |
 |------|-------|--------|
 | Grok-1 checkpoint / shard handling | `grok-ozempic` | Grok-1 shard naming, safetensors / NPY layout |
-| Tensor inventory and mapping | `grok-ozempic` | Manifest-driven precision classification |
-| Router/expert-aware quantization planning | `grok-ozempic` | Grok-1 MoE structure |
-| Per-expert quantization manifests | `grok-ozempic` | xai-dissect integration |
+| Tensor inventory and mapping | `grok-ozempic` | `ModelInventory` plus per-family profiles |
+| Router/expert-aware quantization planning | `grok-ozempic` | Manifest globs plus model-agnostic `DryRunPlanner` |
+| Per-expert quantization manifests | `grok-ozempic` | xai-dissect schema; additional accepted conventions are explicit |
 | Validation against xai-dissect artifacts | `grok-ozempic` | Grok-1 artifact contract |
-| Dry-run quantization reports | `grok-ozempic` | Orchestration concern (`DryRunPlanner`) |
+| Dry-run quantization reports | `grok-ozempic` | Orchestration concern; coverage works with any `ModelInventory` |
 | High-level experiment orchestration | `grok-ozempic` | Pipeline entry points |
 | GOZ1 binary container format | `grok-ozempic` | Grok-specific output format ([`goz1-format.md`](./goz1-format.md)) |
 | CPU `pack_trits` / `encode_trit` | `grok-ozempic` (`quantizer.rs`) | Current `LocalBackend` / stream path; same math, not CUDA |

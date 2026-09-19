@@ -83,6 +83,11 @@ pub struct QuantizationConfig {
     pub output_path: String,
     /// GIF saliency threshold ratio: weights with |w| < threshold × rms(layer)
     /// are silenced to 0; the rest become ±1.
+    ///
+    /// Per-family defaults belong on [`crate::core::model::ModelProfile`], not
+    /// as hardcoded Grok-1 constants. [`QuantizationConfig::default`] keeps `0.05`
+    /// for CLI/legacy callers; a profile may override via
+    /// [`crate::core::model::ModelProfile::quantization_config`].
     pub gif_threshold: f32,
     /// Tensor name substrings that identify routing / gate tensors which should
     /// remain in FP16 instead of being ternary-quantized.
@@ -111,6 +116,11 @@ pub struct QuantizationConfig {
     /// Opt in to the compiled-in non-authoritative Grok-1 baseline
     /// manifest as a fallback when neither
     /// [`Self::manifest_path`] nor `GROK_OZEMPIC_MANIFEST` is set.
+    ///
+    /// This is a **Grok-1 CLI adapter**, not a generic engine knob. New
+    /// families should pass an explicit `manifest_path` (or use
+    /// [`crate::core::model::ModelProfile::manifest`]) rather than extending
+    /// this flag.
     ///
     /// Default is `false` so upgrading from phase 1 preserves existing
     /// legacy-heuristic behavior. Set to `true` for a Grok-1 export to

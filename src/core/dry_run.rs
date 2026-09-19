@@ -1,9 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::inventory::ModelInventory;
-use crate::core::manifest::{DissectManifest, MANIFEST_NAME_CONVENTION_V2};
+use crate::core::manifest::{
+    DissectManifest, Fp16Entry, PreserveEntry, uses_exact_inventory_counts,
+};
 use crate::core::selection::TensorClass;
 use crate::error::{GrokOzempicError, Result};
 use crate::types::{QuantizationConfig, TensorPrecision};
@@ -81,18 +83,19 @@ pub struct PlannedKernelCall {
     pub precision: TensorPrecision,
     /// Effective GIF threshold (meaningful for ternary).
     pub gif_threshold: f32,
-    /// Estimated tensor count this rule covers (based on Grok-1 inventory).
+    /// Estimated tensor count this rule covers (from the provided
+    /// [`crate::core::inventory::ModelInventory`]).
     pub estimated_tensor_count: usize,
 }
 
-/// Coverage analysis against the known Grok-1 tensor inventory.
+/// Coverage analysis against the provided [`crate::core::inventory::ModelInventory`].
 #[derive(Debug, Clone)]
 pub struct CoverageSummary {
     /// How many tensors each operation is planned to handle.
     pub by_operation: BTreeMap<OperationKind, usize>,
     /// Total tensors covered by manifest rules.
     pub covered_by_rules: usize,
-    /// Total tensors in the Grok-1 baseline inventory.
+    /// Total tensors in the supplied inventory.
     pub inventory_total: usize,
     /// Match status.
     pub inventory_coverage: CoverageStatus,
@@ -105,92 +108,170 @@ pub enum CoverageStatus {
     OverComplete { extra: usize },
 }
 
+struct PlanAccum<'a> {
+    rule_plans: &'a mut Vec<PlannedKernelCall>,
+    by_operation: &'a mut BTreeMap<OperationKind, usize>,
+    covered_by_rules: &'a mut usize,
+    claimed_exact_names: &'a mut HashSet<String>,
+}
+
+impl PlanAccum<'_> {
+    fn record(&mut self, plan: PlannedKernelCall) {
+        *self.by_operation.entry(plan.operation).or_insert(0) += plan.estimated_tensor_count;
+        *self.covered_by_rules += plan.estimated_tensor_count;
+        self.rule_plans.push(plan);
+    }
+}
+
+trait NamedReasonRule {
+    fn name(&self) -> &str;
+    fn reason(&self) -> Option<String>;
+}
+
+impl NamedReasonRule for PreserveEntry {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason.clone()
+    }
+}
+
+impl NamedReasonRule for Fp16Entry {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason.clone()
+    }
+}
+
+fn plan_rules<I, Rule, F>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    rules: &[Rule],
+    accum: &mut PlanAccum<'_>,
+    mut planned_rule: F,
+) -> Result<()>
+where
+    I: ModelInventory,
+    F: FnMut(
+        &Rule,
+        &HashSet<String>,
+    ) -> Result<(String, TensorClass, OperationKind, TensorPrecision, f32)>,
+{
+    for rule in rules {
+        let (matcher, class, operation, precision, gif_threshold) =
+            planned_rule(rule, accum.claimed_exact_names)?;
+        let estimated = estimate_tensor_count_for_manifest(
+            inventory,
+            manifest,
+            &matcher,
+            accum.claimed_exact_names,
+        );
+        accum.record(PlannedKernelCall {
+            matcher,
+            operation,
+            class,
+            precision,
+            gif_threshold,
+            estimated_tensor_count: estimated,
+        });
+    }
+    Ok(())
+}
+
 fn plan_preserve_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.preserve {
-        let class = TensorClass::Preserve {
-            reason: entry.reason.clone(),
-        };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-        rule_plans.push(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
-            class,
-            precision: TensorPrecision::Preserve,
-            gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
-    }
-    Ok(())
+    plan_convert_fp16_rules(
+        inventory,
+        manifest,
+        config,
+        &manifest.preserve,
+        accum,
+        TensorPrecision::Preserve,
+        |reason| TensorClass::Preserve { reason },
+    )
 }
 
 fn plan_fp16_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.fp16 {
-        let class = TensorClass::Fp16 {
-            reason: entry.reason.clone(),
-        };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-        rule_plans.push(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
+    plan_convert_fp16_rules(
+        inventory,
+        manifest,
+        config,
+        &manifest.fp16,
+        accum,
+        TensorPrecision::Fp16,
+        |reason| TensorClass::Fp16 { reason },
+    )
+}
+
+fn plan_convert_fp16_rules<I, Rule, F>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rules: &[Rule],
+    accum: &mut PlanAccum<'_>,
+    precision: TensorPrecision,
+    class_from_reason: F,
+) -> Result<()>
+where
+    I: ModelInventory,
+    Rule: NamedReasonRule,
+    F: Fn(Option<String>) -> TensorClass,
+{
+    plan_rules(inventory, manifest, rules, accum, |entry, _| {
+        let class = class_from_reason(entry.reason());
+        let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        Ok((
+            entry.name().to_string(),
             class,
-            precision: TensorPrecision::Fp16,
+            OperationKind::ConvertFp16,
+            precision,
             gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
-    }
-    Ok(())
+        ))
+    })
 }
 
 fn plan_ternary_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.ternary_candidates {
-        let class = TensorClass::TernaryCandidate {
-            rank: entry.rank,
-            gif_threshold: entry.gif_threshold,
-        };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = ternary_operation_from_inventory(inventory, &entry.name)?;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
-        rule_plans.push(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
-            class,
-            precision: TensorPrecision::TernarySnn,
-            gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
-    }
-    Ok(())
+    plan_rules(
+        inventory,
+        manifest,
+        &manifest.ternary_candidates,
+        accum,
+        |entry, claimed_exact_names| {
+            let class = TensorClass::TernaryCandidate {
+                rank: entry.rank,
+                gif_threshold: entry.gif_threshold,
+            };
+            let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+            let operation =
+                ternary_operation_from_inventory(inventory, &entry.name, claimed_exact_names)?;
+            Ok((
+                entry.name.clone(),
+                class,
+                operation,
+                TensorPrecision::TernarySnn,
+                gif_threshold,
+            ))
+        },
+    )
 }
 
 /// Wrap vs re-quantize from matching inventory dtypes, never from a glob
@@ -199,12 +280,15 @@ fn plan_ternary_rules<I: ModelInventory>(
 fn ternary_operation_from_inventory<I: ModelInventory>(
     inventory: &I,
     pattern: &str,
+    claimed_exact_names: &HashSet<String>,
 ) -> Result<OperationKind> {
     let mut saw_quantized = false;
     let mut saw_float = false;
     let mut saw_other = false;
     for tensor in inventory.tensors() {
-        if !crate::core::selection::glob_match(pattern, &tensor.structural_name) {
+        if !crate::core::selection::glob_match(pattern, &tensor.structural_name)
+            || claimed_exact_names.contains(&tensor.structural_name)
+        {
             continue;
         }
         if is_already_quantized_dtype(tensor.dtype) {
@@ -242,12 +326,16 @@ fn plan_default_rule<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
+    // Non-V1 conventions fail closed at pack time; filling holes here would
+    // report CoverageStatus::Full for a profile that `run_quantization`
+    // immediately rejects (Codex P2 on PR #138 / GH #32).
+    if manifest.unmatched_tensors_fail_closed() {
+        return Ok(());
+    }
     let inventory_total = inventory.total_tensors();
-    let default_estimated = inventory_total.saturating_sub(*covered_by_rules);
+    let default_estimated = inventory_total.saturating_sub(*accum.covered_by_rules);
     if default_estimated == 0 {
         return Ok(());
     }
@@ -257,7 +345,7 @@ fn plan_default_rule<I: ModelInventory>(
         TensorPrecision::TernarySnn => OperationKind::QuantizeTernary,
         TensorPrecision::Fp16 | TensorPrecision::Preserve => OperationKind::ConvertFp16,
     };
-    rule_plans.push(PlannedKernelCall {
+    accum.record(PlannedKernelCall {
         matcher: "<defaults>".to_string(),
         operation,
         class: default_class,
@@ -265,8 +353,6 @@ fn plan_default_rule<I: ModelInventory>(
         gif_threshold,
         estimated_tensor_count: default_estimated,
     });
-    *by_operation.entry(operation).or_insert(0) += default_estimated;
-    *covered_by_rules += default_estimated;
     Ok(())
 }
 
@@ -296,11 +382,11 @@ impl DryRunReport {
 
 /// Plans which orchestration verbs each manifest rule would produce.
 ///
-/// The planner reads the xai-dissect manifest, classifies every rule
+/// The planner reads a dissect-style manifest, classifies every rule
 /// (preserve / fp16 / ternary_candidates / defaults) through the existing
 /// selection pipeline, and maps each to an [`OperationKind`]. Wrap vs
 /// re-quantize is decided from inventory dtype, not glob substrings.
-/// The result can be validated against the xai-dissect tensor inventory
+/// The result can be validated against the caller's [`ModelInventory`]
 /// to ensure full coverage.
 pub struct DryRunPlanner;
 
@@ -309,9 +395,9 @@ impl DryRunPlanner {
     /// `DryRunReport` mapping each rule to its planned operation.
     ///
     /// The `inventory` parameter provides model-specific tensor counts for
-    /// accurate per-rule estimates. For V2 structural manifests, counts are
-    /// taken exactly from the inventory; for legacy V1 manifests, a heuristic
-    /// is used.
+    /// accurate per-rule estimates. For any convention other than legacy V1
+    /// `blk.*`, counts are taken exactly from the inventory; V1 still uses a
+    /// wildcard heuristic.
     pub fn plan<I: ModelInventory>(
         inventory: &I,
         manifest: &DissectManifest,
@@ -321,14 +407,14 @@ impl DryRunPlanner {
         let mut by_operation: BTreeMap<OperationKind, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
 
-        Self::plan_all_rules(
-            inventory,
-            manifest,
-            config,
-            &mut rule_plans,
-            &mut by_operation,
-            &mut covered_by_rules,
-        )?;
+        let mut claimed_exact_names = HashSet::new();
+        let mut accum = PlanAccum {
+            rule_plans: &mut rule_plans,
+            by_operation: &mut by_operation,
+            covered_by_rules: &mut covered_by_rules,
+            claimed_exact_names: &mut claimed_exact_names,
+        };
+        Self::plan_all_rules(inventory, manifest, config, &mut accum)?;
 
         let inventory_coverage = calculate_coverage(covered_by_rules, inventory.total_tensors());
         let backend_handled_total = by_operation.values().sum();
@@ -349,42 +435,12 @@ impl DryRunPlanner {
         inventory: &I,
         manifest: &DissectManifest,
         config: &QuantizationConfig,
-        rule_plans: &mut Vec<PlannedKernelCall>,
-        by_operation: &mut BTreeMap<OperationKind, usize>,
-        covered_by_rules: &mut usize,
+        accum: &mut PlanAccum<'_>,
     ) -> Result<()> {
-        plan_preserve_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-        )?;
-        plan_fp16_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-        )?;
-        plan_ternary_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-        )?;
-        plan_default_rule(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-        )
+        plan_preserve_rules(inventory, manifest, config, accum)?;
+        plan_fp16_rules(inventory, manifest, config, accum)?;
+        plan_ternary_rules(inventory, manifest, config, accum)?;
+        plan_default_rule(inventory, manifest, config, accum)
     }
 
     /// Produce a machine-readable JSON mapping from rule matcher to planned
@@ -432,25 +488,19 @@ fn resolve_precision(
 }
 
 /// Heuristically estimate how many concrete tensors a single glob pattern
-/// matches in the Grok-1 inventory (legacy V1 `blk.*` naming convention).
+/// matches under the legacy V1 `blk.*` naming convention.
 ///
-/// For the xai-dissect structural manifest (V2 `block_*.slot_*` convention)
-/// the planner uses exact counts from [`ModelInventory::count_matching`]
-/// instead, so that dry-run coverage reports are accurate for the 770-tensor
-/// inventory (e.g. 64 for `block_*.slot_11.router`).
-///
+/// For every other accepted convention the planner uses exact counts from
+/// [`ModelInventory::count_matching`] instead.
 fn estimate_tensor_count<I: ModelInventory>(inventory: &I, pattern: &str) -> usize {
-    // Wildcard patterns like "blk.*.ffn_up.weight" could match up to
-    // GROK1_BLOCK_COUNT tensors (one per block).  Exact names count as 1.
-    // This is the legacy V1 heuristic. For structural V2 manifests the
-    // planner uses exact counts from Grok1Inventory instead (see
-    // estimate_tensor_count_for_manifest).
+    // Wildcard patterns like "blk.*.ffn_up.weight" could match one tensor
+    // per block. Exact names count as 1. Scale the wildcard multiplier from
+    // unique block ids on the inventory (Grok-1's 64 blocks → 64/8 = 8,
+    // matching the historical heuristic).
     let star_count = pattern.matches('*').count();
     match star_count {
         0 => 1,
         _ => {
-            // Scale the wildcard multiplier dynamically based on the number of blocks in the inventory.
-            // For Grok-1 (64 blocks), this results in 64 / 8 = 8, matching the legacy heuristic.
             let mut unique_blocks = std::collections::HashSet::new();
             for t in inventory.tensors() {
                 if let Some(b) = t.block {
@@ -472,12 +522,18 @@ fn estimate_tensor_count_for_manifest<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     pattern: &str,
+    claimed_exact_names: &mut HashSet<String>,
 ) -> usize {
-    if manifest.model.tensor_name_convention == MANIFEST_NAME_CONVENTION_V2 {
-        inventory.count_matching(pattern)
-    } else {
-        estimate_tensor_count(inventory, pattern)
+    if !uses_exact_inventory_counts(&manifest.model.tensor_name_convention) {
+        return estimate_tensor_count(inventory, pattern);
     }
+
+    inventory
+        .tensors()
+        .iter()
+        .filter(|tensor| crate::core::selection::glob_match(pattern, &tensor.structural_name))
+        .filter(|tensor| claimed_exact_names.insert(tensor.structural_name.clone()))
+        .count()
 }
 
 #[cfg(test)]
@@ -486,7 +542,7 @@ mod tests {
     use crate::core::alignment::embedded_grok1_structural_manifest;
     use crate::core::alignment::plan_structural_manifest;
     use crate::core::grok1_inventory::Grok1Inventory;
-    use crate::core::inventory::{InventoryTensor, ModelInventory};
+    use crate::core::inventory::{InventoryTensor, VecInventory};
     use crate::core::manifest::MANIFEST_NAME_CONVENTION_V2;
     use crate::types::{GROK1_TENSOR_TOTAL, QuantizationConfig};
 
@@ -501,8 +557,13 @@ mod tests {
             .iter()
             .find(|e| e.name.contains("router"))
             .expect("structural manifest has router preserve rule");
-        let count =
-            estimate_tensor_count_for_manifest(&Grok1Inventory::full(), m, &router_rule.name);
+        let mut claimed_exact_names = HashSet::new();
+        let count = estimate_tensor_count_for_manifest(
+            &Grok1Inventory::full(),
+            m,
+            &router_rule.name,
+            &mut claimed_exact_names,
+        );
         assert_eq!(
             count, 64,
             "router rule should count 64 via inventory, got {count}"
@@ -656,17 +717,6 @@ mod tests {
         }
     }
 
-    struct TinyInv(Vec<InventoryTensor>);
-
-    impl ModelInventory for TinyInv {
-        fn total_tensors(&self) -> usize {
-            self.0.len()
-        }
-        fn tensors(&self) -> &[InventoryTensor] {
-            &self.0
-        }
-    }
-
     fn tiny_tensor(name: &str, dtype: &'static str) -> InventoryTensor {
         InventoryTensor {
             structural_name: name.into(),
@@ -689,8 +739,8 @@ mod tests {
             schema: "xai-dissect.manifest".into(),
             schema_version: MANIFEST_SCHEMA_VERSION,
             model: ManifestModel {
-                family: "grok-1".into(),
-                source: "xai-org/grok-1".into(),
+                family: "test-model".into(),
+                source: "grok-ozempic/test".into(),
                 tensor_name_convention: MANIFEST_NAME_CONVENTION_V2.into(),
             },
             produced_by: None,
@@ -710,11 +760,69 @@ mod tests {
     }
 
     #[test]
-    fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
-        let inv = TinyInv(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
-        let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
-        let report = DryRunPlanner::plan(&inv, &m, &QuantizationConfig::default())
+    fn fail_closed_manifest_leaves_unmatched_inventory_partial() {
+        let inv = VecInventory::new(vec![
+            tiny_tensor("block_000.slot_00.router", "f32"),
+            tiny_tensor("block_000.slot_00.expert", "f32"),
+        ]);
+        let manifest = v2_manifest_with_ternary("block_000.slot_00.router");
+
+        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
             .expect("plan should succeed");
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Partial { missing: 1 }
+        );
+        assert_eq!(report.coverage.covered_by_rules, 1);
+        assert!(
+            report
+                .rule_plans
+                .iter()
+                .all(|plan| plan.matcher != "<defaults>"),
+            "fail-closed manifests must not synthesize defaults for unmatched tensors"
+        );
+    }
+
+    #[test]
+    fn overlapping_rules_count_each_exact_inventory_tensor_once_by_precedence() {
+        let inv = VecInventory::new(vec![
+            tiny_tensor("block_000.slot_00.router", "f32"),
+            tiny_tensor("block_000.slot_00.expert", "f32"),
+        ]);
+        let mut manifest = v2_manifest_with_ternary("block_000.slot_00.*");
+        manifest
+            .preserve
+            .push(crate::core::manifest::PreserveEntry {
+                name: "block_000.slot_00.router".into(),
+                reason: Some("routing-critical".into()),
+            });
+
+        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
+            .expect("plan should succeed");
+
+        assert_eq!(report.coverage.inventory_coverage, CoverageStatus::Full);
+        assert_eq!(report.coverage.covered_by_rules, 2);
+        assert_eq!(report.backend_handled_total, 2);
+        let preserve = report
+            .rule_plans
+            .iter()
+            .find(|plan| plan.matcher == "block_000.slot_00.router")
+            .expect("preserve rule");
+        assert_eq!(preserve.estimated_tensor_count, 1);
+        let ternary = report
+            .rule_plans
+            .iter()
+            .find(|plan| plan.matcher == "block_000.slot_00.*")
+            .expect("ternary rule");
+        assert_eq!(ternary.estimated_tensor_count, 1);
+    }
+
+    #[test]
+    fn ternary_i8_source_plans_wrap_even_without_moe_expert_in_glob() {
+        let inv = VecInventory::from(vec![tiny_tensor("block_000.slot_00.already_int8", "i8")]);
+        let m = v2_manifest_with_ternary("block_*.slot_00.already_int8");
+        let report = crate::core::test_support::plan_for(&inv, &m);
         let plan = report
             .rule_plans
             .iter()
@@ -725,7 +833,7 @@ mod tests {
 
     #[test]
     fn glob_containing_moe_expert_does_not_force_wrap_on_f32() {
-        let inv = TinyInv(vec![tiny_tensor(
+        let inv = VecInventory::new(vec![tiny_tensor(
             "block_000.slot_00.moe_expert.floaty",
             "f32",
         )]);
@@ -746,7 +854,7 @@ mod tests {
 
     #[test]
     fn mixed_inventory_dtypes_fail_closed() {
-        let inv = TinyInv(vec![
+        let inv = VecInventory::new(vec![
             tiny_tensor("block_000.slot_00.mixed", "i8"),
             tiny_tensor("block_001.slot_00.mixed", "f32"),
         ]);

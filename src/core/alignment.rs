@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use crate::core::inventory::ModelInventory;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
-use crate::core::selection::{TensorClass, classify};
+use crate::core::selection::{TensorClass, TensorClassifier, classify};
 use crate::types::QuantizationConfig;
 
 pub const GROK1_STRUCTURAL_MANIFEST_JSON: &str =
@@ -84,73 +84,106 @@ impl AlignmentReport {
     }
 }
 
-pub fn check_alignment<I: ModelInventory>(
-    inventory: &I,
-    manifest: &DissectManifest,
-    config: &QuantizationConfig,
-) -> AlignmentReport {
+#[derive(Default)]
+struct ClassCounts {
+    preserve: usize,
+    fp16: usize,
+    ternary: usize,
+    default: usize,
+}
+
+impl ClassCounts {
+    fn bump(&mut self, class: &TensorClass) {
+        match class {
+            TensorClass::Preserve { .. } => self.preserve += 1,
+            TensorClass::Fp16 { .. } => self.fp16 += 1,
+            TensorClass::TernaryCandidate { .. } => self.ternary += 1,
+            TensorClass::Default => self.default += 1,
+        }
+    }
+}
+
+fn record_mismatch(
+    mismatches: &mut Vec<TensorAlignment>,
+    boundary_summary: &mut BTreeMap<String, usize>,
+    structural_name: String,
+    expected: TensorClass,
+    actual: TensorClass,
+) {
+    let boundary_key = format!("{expected:?} -> {actual:?}");
+    *boundary_summary.entry(boundary_key).or_insert(0) += 1;
+    mismatches.push(TensorAlignment {
+        structural_name,
+        expected_class: expected.clone(),
+        actual_class: actual.clone(),
+        match_status: ClassMatch::Mismatch {
+            got: actual,
+            expected,
+        },
+    });
+}
+
+/// Compare inventory expected classes against a [`TensorClassifier`].
+///
+/// Manifest glob matching is the default classifier; a model plugin can
+/// supply its own type without forking this function.
+pub fn check_alignment_with<I, C>(inventory: &I, classifier: &C) -> AlignmentReport
+where
+    I: ModelInventory,
+    C: TensorClassifier,
+{
     let mut matched = 0;
-    let mut mismatched = 0;
-    let mut preserve_exp = 0;
-    let mut fp16_exp = 0;
-    let mut ternary_exp = 0;
-    let mut default_exp = 0;
-    let mut preserve_act = 0;
-    let mut fp16_act = 0;
-    let mut ternary_act = 0;
-    let mut default_act = 0;
+    let mut expected_counts = ClassCounts::default();
+    let mut actual_counts = ClassCounts::default();
     let mut mismatches = Vec::new();
     let mut boundary_summary: BTreeMap<String, usize> = BTreeMap::new();
 
     for t in inventory.tensors() {
-        let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
-        let expected = &t.expected_class;
-
-        match expected {
-            TensorClass::Preserve { .. } => preserve_exp += 1,
-            TensorClass::Fp16 { .. } => fp16_exp += 1,
-            TensorClass::TernaryCandidate { .. } => ternary_exp += 1,
-            TensorClass::Default => default_exp += 1,
-        }
-        match &actual {
-            TensorClass::Preserve { .. } => preserve_act += 1,
-            TensorClass::Fp16 { .. } => fp16_act += 1,
-            TensorClass::TernaryCandidate { .. } => ternary_act += 1,
-            TensorClass::Default => default_act += 1,
-        }
-
-        if std::mem::discriminant(expected) == std::mem::discriminant(&actual) {
+        let actual = classifier.classify_name(&t.structural_name);
+        expected_counts.bump(&t.expected_class);
+        actual_counts.bump(&actual);
+        if std::mem::discriminant(&t.expected_class) == std::mem::discriminant(&actual) {
             matched += 1;
         } else {
-            mismatched += 1;
-            let boundary_key = format!("{expected:?} -> {actual:?}");
-            *boundary_summary.entry(boundary_key).or_insert(0) += 1;
-            let got = actual.clone();
-            let expected = expected.clone();
-            mismatches.push(TensorAlignment {
-                structural_name: t.structural_name.clone(),
-                expected_class: expected.clone(),
-                actual_class: got.clone(),
-                match_status: ClassMatch::Mismatch { got, expected },
-            });
+            record_mismatch(
+                &mut mismatches,
+                &mut boundary_summary,
+                t.structural_name.clone(),
+                t.expected_class.clone(),
+                actual,
+            );
         }
     }
 
     AlignmentReport {
         total_inventory_tensors: inventory.total_tensors(),
         matched,
-        mismatched,
-        preserve_expected_count: preserve_exp,
-        fp16_expected_count: fp16_exp,
-        ternary_expected_count: ternary_exp,
-        default_expected_count: default_exp,
-        preserve_actual_count: preserve_act,
-        fp16_actual_count: fp16_act,
-        ternary_actual_count: ternary_act,
-        default_actual_count: default_act,
+        mismatched: mismatches.len(),
+        preserve_expected_count: expected_counts.preserve,
+        fp16_expected_count: expected_counts.fp16,
+        ternary_expected_count: expected_counts.ternary,
+        default_expected_count: expected_counts.default,
+        preserve_actual_count: actual_counts.preserve,
+        fp16_actual_count: actual_counts.fp16,
+        ternary_actual_count: actual_counts.ternary,
+        default_actual_count: actual_counts.default,
         mismatches,
         boundary_summary,
     }
+}
+
+/// Compare inventory expected classes against a dissect manifest.
+///
+/// `config.router_patterns` are unused while a manifest is supplied
+/// (manifest globs win). The argument is kept so existing call sites stay
+/// stable; plugins that need a non-manifest classifier should call
+/// [`check_alignment_with`].
+pub fn check_alignment<I: ModelInventory>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    _config: &QuantizationConfig,
+) -> AlignmentReport {
+    check_alignment_with(inventory, manifest)
 }
 
 pub struct ConcreteCoverage {
@@ -195,23 +228,86 @@ pub fn classify_full_inventory<I: ModelInventory>(
 }
 
 #[cfg(test)]
-/// Helper to create a standard test setup: load structural manifest + default config + run plan
-pub(crate) fn plan_structural_manifest() -> crate::core::dry_run::DryRunReport {
-    let m = embedded_grok1_structural_manifest();
-    let config = QuantizationConfig::default();
-    crate::core::dry_run::DryRunPlanner::plan(
-        &crate::core::grok1_inventory::Grok1Inventory::full(),
-        m,
-        &config,
-    )
-    .expect("plan should succeed")
-}
+pub(crate) use crate::core::test_support::plan_structural_manifest;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::grok1_inventory::Grok1Inventory;
+    use crate::core::inventory::{InventoryTensor, VecInventory};
     use crate::types::GROK1_TENSOR_TOTAL;
+
+    fn class_tensor(name: &str, expected: TensorClass) -> InventoryTensor {
+        InventoryTensor {
+            structural_name: name.into(),
+            expected_class: expected,
+            dtype: "f32",
+            block: None,
+            slot: None,
+            kind: "fixture",
+        }
+    }
+
+    /// Returns Fp16/Ternary/Default/Preserve for preserve/fp16/ternary/default
+    /// so every [`ClassCounts::bump`] arm and [`record_mismatch`] run.
+    struct CycleClassifier;
+
+    impl TensorClassifier for CycleClassifier {
+        fn classify_name(&self, name: &str) -> TensorClass {
+            match name {
+                "preserve" => TensorClass::Fp16 { reason: None },
+                "fp16" => TensorClass::TernaryCandidate {
+                    rank: None,
+                    gif_threshold: None,
+                },
+                "ternary" => TensorClass::Default,
+                _ => TensorClass::Preserve { reason: None },
+            }
+        }
+    }
+
+    #[test]
+    fn check_alignment_with_records_class_mismatches() {
+        let inv = VecInventory::from(vec![
+            class_tensor("preserve", TensorClass::Preserve { reason: None }),
+            class_tensor("fp16", TensorClass::Fp16 { reason: None }),
+            class_tensor(
+                "ternary",
+                TensorClass::TernaryCandidate {
+                    rank: None,
+                    gif_threshold: None,
+                },
+            ),
+            class_tensor("default", TensorClass::Default),
+        ]);
+        let report = check_alignment_with(&inv, &CycleClassifier);
+        assert!(!report.is_aligned());
+        assert_eq!((report.matched, report.mismatched), (0, 4));
+        assert_eq!(
+            (
+                report.preserve_expected_count,
+                report.fp16_expected_count,
+                report.ternary_expected_count,
+                report.default_expected_count
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(
+            (
+                report.preserve_actual_count,
+                report.fp16_actual_count,
+                report.ternary_actual_count,
+                report.default_actual_count
+            ),
+            (1, 1, 1, 1)
+        );
+        assert_eq!(report.boundary_summary.len(), 4);
+        assert!(report.summary().contains("MISALIGNED"));
+        assert!(matches!(
+            report.mismatches[0].match_status,
+            ClassMatch::Mismatch { .. }
+        ));
+    }
 
     #[test]
     fn full_inventory_has_770_tensors() {
@@ -221,10 +317,8 @@ mod tests {
 
     #[test]
     fn alignment_against_structural_manifest() {
-        let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = check_alignment(&inv, manifest, &config);
+        let report =
+            crate::core::test_support::align_profile(&crate::core::models::grok1::Grok1Profile);
 
         eprintln!("{}", report.summary());
         for (boundary, count) in &report.boundary_summary {
@@ -241,10 +335,8 @@ mod tests {
 
     #[test]
     fn preserve_tensors_are_not_ternary() {
-        let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let report = check_alignment(&inv, manifest, &config);
+        let report =
+            crate::core::test_support::align_profile(&crate::core::models::grok1::Grok1Profile);
 
         let preserve_leaked_to_ternary = report
             .mismatches
@@ -281,9 +373,11 @@ mod tests {
     #[test]
     fn concrete_coverage_has_no_unclassified_tensors() {
         let inv = Grok1Inventory::full();
-        let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
-        let coverage = classify_full_inventory(&inv, manifest, &config);
+        let coverage = classify_full_inventory(
+            &inv,
+            embedded_grok1_structural_manifest(),
+            &QuantizationConfig::default(),
+        );
 
         assert_eq!(
             coverage.total_classified,
@@ -504,11 +598,11 @@ mod tests {
     fn no_router_tensor_classified_as_ternary() {
         let inv = Grok1Inventory::full();
         let manifest = embedded_grok1_structural_manifest();
-        let config = QuantizationConfig::default();
+        let classifier = manifest;
 
         for t in &inv.tensors {
             if t.kind == "router" {
-                let actual = classify(&t.structural_name, Some(manifest), &config.router_patterns);
+                let actual = classifier.classify_name(&t.structural_name);
                 assert!(
                     !matches!(actual, TensorClass::TernaryCandidate { .. }),
                     "router tensor '{}' must not be TernaryCandidate, got {:?}",
