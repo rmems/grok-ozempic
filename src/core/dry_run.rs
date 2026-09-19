@@ -693,6 +693,28 @@ mod tests {
     }
 
     #[test]
+    fn fail_closed_manifest_leaves_unmatched_inventory_partial() {
+        let inv = VecInventory::new(vec![
+            tiny_tensor("block_000.slot_00.router", "f32"),
+            tiny_tensor("block_000.slot_00.expert", "f32"),
+        ]);
+        let manifest = v2_manifest_with_ternary("block_000.slot_00.router");
+
+        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
+            .expect("plan should succeed");
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Partial { missing: 1 }
+        );
+        assert_eq!(report.coverage.covered_by_rules, 1);
+        assert!(
+            report.rule_plans.iter().all(|plan| plan.matcher != "<defaults>"),
+            "fail-closed manifests must not synthesize defaults for unmatched tensors"
+        );
+    }
+
+    #[test]
     fn overlapping_rules_count_each_exact_inventory_tensor_once_by_precedence() {
         let inv = VecInventory::new(vec![
             tiny_tensor("block_000.slot_00.router", "f32"),
