@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -113,6 +113,7 @@ fn plan_preserve_rules<I: ModelInventory>(
     rule_plans: &mut Vec<PlannedKernelCall>,
     by_operation: &mut BTreeMap<OperationKind, usize>,
     covered_by_rules: &mut usize,
+    claimed_exact_names: &mut HashSet<String>,
 ) -> Result<()> {
     for entry in &manifest.preserve {
         let class = TensorClass::Preserve {
@@ -120,7 +121,12 @@ fn plan_preserve_rules<I: ModelInventory>(
         };
         let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
         let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        let estimated = estimate_tensor_count_for_manifest(
+            inventory,
+            manifest,
+            &entry.name,
+            claimed_exact_names,
+        );
         rule_plans.push(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
@@ -142,6 +148,7 @@ fn plan_fp16_rules<I: ModelInventory>(
     rule_plans: &mut Vec<PlannedKernelCall>,
     by_operation: &mut BTreeMap<OperationKind, usize>,
     covered_by_rules: &mut usize,
+    claimed_exact_names: &mut HashSet<String>,
 ) -> Result<()> {
     for entry in &manifest.fp16 {
         let class = TensorClass::Fp16 {
@@ -171,6 +178,7 @@ fn plan_ternary_rules<I: ModelInventory>(
     rule_plans: &mut Vec<PlannedKernelCall>,
     by_operation: &mut BTreeMap<OperationKind, usize>,
     covered_by_rules: &mut usize,
+    claimed_exact_names: &mut HashSet<String>,
 ) -> Result<()> {
     for entry in &manifest.ternary_candidates {
         let class = TensorClass::TernaryCandidate {
@@ -178,8 +186,14 @@ fn plan_ternary_rules<I: ModelInventory>(
             gif_threshold: entry.gif_threshold,
         };
         let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = ternary_operation_from_inventory(inventory, &entry.name)?;
-        let estimated = estimate_tensor_count_for_manifest(inventory, manifest, &entry.name);
+        let operation =
+            ternary_operation_from_inventory(inventory, &entry.name, claimed_exact_names)?;
+        let estimated = estimate_tensor_count_for_manifest(
+            inventory,
+            manifest,
+            &entry.name,
+            claimed_exact_names,
+        );
         rule_plans.push(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
@@ -200,12 +214,15 @@ fn plan_ternary_rules<I: ModelInventory>(
 fn ternary_operation_from_inventory<I: ModelInventory>(
     inventory: &I,
     pattern: &str,
+    claimed_exact_names: &HashSet<String>,
 ) -> Result<OperationKind> {
     let mut saw_quantized = false;
     let mut saw_float = false;
     let mut saw_other = false;
     for tensor in inventory.tensors() {
-        if !crate::core::selection::glob_match(pattern, &tensor.structural_name) {
+        if !crate::core::selection::glob_match(pattern, &tensor.structural_name)
+            || claimed_exact_names.contains(&tensor.structural_name)
+        {
             continue;
         }
         if is_already_quantized_dtype(tensor.dtype) {
@@ -322,6 +339,7 @@ impl DryRunPlanner {
         let mut by_operation: BTreeMap<OperationKind, usize> = BTreeMap::new();
         let mut covered_by_rules = 0usize;
 
+        let mut claimed_exact_names = HashSet::new();
         Self::plan_all_rules(
             inventory,
             manifest,
@@ -329,6 +347,7 @@ impl DryRunPlanner {
             &mut rule_plans,
             &mut by_operation,
             &mut covered_by_rules,
+            &mut claimed_exact_names,
         )?;
 
         let inventory_coverage = calculate_coverage(covered_by_rules, inventory.total_tensors());
@@ -353,6 +372,7 @@ impl DryRunPlanner {
         rule_plans: &mut Vec<PlannedKernelCall>,
         by_operation: &mut BTreeMap<OperationKind, usize>,
         covered_by_rules: &mut usize,
+        claimed_exact_names: &mut HashSet<String>,
     ) -> Result<()> {
         plan_preserve_rules(
             inventory,
@@ -361,6 +381,7 @@ impl DryRunPlanner {
             rule_plans,
             by_operation,
             covered_by_rules,
+            claimed_exact_names,
         )?;
         plan_fp16_rules(
             inventory,
@@ -369,6 +390,7 @@ impl DryRunPlanner {
             rule_plans,
             by_operation,
             covered_by_rules,
+            claimed_exact_names,
         )?;
         plan_ternary_rules(
             inventory,
@@ -377,6 +399,7 @@ impl DryRunPlanner {
             rule_plans,
             by_operation,
             covered_by_rules,
+            claimed_exact_names,
         )?;
         plan_default_rule(
             inventory,
@@ -467,12 +490,18 @@ fn estimate_tensor_count_for_manifest<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     pattern: &str,
+    claimed_exact_names: &mut HashSet<String>,
 ) -> usize {
-    if uses_exact_inventory_counts(&manifest.model.tensor_name_convention) {
-        inventory.count_matching(pattern)
-    } else {
-        estimate_tensor_count(inventory, pattern)
+    if !uses_exact_inventory_counts(&manifest.model.tensor_name_convention) {
+        return estimate_tensor_count(inventory, pattern);
     }
+
+    inventory
+        .tensors()
+        .iter()
+        .filter(|tensor| crate::core::selection::glob_match(pattern, &tensor.structural_name))
+        .filter(|tensor| claimed_exact_names.insert(tensor.structural_name.clone()))
+        .count()
 }
 
 #[cfg(test)]
