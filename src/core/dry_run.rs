@@ -267,6 +267,12 @@ fn plan_default_rule<I: ModelInventory>(
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
+    // Non-V1 conventions fail closed at pack time; filling holes here would
+    // report CoverageStatus::Full for a profile that `run_quantization`
+    // immediately rejects (Codex P2 on PR #138 / GH #32).
+    if manifest.unmatched_tensors_fail_closed() {
+        return Ok(());
+    }
     let inventory_total = inventory.total_tensors();
     let default_estimated = inventory_total.saturating_sub(*accum.covered_by_rules);
     if default_estimated == 0 {
@@ -746,6 +752,31 @@ mod tests {
             .find(|plan| plan.matcher == "block_000.slot_00.*")
             .expect("ternary rule");
         assert_eq!(ternary.estimated_tensor_count, 1);
+    }
+
+    #[test]
+    fn fail_closed_manifest_reports_partial_when_a_tensor_is_unmatched() {
+        let inv = VecInventory::new(vec![
+            tiny_tensor("block_000.slot_00.router", "f32"),
+            tiny_tensor("block_000.slot_00.expert", "f32"),
+        ]);
+        let manifest = v2_manifest_with_ternary("block_000.slot_00.router");
+        let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
+            .expect("plan should succeed");
+
+        assert_eq!(
+            report.coverage.inventory_coverage,
+            CoverageStatus::Partial { missing: 1 }
+        );
+        assert_eq!(report.coverage.covered_by_rules, 1);
+        assert_eq!(report.backend_handled_total, 1);
+        assert!(
+            report
+                .rule_plans
+                .iter()
+                .all(|plan| plan.matcher != "<defaults>"),
+            "fail-closed dry-run must not synthesize <defaults>"
+        );
     }
 
     #[test]

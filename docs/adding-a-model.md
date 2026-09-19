@@ -51,7 +51,10 @@ unchanged in v1.
 `run_quantization` still writes Grok-1 architecture keys into GOZ1 metadata.
 Unmatched tensor names **fail closed** for every non-V1 convention (same
 `ManifestV2UnmatchedTensor` error as structural V2). V1 `blk.*` keeps
-defaults fallthrough.
+defaults fallthrough. Dry-run matches packing: a fail-closed manifest
+with unmatched inventory tensors reports `CoverageStatus::Partial` and
+does not synthesize a `<defaults>` plan. Complete plugins still need
+`CoverageStatus::Full` via explicit rules.
 
 ## Classification
 
