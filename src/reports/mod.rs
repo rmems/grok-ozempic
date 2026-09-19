@@ -1,4 +1,5 @@
 pub mod detector;
+pub mod scan;
 pub mod schema;
 pub mod templates;
 pub mod validator;
@@ -25,5 +26,7 @@ pub(crate) fn grok1_expected_expert_shape_strings() -> [String; 3] {
     ]
 }
 
+#[cfg(test)]
+mod scan_tests;
 #[cfg(test)]
 mod tests;
