@@ -207,7 +207,7 @@ as already landed.
 - [x] 1. Add `clap` CLI entrypoint in `src/bin/grok-ozempic.rs` (or equivalent binary target) exposing the `artifacts` subcommand.
 - [x] 2. Create `src/reports/mod.rs` to expose the new reporting module.
 - [x] 3. Create `src/reports/schema.rs` with the `ArtifactManifest`, `Hyperparameters`, `RouterEntry`, and other structs defined in Section 1.
-- [x] 4. Create `src/reports/detector.rs` that reads a `GOZ1` stream or manifest, applies the classification rules (Section 2/3/4), and constructs the IR structs.
+- [x] 4. Create `src/reports/detector.rs` that reads a manifest, applies the classification rules (Section 2/3/4), and constructs the IR structs. GOZ1-stream ingestion is not implemented by this CLI.
 - [x] 5. Create `src/reports/templates.rs` providing `format!()` macros for `inventory.md`, `routing-report.md`, `experts.md`, `saaq-readiness.md`, and `stats.md` matching Section 5 exactly.
 - [x] 6. Create `src/reports/writer.rs` that writes the interpolated templates to the `--output-dir`.
 - [x] 7. Create `src/reports/validator.rs` implementing strict invariant checks (770 tensors, shapes, block counts) that either panic or return `Err` if the generated IR violates the schema.
