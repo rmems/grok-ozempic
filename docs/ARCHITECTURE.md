@@ -180,9 +180,11 @@ local glue rather than backend kernel implementations:
 ## Dependency status
 
 `myelin-accelerator` is recorded as a **planned dependency** in
-[`Cargo.toml`](../Cargo.toml) (commented out). It becomes a real, feature-gated
-dependency once the `MyelinBackend` FFI bridge is implemented against
-[Limen-Neural/myelin-accelerator](https://github.com/Limen-Neural/myelin-accelerator).
+[`Cargo.toml`](../Cargo.toml) (commented out). Its current placeholder URL still
+points at `rmems/myelin-accelerator`; update that declaration to
+[Limen-Neural/myelin-accelerator](https://github.com/Limen-Neural/myelin-accelerator)
+when the `MyelinBackend` FFI bridge is implemented and the dependency becomes
+feature-gated.
 
 There is no 2026-05-28 sprint cutoff and no in-tree GPU provisioning runbook.
 Kernel work and cloud GPU experiments belong in `myelin-accelerator` and
