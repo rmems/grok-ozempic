@@ -110,20 +110,13 @@ impl ModelProfile for ToyMoeProfile {
     }
 }
 
-fn tensor(
-    name: String,
-    class: TensorClass,
-    dtype: &'static str,
-    block: Option<u32>,
-    slot: Option<u32>,
-    kind: &'static str,
-) -> InventoryTensor {
+fn f32_tensor(name: String, class: TensorClass, kind: &'static str) -> InventoryTensor {
     InventoryTensor {
         structural_name: name,
         expected_class: class,
-        dtype,
-        block,
-        slot,
+        dtype: "f32",
+        block: None,
+        slot: None,
         kind,
     }
 }
@@ -142,45 +135,45 @@ fn ternary() -> TensorClass {
 }
 
 fn push_layer(tensors: &mut Vec<InventoryTensor>, layer: u32) {
-    tensors.push(tensor(
-        format!("model.layers.{layer}.input_layernorm.weight"),
-        preserve("norm"),
-        "f32",
-        Some(layer),
-        None,
-        "input_norm",
-    ));
+    tensors.push(InventoryTensor {
+        block: Some(layer),
+        ..f32_tensor(
+            format!("model.layers.{layer}.input_layernorm.weight"),
+            preserve("norm"),
+            "input_norm",
+        )
+    });
     for (proj, kind) in [
         ("q_proj", "attn_q"),
         ("k_proj", "attn_k"),
         ("v_proj", "attn_v"),
         ("o_proj", "attn_o"),
     ] {
-        tensors.push(tensor(
-            format!("model.layers.{layer}.self_attn.{proj}.weight"),
-            ternary(),
-            "f32",
-            Some(layer),
-            None,
-            kind,
-        ));
+        tensors.push(InventoryTensor {
+            block: Some(layer),
+            ..f32_tensor(
+                format!("model.layers.{layer}.self_attn.{proj}.weight"),
+                ternary(),
+                kind,
+            )
+        });
     }
-    tensors.push(tensor(
-        format!("model.layers.{layer}.post_attention_layernorm.weight"),
-        preserve("norm"),
-        "f32",
-        Some(layer),
-        None,
-        "post_attn_norm",
-    ));
-    tensors.push(tensor(
-        format!("model.layers.{layer}.block_sparse_moe.gate.weight"),
-        preserve("moe-router"),
-        "f32",
-        Some(layer),
-        None,
-        "router",
-    ));
+    tensors.push(InventoryTensor {
+        block: Some(layer),
+        ..f32_tensor(
+            format!("model.layers.{layer}.post_attention_layernorm.weight"),
+            preserve("norm"),
+            "post_attn_norm",
+        )
+    });
+    tensors.push(InventoryTensor {
+        block: Some(layer),
+        ..f32_tensor(
+            format!("model.layers.{layer}.block_sparse_moe.gate.weight"),
+            preserve("moe-router"),
+            "router",
+        )
+    });
     push_experts(tensors, layer);
 }
 
@@ -191,47 +184,35 @@ fn push_experts(tensors: &mut Vec<InventoryTensor>, layer: u32) {
             ("w2", "moe_expert.w2"),
             ("w3", "moe_expert.w3"),
         ] {
-            tensors.push(tensor(
-                format!("model.layers.{layer}.block_sparse_moe.experts.{expert}.{proj}.weight"),
-                ternary(),
-                "f32",
-                Some(layer),
-                Some(expert),
-                kind,
-            ));
+            tensors.push(InventoryTensor {
+                block: Some(layer),
+                slot: Some(expert),
+                ..f32_tensor(
+                    format!("model.layers.{layer}.block_sparse_moe.experts.{expert}.{proj}.weight"),
+                    ternary(),
+                    kind,
+                )
+            });
         }
     }
 }
 
 fn build_toy_moe_tensors() -> Vec<InventoryTensor> {
     let mut tensors = Vec::with_capacity(TOY_MOE_TENSOR_TOTAL);
-    tensors.push(tensor(
+    tensors.push(f32_tensor(
         "model.embed_tokens.weight".into(),
         ternary(),
-        "f32",
-        None,
-        None,
         "embed",
     ));
     for layer in 0..TOY_MOE_LAYERS {
         push_layer(&mut tensors, layer);
     }
-    tensors.push(tensor(
+    tensors.push(f32_tensor(
         "model.norm.weight".into(),
         preserve("final-norm"),
-        "f32",
-        None,
-        None,
         "final_norm",
     ));
-    tensors.push(tensor(
-        "lm_head.weight".into(),
-        ternary(),
-        "f32",
-        None,
-        None,
-        "lm_head",
-    ));
+    tensors.push(f32_tensor("lm_head.weight".into(), ternary(), "lm_head"));
     tensors
 }
 

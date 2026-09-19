@@ -106,14 +106,26 @@ pub enum CoverageStatus {
     OverComplete { extra: usize },
 }
 
+struct PlanAccum<'a> {
+    rule_plans: &'a mut Vec<PlannedKernelCall>,
+    by_operation: &'a mut BTreeMap<OperationKind, usize>,
+    covered_by_rules: &'a mut usize,
+    claimed_exact_names: &'a mut HashSet<String>,
+}
+
+impl PlanAccum<'_> {
+    fn record(&mut self, plan: PlannedKernelCall) {
+        *self.by_operation.entry(plan.operation).or_insert(0) += plan.estimated_tensor_count;
+        *self.covered_by_rules += plan.estimated_tensor_count;
+        self.rule_plans.push(plan);
+    }
+}
+
 fn plan_preserve_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
-    claimed_exact_names: &mut HashSet<String>,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
     for entry in &manifest.preserve {
         let class = TensorClass::Preserve {
@@ -125,9 +137,9 @@ fn plan_preserve_rules<I: ModelInventory>(
             inventory,
             manifest,
             &entry.name,
-            claimed_exact_names,
+            accum.claimed_exact_names,
         );
-        rule_plans.push(PlannedKernelCall {
+        accum.record(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
             class,
@@ -135,8 +147,6 @@ fn plan_preserve_rules<I: ModelInventory>(
             gif_threshold,
             estimated_tensor_count: estimated,
         });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
     }
     Ok(())
 }
@@ -145,10 +155,7 @@ fn plan_fp16_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
-    claimed_exact_names: &mut HashSet<String>,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
     for entry in &manifest.fp16 {
         let class = TensorClass::Fp16 {
@@ -160,9 +167,9 @@ fn plan_fp16_rules<I: ModelInventory>(
             inventory,
             manifest,
             &entry.name,
-            claimed_exact_names,
+            accum.claimed_exact_names,
         );
-        rule_plans.push(PlannedKernelCall {
+        accum.record(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
             class,
@@ -170,8 +177,6 @@ fn plan_fp16_rules<I: ModelInventory>(
             gif_threshold,
             estimated_tensor_count: estimated,
         });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
     }
     Ok(())
 }
@@ -180,10 +185,7 @@ fn plan_ternary_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
-    claimed_exact_names: &mut HashSet<String>,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
     for entry in &manifest.ternary_candidates {
         let class = TensorClass::TernaryCandidate {
@@ -192,14 +194,14 @@ fn plan_ternary_rules<I: ModelInventory>(
         };
         let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
         let operation =
-            ternary_operation_from_inventory(inventory, &entry.name, claimed_exact_names)?;
+            ternary_operation_from_inventory(inventory, &entry.name, accum.claimed_exact_names)?;
         let estimated = estimate_tensor_count_for_manifest(
             inventory,
             manifest,
             &entry.name,
-            claimed_exact_names,
+            accum.claimed_exact_names,
         );
-        rule_plans.push(PlannedKernelCall {
+        accum.record(PlannedKernelCall {
             matcher: entry.name.clone(),
             operation,
             class,
@@ -207,8 +209,6 @@ fn plan_ternary_rules<I: ModelInventory>(
             gif_threshold,
             estimated_tensor_count: estimated,
         });
-        *by_operation.entry(operation).or_insert(0) += estimated;
-        *covered_by_rules += estimated;
     }
     Ok(())
 }
@@ -265,12 +265,10 @@ fn plan_default_rule<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
-    rule_plans: &mut Vec<PlannedKernelCall>,
-    by_operation: &mut BTreeMap<OperationKind, usize>,
-    covered_by_rules: &mut usize,
+    accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
     let inventory_total = inventory.total_tensors();
-    let default_estimated = inventory_total.saturating_sub(*covered_by_rules);
+    let default_estimated = inventory_total.saturating_sub(*accum.covered_by_rules);
     if default_estimated == 0 {
         return Ok(());
     }
@@ -280,7 +278,7 @@ fn plan_default_rule<I: ModelInventory>(
         TensorPrecision::TernarySnn => OperationKind::QuantizeTernary,
         TensorPrecision::Fp16 | TensorPrecision::Preserve => OperationKind::ConvertFp16,
     };
-    rule_plans.push(PlannedKernelCall {
+    accum.record(PlannedKernelCall {
         matcher: "<defaults>".to_string(),
         operation,
         class: default_class,
@@ -288,8 +286,6 @@ fn plan_default_rule<I: ModelInventory>(
         gif_threshold,
         estimated_tensor_count: default_estimated,
     });
-    *by_operation.entry(operation).or_insert(0) += default_estimated;
-    *covered_by_rules += default_estimated;
     Ok(())
 }
 
@@ -345,15 +341,13 @@ impl DryRunPlanner {
         let mut covered_by_rules = 0usize;
 
         let mut claimed_exact_names = HashSet::new();
-        Self::plan_all_rules(
-            inventory,
-            manifest,
-            config,
-            &mut rule_plans,
-            &mut by_operation,
-            &mut covered_by_rules,
-            &mut claimed_exact_names,
-        )?;
+        let mut accum = PlanAccum {
+            rule_plans: &mut rule_plans,
+            by_operation: &mut by_operation,
+            covered_by_rules: &mut covered_by_rules,
+            claimed_exact_names: &mut claimed_exact_names,
+        };
+        Self::plan_all_rules(inventory, manifest, config, &mut accum)?;
 
         let inventory_coverage = calculate_coverage(covered_by_rules, inventory.total_tensors());
         let backend_handled_total = by_operation.values().sum();
@@ -374,46 +368,12 @@ impl DryRunPlanner {
         inventory: &I,
         manifest: &DissectManifest,
         config: &QuantizationConfig,
-        rule_plans: &mut Vec<PlannedKernelCall>,
-        by_operation: &mut BTreeMap<OperationKind, usize>,
-        covered_by_rules: &mut usize,
-        claimed_exact_names: &mut HashSet<String>,
+        accum: &mut PlanAccum<'_>,
     ) -> Result<()> {
-        plan_preserve_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-            claimed_exact_names,
-        )?;
-        plan_fp16_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-            claimed_exact_names,
-        )?;
-        plan_ternary_rules(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-            claimed_exact_names,
-        )?;
-        plan_default_rule(
-            inventory,
-            manifest,
-            config,
-            rule_plans,
-            by_operation,
-            covered_by_rules,
-        )
+        plan_preserve_rules(inventory, manifest, config, accum)?;
+        plan_fp16_rules(inventory, manifest, config, accum)?;
+        plan_ternary_rules(inventory, manifest, config, accum)?;
+        plan_default_rule(inventory, manifest, config, accum)
     }
 
     /// Produce a machine-readable JSON mapping from rule matcher to planned
