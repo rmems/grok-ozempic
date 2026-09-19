@@ -121,34 +121,66 @@ impl PlanAccum<'_> {
     }
 }
 
+fn plan_rules<I, Rule, F>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    rules: &[Rule],
+    accum: &mut PlanAccum<'_>,
+    mut planned_rule: F,
+) -> Result<()>
+where
+    I: ModelInventory,
+    F: FnMut(
+        &Rule,
+        &HashSet<String>,
+    ) -> Result<(String, TensorClass, OperationKind, TensorPrecision, f32)>,
+{
+    for rule in rules {
+        let (matcher, class, operation, precision, gif_threshold) =
+            planned_rule(rule, accum.claimed_exact_names)?;
+        let estimated = estimate_tensor_count_for_manifest(
+            inventory,
+            manifest,
+            &matcher,
+            accum.claimed_exact_names,
+        );
+        accum.record(PlannedKernelCall {
+            matcher,
+            operation,
+            class,
+            precision,
+            gif_threshold,
+            estimated_tensor_count: estimated,
+        });
+    }
+    Ok(())
+}
+
 fn plan_preserve_rules<I: ModelInventory>(
     inventory: &I,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.preserve {
-        let class = TensorClass::Preserve {
-            reason: entry.reason.clone(),
-        };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(
-            inventory,
-            manifest,
-            &entry.name,
-            accum.claimed_exact_names,
-        );
-        accum.record(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
-            class,
-            precision: TensorPrecision::Preserve,
-            gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-    }
-    Ok(())
+    plan_rules(
+        inventory,
+        manifest,
+        &manifest.preserve,
+        accum,
+        |entry, _| {
+            let class = TensorClass::Preserve {
+                reason: entry.reason.clone(),
+            };
+            let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+            Ok((
+                entry.name.clone(),
+                class,
+                OperationKind::ConvertFp16,
+                TensorPrecision::Preserve,
+                gif_threshold,
+            ))
+        },
+    )
 }
 
 fn plan_fp16_rules<I: ModelInventory>(
@@ -157,28 +189,19 @@ fn plan_fp16_rules<I: ModelInventory>(
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.fp16 {
+    plan_rules(inventory, manifest, &manifest.fp16, accum, |entry, _| {
         let class = TensorClass::Fp16 {
             reason: entry.reason.clone(),
         };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation = OperationKind::ConvertFp16;
-        let estimated = estimate_tensor_count_for_manifest(
-            inventory,
-            manifest,
-            &entry.name,
-            accum.claimed_exact_names,
-        );
-        accum.record(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
+        let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        Ok((
+            entry.name.clone(),
             class,
-            precision: TensorPrecision::Fp16,
+            OperationKind::ConvertFp16,
+            TensorPrecision::Fp16,
             gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-    }
-    Ok(())
+        ))
+    })
 }
 
 fn plan_ternary_rules<I: ModelInventory>(
@@ -187,30 +210,28 @@ fn plan_ternary_rules<I: ModelInventory>(
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    for entry in &manifest.ternary_candidates {
-        let class = TensorClass::TernaryCandidate {
-            rank: entry.rank,
-            gif_threshold: entry.gif_threshold,
-        };
-        let (_precision, gif_threshold) = resolve_precision(&class, manifest, config)?;
-        let operation =
-            ternary_operation_from_inventory(inventory, &entry.name, accum.claimed_exact_names)?;
-        let estimated = estimate_tensor_count_for_manifest(
-            inventory,
-            manifest,
-            &entry.name,
-            accum.claimed_exact_names,
-        );
-        accum.record(PlannedKernelCall {
-            matcher: entry.name.clone(),
-            operation,
-            class,
-            precision: TensorPrecision::TernarySnn,
-            gif_threshold,
-            estimated_tensor_count: estimated,
-        });
-    }
-    Ok(())
+    plan_rules(
+        inventory,
+        manifest,
+        &manifest.ternary_candidates,
+        accum,
+        |entry, claimed_exact_names| {
+            let class = TensorClass::TernaryCandidate {
+                rank: entry.rank,
+                gif_threshold: entry.gif_threshold,
+            };
+            let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+            let operation =
+                ternary_operation_from_inventory(inventory, &entry.name, claimed_exact_names)?;
+            Ok((
+                entry.name.clone(),
+                class,
+                operation,
+                TensorPrecision::TernarySnn,
+                gif_threshold,
+            ))
+        },
+    )
 }
 
 /// Wrap vs re-quantize from matching inventory dtypes, never from a glob
