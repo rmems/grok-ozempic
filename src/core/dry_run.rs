@@ -700,10 +700,12 @@ mod tests {
             tiny_tensor("block_000.slot_00.expert", "f32"),
         ]);
         let mut manifest = v2_manifest_with_ternary("block_000.slot_00.*");
-        manifest.preserve.push(crate::core::manifest::PreserveEntry {
-            name: "block_000.slot_00.router".into(),
-            reason: Some("routing-critical".into()),
-        });
+        manifest
+            .preserve
+            .push(crate::core::manifest::PreserveEntry {
+                name: "block_000.slot_00.router".into(),
+                reason: Some("routing-critical".into()),
+            });
 
         let report = DryRunPlanner::plan(&inv, &manifest, &QuantizationConfig::default())
             .expect("plan should succeed");
