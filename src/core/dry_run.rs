@@ -530,8 +530,13 @@ mod tests {
             .iter()
             .find(|e| e.name.contains("router"))
             .expect("structural manifest has router preserve rule");
-        let count =
-            estimate_tensor_count_for_manifest(&Grok1Inventory::full(), m, &router_rule.name);
+        let mut claimed_exact_names = HashSet::new();
+        let count = estimate_tensor_count_for_manifest(
+            &Grok1Inventory::full(),
+            m,
+            &router_rule.name,
+            &mut claimed_exact_names,
+        );
         assert_eq!(
             count, 64,
             "router rule should count 64 via inventory, got {count}"
