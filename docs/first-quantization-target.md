@@ -51,7 +51,7 @@ FFI stub) and `DryRunPlanner`. That seam is the future dispatch point; it is
 
 | Layer | Role in this experiment |
 |-------|-------------------------|
-| Manifest | Explicit structural (or then-current baseline) rule covering `embedding.slot_00.token_embedding` |
+| Manifest | Current structural V2 manifest: explicit rule covering `embedding.slot_00.token_embedding`; historical baseline V1 manifest: no matching candidate, so its `ternary_snn` default supplied the policy |
 | Selection | `ternary_snn` on an f32 source → planned `OperationKind::QuantizeTernary` |
 | Live pack | `run_quantization` → `quantizer::quantize_f32` on CPU |
 | `LocalBackend` | Same math, not on the `quantize-goz1` call path |
