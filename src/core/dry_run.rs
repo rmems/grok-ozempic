@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::core::inventory::ModelInventory;
-use crate::core::manifest::{DissectManifest, uses_exact_inventory_counts};
+use crate::core::manifest::{
+    DissectManifest, Fp16Entry, PreserveEntry, uses_exact_inventory_counts,
+};
 use crate::core::selection::TensorClass;
 use crate::error::{GrokOzempicError, Result};
 use crate::types::{QuantizationConfig, TensorPrecision};
@@ -121,6 +123,31 @@ impl PlanAccum<'_> {
     }
 }
 
+trait NamedReasonRule {
+    fn name(&self) -> &str;
+    fn reason(&self) -> Option<String>;
+}
+
+impl NamedReasonRule for PreserveEntry {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason.clone()
+    }
+}
+
+impl NamedReasonRule for Fp16Entry {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason.clone()
+    }
+}
+
 fn plan_rules<I, Rule, F>(
     inventory: &I,
     manifest: &DissectManifest,
@@ -162,24 +189,14 @@ fn plan_preserve_rules<I: ModelInventory>(
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    plan_rules(
+    plan_convert_fp16_rules(
         inventory,
         manifest,
+        config,
         &manifest.preserve,
         accum,
-        |entry, _| {
-            let class = TensorClass::Preserve {
-                reason: entry.reason.clone(),
-            };
-            let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
-            Ok((
-                entry.name.clone(),
-                class,
-                OperationKind::ConvertFp16,
-                TensorPrecision::Preserve,
-                gif_threshold,
-            ))
-        },
+        TensorPrecision::Preserve,
+        |reason| TensorClass::Preserve { reason },
     )
 }
 
@@ -189,16 +206,39 @@ fn plan_fp16_rules<I: ModelInventory>(
     config: &QuantizationConfig,
     accum: &mut PlanAccum<'_>,
 ) -> Result<()> {
-    plan_rules(inventory, manifest, &manifest.fp16, accum, |entry, _| {
-        let class = TensorClass::Fp16 {
-            reason: entry.reason.clone(),
-        };
+    plan_convert_fp16_rules(
+        inventory,
+        manifest,
+        config,
+        &manifest.fp16,
+        accum,
+        TensorPrecision::Fp16,
+        |reason| TensorClass::Fp16 { reason },
+    )
+}
+
+fn plan_convert_fp16_rules<I, Rule, F>(
+    inventory: &I,
+    manifest: &DissectManifest,
+    config: &QuantizationConfig,
+    rules: &[Rule],
+    accum: &mut PlanAccum<'_>,
+    precision: TensorPrecision,
+    class_from_reason: F,
+) -> Result<()>
+where
+    I: ModelInventory,
+    Rule: NamedReasonRule,
+    F: Fn(Option<String>) -> TensorClass,
+{
+    plan_rules(inventory, manifest, rules, accum, |entry, _| {
+        let class = class_from_reason(entry.reason());
         let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
         Ok((
-            entry.name.clone(),
+            entry.name().to_string(),
             class,
             OperationKind::ConvertFp16,
-            TensorPrecision::Fp16,
+            precision,
             gif_threshold,
         ))
     })
