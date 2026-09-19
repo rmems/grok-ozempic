@@ -43,6 +43,25 @@ pipelines have different outputs:
 
 An `artifact.index.json` from the first pipeline is not a GOZ1 checkpoint.
 
+## Backend delegation (what this experiment used)
+
+PR #25 added the `BackendKernel` trait (`LocalBackend` CPU, `MyelinBackend`
+FFI stub) and `DryRunPlanner`. That seam is the future dispatch point; it is
+**not** how the first embedding pack ran.
+
+| Layer | Role in this experiment |
+|-------|-------------------------|
+| Manifest | Current structural V2 manifest: explicit rule covering `embedding.slot_00.token_embedding`; historical baseline V1 manifest: no matching candidate, so its `ternary_snn` default supplied the policy |
+| Selection | `ternary_snn` on an f32 source → planned `OperationKind::QuantizeTernary` |
+| Live pack | `run_quantization` → `quantizer::quantize_f32` on CPU |
+| `LocalBackend` | Same math, not on the `quantize-goz1` call path |
+| `MyelinBackend` | Unused stub; do not cite myelin or CUDA as the compute backend |
+
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the five-minute
+manifest → trait → myelin trace, and
+[`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) for the
+copyable commands.
+
 ## Manifest and safety contract
 
 Use a manifest that explicitly covers the structural NPY name. Runtime support
@@ -95,3 +114,11 @@ that the broader ingest gates are complete.
   as part of this documentation contract.
 - Do not treat pickle as a direct `quantize-goz1` input.
 - Do not treat SAAQ metadata conversion as real-weight quantization.
+- Do not treat `MyelinBackend` as the compute path for this pack.
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — `BackendKernel` / `DryRunPlanner` boundary
+- [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) — copyable commands
+- [`dissect-manifest.md`](./dissect-manifest.md) — V2 fail-closed classification
+- [`goz1-format.md`](./goz1-format.md) — GOZ1 v1 vs v3 layout
