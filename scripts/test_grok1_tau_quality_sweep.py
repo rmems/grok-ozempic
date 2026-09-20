@@ -93,7 +93,7 @@ class SweepCsvTests(unittest.TestCase):
             self.assertEqual(len(rows), 4)
             with out.open() as f:
                 read_rows = list(csv.DictReader(f))
-            self.assertEqual(read_rows[0].keys(), {c: None for c in sweep.CSV_COLUMNS}.keys())
+            self.assertEqual(list(read_rows[0].keys()), sweep.CSV_COLUMNS)
             names = {r["tensor_name"] for r in read_rows}
             self.assertEqual(
                 names,
