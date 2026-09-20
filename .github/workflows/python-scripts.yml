@@ -79,6 +79,9 @@ jobs:
       - name: Unit tests (block weight loading)
         run: python3 -m unittest scripts.test_grok1_block_weights -v
 
+      - name: Unit tests (tau quality sweep)
+        run: python3 -m unittest scripts.test_grok1_tau_quality_sweep -v
+
       - name: Codex co-author hook contract
         run: |
           jq empty .codex/hooks.json

@@ -233,7 +233,7 @@ where
 {
     plan_rules(inventory, manifest, rules, accum, |entry, _| {
         let class = class_from_reason(entry.reason());
-        let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+        let (_, gif_threshold) = resolve_precision(entry.name(), &class, manifest, config)?;
         Ok((
             entry.name().to_string(),
             class,
@@ -260,7 +260,11 @@ fn plan_ternary_rules<I: ModelInventory>(
                 rank: entry.rank,
                 gif_threshold: entry.gif_threshold,
             };
-            let (_, gif_threshold) = resolve_precision(&class, manifest, config)?;
+            // SAAQ τ applies here only when a map pattern matches this rule's
+            // name; a map that subdivides one rule into several τ values is
+            // still applied per-tensor at pack time (v3 tensor rows are
+            // authoritative) — see core::saaq's dry-run caveat.
+            let (_, gif_threshold) = resolve_precision(&entry.name, &class, manifest, config)?;
             let operation =
                 ternary_operation_from_inventory(inventory, &entry.name, claimed_exact_names)?;
             Ok((
@@ -340,7 +344,11 @@ fn plan_default_rule<I: ModelInventory>(
         return Ok(());
     }
     let default_class = TensorClass::Default;
-    let (precision, gif_threshold) = resolve_precision(&default_class, manifest, config)?;
+    // `<defaults>` covers every unclassified tensor, so the row reports the
+    // manifest/CLI baseline. SAAQ-derived per-tensor values still apply at
+    // pack time; the plan cannot name them at rule granularity (core::saaq).
+    let (precision, gif_threshold) =
+        resolve_precision("<defaults>", &default_class, manifest, config)?;
     let operation = match precision {
         TensorPrecision::TernarySnn => OperationKind::QuantizeTernary,
         TensorPrecision::Fp16 | TensorPrecision::Preserve => OperationKind::ConvertFp16,
@@ -480,11 +488,12 @@ impl DryRunPlanner {
 // ---------------------------------------------------------------------------
 
 fn resolve_precision(
+    name: &str,
     class: &TensorClass,
     manifest: &DissectManifest,
     config: &QuantizationConfig,
 ) -> Result<(TensorPrecision, f32)> {
-    crate::core::precision::decide(class, Some(manifest), config)
+    crate::core::precision::decide_for_tensor(name, class, Some(manifest), config)
 }
 
 /// Heuristically estimate how many concrete tensors a single glob pattern

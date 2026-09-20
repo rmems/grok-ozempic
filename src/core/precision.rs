@@ -3,9 +3,12 @@
 //! threshold.
 //!
 //! Threshold resolution order:
-//! 1. Per-tensor `gif_threshold` carried on a `TernaryCandidate`.
-//! 2. `manifest.defaults.gif_threshold` if set.
-//! 3. `config.gif_threshold` (always present).
+//! 1. Per-tensor `gif_threshold` carried on a `TernaryCandidate` — explicit
+//!    manifest authoring always wins.
+//! 2. SAAQ-derived `gif_threshold` from [`QuantizationConfig::saaq_tau_map`]
+//!    (looked up by tensor name; only consulted by [`decide_for_tensor`]).
+//! 3. `manifest.defaults.gif_threshold` if set.
+//! 4. `config.gif_threshold` (always present).
 //!
 //! Precision tier resolution:
 //! - `TensorClass::Preserve`          → [`TensorPrecision::Preserve`]
@@ -29,7 +32,26 @@ use crate::{
 };
 
 /// Decide `(precision, effective_gif_threshold)` for a single tensor.
+///
+/// Equivalent to [`decide_for_tensor`] with no tensor name, so the optional
+/// [`QuantizationConfig::saaq_tau_map`] source is not consulted. Pack-side
+/// callers should prefer [`decide_for_tensor`] so SAAQ-derived per-tensor
+/// thresholds apply.
 pub fn decide(
+    class: &TensorClass,
+    manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<(TensorPrecision, f32)> {
+    decide_for_tensor("", class, manifest, config)
+}
+
+/// [`decide`] with the tensor name, enabling the SAAQ-derived threshold
+/// source (`config.saaq_tau_map`). SAAQ entries fill the per-tensor
+/// `gif_threshold` slot: they apply only where the manifest carried no
+/// explicit `ternary_candidates[].gif_threshold`, and outrank
+/// `manifest.defaults` / `config.gif_threshold`.
+pub fn decide_for_tensor(
+    tensor_name: &str,
     class: &TensorClass,
     manifest: Option<&DissectManifest>,
     config: &QuantizationConfig,
@@ -40,7 +62,7 @@ pub fn decide(
         TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnn,
         TensorClass::Default => resolve_default_precision(manifest)?,
     };
-    let threshold = resolve_threshold(class, manifest, config)?;
+    let threshold = resolve_threshold(tensor_name, class, manifest, config)?;
     Ok((precision, threshold))
 }
 
@@ -55,6 +77,7 @@ fn resolve_default_precision(manifest: Option<&DissectManifest>) -> Result<Tenso
 }
 
 fn resolve_threshold(
+    tensor_name: &str,
     class: &TensorClass,
     manifest: Option<&DissectManifest>,
     config: &QuantizationConfig,
@@ -65,6 +88,12 @@ fn resolve_threshold(
     } = class
     {
         *t
+    } else if let Some(t) = config
+        .saaq_tau_map
+        .as_ref()
+        .and_then(|map| map.lookup(tensor_name))
+    {
+        t
     } else if let Some(m) = manifest
         && let Some(t) = m.defaults.gif_threshold
     {

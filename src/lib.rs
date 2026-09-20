@@ -41,9 +41,12 @@ pub use crate::core::manifest::{
     load_manifest, parse_manifest_bytes, uses_exact_inventory_counts,
 };
 pub use crate::core::ozempic::OzempicMoE;
-pub use crate::core::precision::{decide as precision_decide, parse_precision_str};
+pub use crate::core::precision::{
+    decide as precision_decide, decide_for_tensor, parse_precision_str,
+};
 pub use crate::core::projector::Projector;
 pub use crate::core::quantizer::{QuantizedTensor, quantize_f16, quantize_f32};
+pub use crate::core::saaq::{SaaqTauEntry, SaaqTauMap, load_saaq_tau_map};
 pub use crate::core::selection::{
     LEGACY_DEFAULT_ROUTER_PATTERNS, TensorClass, TensorClassifier, classify as selection_classify,
     glob_match,

@@ -16,6 +16,7 @@ pub(crate) fn cmd_quantize_goz1(
     input_format: CliInputFormat,
     gif_threshold: Option<f32>,
     use_embedded_baseline: bool,
+    saaq_tau_map: Option<PathBuf>,
     verify: bool,
 ) -> anyhow::Result<()> {
     let config = prepare_quantize_goz1(
@@ -25,6 +26,7 @@ pub(crate) fn cmd_quantize_goz1(
         input_format,
         gif_threshold,
         use_embedded_baseline,
+        saaq_tau_map,
     )?;
     let stats =
         run_quantization(&config).map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
@@ -92,19 +94,27 @@ fn prepare_quantize_goz1(
     input_format: CliInputFormat,
     gif_threshold: Option<f32>,
     use_embedded_baseline: bool,
+    saaq_tau_map: Option<PathBuf>,
 ) -> anyhow::Result<QuantizationConfig> {
     let (input_dir_s, output_s) =
         validate_goz1_cli_paths(input_dir, output, manifest.as_deref(), gif_threshold)?;
     // Match resolve_manifest precedence messaging (env wins over embedded).
     note_manifest_policy(manifest.is_none(), use_embedded_baseline);
-    Ok(goz1_config_from_cli(
+    let saaq_tau_map = saaq_tau_map
+        .as_deref()
+        .map(grok_ozempic::load_saaq_tau_map)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("SAAQ tau map load failed: {e}"))?;
+    let mut config = goz1_config_from_cli(
         input_dir_s,
         output_s,
         input_format,
         manifest,
         gif_threshold,
         use_embedded_baseline,
-    ))
+    );
+    config.saaq_tau_map = saaq_tau_map;
+    Ok(config)
 }
 
 fn print_quantize_goz1_summary(output: &Path, stats: &[ShardStats]) {

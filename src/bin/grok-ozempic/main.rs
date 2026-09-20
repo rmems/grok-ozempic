@@ -150,6 +150,14 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         use_embedded_baseline: bool,
 
+        /// Optional SAAQ τ map JSON (corinth-canal `saaq-tau-map` schema):
+        /// per-tensor/per-tier `gif_threshold` values derived from
+        /// `saaq_delta_q_target`. Precedence: explicit per-tensor manifest
+        /// `gif_threshold` > this map > `manifest.defaults` > `--gif-threshold`.
+        /// Applied values land in each GOZ1 v3 tensor row.
+        #[arg(long)]
+        saaq_tau_map: Option<PathBuf>,
+
         /// Verify GOZ1 container after write
         #[arg(long, default_value_t = false)]
         verify: bool,
@@ -198,9 +206,11 @@ fn run_cli(command: Commands) -> anyhow::Result<()> {
             manifest, artifact_index, plan_fingerprints, output_root, strict_router_protection,
         ),
         Commands::QuantizeGoz1 {
-            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline, verify,
+            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline,
+            saaq_tau_map, verify,
         } => cmd_quantize_goz1(
-            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline, verify,
+            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline,
+            saaq_tau_map, verify,
         ),
         Commands::Artifacts { cmd } => cmd_artifacts(cmd),
     }
