@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 
 use crate::CliInputFormat;
 
+// CLI args forwarded one-per-flag; grouping them into an options struct would
+// just rename the same arity (same rationale as the existing allow in
+// src/artifact.rs).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn cmd_quantize_goz1(
     input_dir: PathBuf,
     output: PathBuf,
