@@ -44,6 +44,7 @@ Optional ``--verify-pack PACK.goz1`` cross-checks that the per-tensor
 match what this sweep would recompute from the same npy inputs — the applied-tau
 audit the #58/#66 trap requires, run offline without re-quantizing.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -101,7 +102,7 @@ def tensor_stats(w: np.ndarray) -> dict:
     std = float(w.std())
     rms = float(math.sqrt(float((w * w).mean())))
     mean_abs = float(np.abs(w).mean())
-    kurtosis = float("nan") if std == 0.0 else float(((w - mean) ** 4).mean() / std**4 - 3.0)
+    kurtosis = float("nan") if std <= 0.0 else float(((w - mean) ** 4).mean() / std**4 - 3.0)
     return {
         "num_elements": n,
         "rms": rms,
@@ -228,9 +229,7 @@ def verify_pack(pack_path: Path, npy_dir: Path) -> list[str]:
         w = np.asarray(tensors[name], dtype=np.float64).ravel()
         rms = float(math.sqrt(float((w * w).mean())))
         expected_tau_abs = row["gif_threshold"] * rms
-        if not math.isclose(
-            expected_tau_abs, row["threshold_abs"], rel_tol=1e-4, abs_tol=1e-9
-        ):
+        if not math.isclose(expected_tau_abs, row["threshold_abs"], rel_tol=1e-4, abs_tol=1e-9):
             mismatches.append(
                 f"{name}: threshold_abs={row['threshold_abs']} != "
                 f"gif_threshold({row['gif_threshold']})*rms({rms:.6g})={expected_tau_abs:.6g}"

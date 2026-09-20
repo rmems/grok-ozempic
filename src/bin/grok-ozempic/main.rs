@@ -209,8 +209,10 @@ fn run_cli(command: Commands) -> anyhow::Result<()> {
             input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline,
             saaq_tau_map, verify,
         } => cmd_quantize_goz1(
-            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline,
-            saaq_tau_map, verify,
+            input_dir, output, input_format,
+            quantize::QuantizeGoz1Options {
+                manifest, gif_threshold, use_embedded_baseline, saaq_tau_map, verify,
+            },
         ),
         Commands::Artifacts { cmd } => cmd_artifacts(cmd),
     }

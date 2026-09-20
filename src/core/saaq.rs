@@ -184,13 +184,23 @@ mod tests {
         assert_eq!(map.lookup("block_042.slot_01.extra.moe_expert.down"), None);
     }
 
+    // Prefer crate target/ over shared OS temp_dir (Semgrep temp-dir),
+    // matching the quantize.rs test helper.
+    fn test_dir() -> std::path::PathBuf {
+        let d = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("saaq-map-tests")
+            .join(std::process::id().to_string());
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     #[test]
     fn load_rejects_negative_threshold() {
         // NaN/Infinity are not JSON literals, so serde_json rejects them at
         // parse time; a negative value parses fine and must be caught by
         // validate_gif_threshold instead.
-        let path =
-            std::env::temp_dir().join(format!("saaq-tau-map-bad-{}.json", std::process::id()));
+        let path = test_dir().join("bad.json");
         let mut f = std::fs::File::create(&path).unwrap();
         write!(
             f,
@@ -208,8 +218,7 @@ mod tests {
 
     #[test]
     fn load_round_trips_minimal_map() {
-        let path =
-            std::env::temp_dir().join(format!("saaq-tau-map-ok-{}.json", std::process::id()));
+        let path = test_dir().join("ok.json");
         std::fs::write(
             &path,
             r#"{

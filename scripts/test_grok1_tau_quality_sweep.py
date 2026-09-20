@@ -87,9 +87,7 @@ class SweepCsvTests(unittest.TestCase):
             np.save(npy_dir / "block_000__slot_00__moe_expert__gate.npy", _gaussian(1024))
             np.save(npy_dir / "block_000__slot_00__moe_expert__down.npy", _gaussian(512, 9))
             out = Path(tmp) / "tau_quality.csv"
-            rows = sweep.run_sweep(
-                npy_dir, [0.05, 0.65], out
-            )
+            rows = sweep.run_sweep(npy_dir, [0.05, 0.65], out)
             self.assertEqual(len(rows), 4)
             with out.open() as f:
                 read_rows = list(csv.DictReader(f))
@@ -102,16 +100,10 @@ class SweepCsvTests(unittest.TestCase):
                     "block_000.slot_00.moe_expert.down",
                 },
             )
-            self.assertEqual(
-                {r["tensor_role"] for r in read_rows}, {"gate", "down"}
-            )
+            self.assertEqual({r["tensor_role"] for r in read_rows}, {"gate", "down"})
             # Higher gif_threshold -> higher sparsity on the same tensor.
-            gate_rows = [
-                r for r in read_rows if r["tensor_name"].endswith("gate")
-            ]
-            self.assertLess(
-                float(gate_rows[0]["sparsity"]), float(gate_rows[1]["sparsity"])
-            )
+            gate_rows = [r for r in read_rows if r["tensor_name"].endswith("gate")]
+            self.assertLess(float(gate_rows[0]["sparsity"]), float(gate_rows[1]["sparsity"]))
 
     def test_parse_gif_thresholds_rejects_bad_values(self) -> None:
         with self.assertRaises(sweep.SweepError):

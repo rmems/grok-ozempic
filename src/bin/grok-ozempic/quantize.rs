@@ -9,29 +9,24 @@ use std::path::{Path, PathBuf};
 
 use crate::CliInputFormat;
 
-// CLI args forwarded one-per-flag; grouping them into an options struct would
-// just rename the same arity (same rationale as the existing allow in
-// src/artifact.rs).
-#[allow(clippy::too_many_arguments)]
+/// Option-bearing `quantize-goz1` flags bundled so function arity stays under
+// the clippy/qlty thresholds as new τ sources are added.
+pub(crate) struct QuantizeGoz1Options {
+    pub manifest: Option<PathBuf>,
+    pub gif_threshold: Option<f32>,
+    pub use_embedded_baseline: bool,
+    pub saaq_tau_map: Option<PathBuf>,
+    pub verify: bool,
+}
+
 pub(crate) fn cmd_quantize_goz1(
     input_dir: PathBuf,
     output: PathBuf,
-    manifest: Option<PathBuf>,
     input_format: CliInputFormat,
-    gif_threshold: Option<f32>,
-    use_embedded_baseline: bool,
-    saaq_tau_map: Option<PathBuf>,
-    verify: bool,
+    options: QuantizeGoz1Options,
 ) -> anyhow::Result<()> {
-    let config = prepare_quantize_goz1(
-        &input_dir,
-        &output,
-        manifest,
-        input_format,
-        gif_threshold,
-        use_embedded_baseline,
-        saaq_tau_map,
-    )?;
+    let verify = options.verify;
+    let config = prepare_quantize_goz1(&input_dir, &output, input_format, options)?;
     let stats =
         run_quantization(&config).map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
     print_quantize_goz1_summary(&output, &stats);
@@ -94,12 +89,16 @@ fn validate_goz1_cli_paths(
 fn prepare_quantize_goz1(
     input_dir: &Path,
     output: &Path,
-    manifest: Option<PathBuf>,
     input_format: CliInputFormat,
-    gif_threshold: Option<f32>,
-    use_embedded_baseline: bool,
-    saaq_tau_map: Option<PathBuf>,
+    options: QuantizeGoz1Options,
 ) -> anyhow::Result<QuantizationConfig> {
+    let QuantizeGoz1Options {
+        manifest,
+        gif_threshold,
+        use_embedded_baseline,
+        saaq_tau_map,
+        verify: _,
+    } = options;
     let (input_dir_s, output_s) =
         validate_goz1_cli_paths(input_dir, output, manifest.as_deref(), gif_threshold)?;
     // Match resolve_manifest precedence messaging (env wins over embedded).
