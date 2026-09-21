@@ -439,6 +439,51 @@ mod tests {
         );
     }
 
+    #[test]
+    fn prepare_loads_saaq_tau_map_into_config() {
+        let dir = tempfile_dir();
+        let map_path = dir.join("tau.json");
+        fs::write(
+            &map_path,
+            r#"{"entries": [{"pattern": "a.b", "gif_threshold": 0.65}]}"#,
+        )
+        .unwrap();
+        let opts = QuantizeGoz1Options {
+            manifest: None,
+            gif_threshold: None,
+            use_embedded_baseline: true,
+            saaq_tau_map: Some(map_path),
+            verify: false,
+        };
+        let cfg =
+            prepare_quantize_goz1(&dir, &dir.join("out.goz1"), CliInputFormat::Npy, opts).unwrap();
+        assert_eq!(cfg.saaq_tau_map.unwrap().lookup("a.b"), Some(0.65));
+    }
+
+    #[test]
+    fn prepare_rejects_bad_saaq_tau_map() {
+        let dir = tempfile_dir();
+        let map_path = dir.join("bad.json");
+        fs::write(
+            &map_path,
+            r#"{"entries": [{"pattern": "a.b", "gif_threshold": -0.1}]}"#,
+        )
+        .unwrap();
+        let opts = QuantizeGoz1Options {
+            manifest: None,
+            gif_threshold: None,
+            use_embedded_baseline: true,
+            saaq_tau_map: Some(map_path),
+            verify: false,
+        };
+        let err = prepare_quantize_goz1(&dir, &dir.join("out.goz1"), CliInputFormat::Npy, opts)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("SAAQ tau map"),
+            "expected saaq map error, got {err}"
+        );
+    }
+
     fn tempfile_dir() -> PathBuf {
         // Prefer crate target/ over shared OS temp_dir (Semgrep temp-dir).
         let d = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
