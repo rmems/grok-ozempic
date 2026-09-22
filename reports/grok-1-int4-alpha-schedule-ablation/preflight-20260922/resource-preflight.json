@@ -1,0 +1,18 @@
+{
+  "requirements": {
+    "49": {
+      "additional": 19412860928,
+      "path": "/home/raulmc/rmems/grok-ozempic/.worktrees/125-alpha-schedule/reports/grok-1-int4-alpha-schedule-ablation/preflight-20260922"
+    }
+  },
+  "snapshot": {
+    "competing": [
+      10387
+    ],
+    "disk_free": {
+      "49": 68888530944
+    },
+    "mem_available": 26677383168,
+    "swap_free": 151552
+  }
+}
