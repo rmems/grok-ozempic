@@ -200,6 +200,23 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.p.analyze({c: fixture(c) for c in "ABC"})
 
+    def test_row_block_identifiers_require_integers(self):
+        for collection in ("per_block", "pack_provenance"):
+            for index, value in ((0, False), (1, True), (0, 0.0), (3, 3.0)):
+                payload = fixture("A")
+                payload["chain"][collection][index]["block"] = value
+                with self.subTest(collection=collection, value=value):
+                    with self.assertRaisesRegex(ValueError, "integer"):
+                        self.p.validate_cell(payload, "A", "fresh-run")
+
+    def test_direct_child_rss_cannot_replace_missing_process_group_sample(self):
+        for sampled in (None, 0):
+            payload = fixture("A")
+            payload["resources"]["process_tree_peak_rss_bytes"] = sampled
+            payload["resources"]["direct_child_peak_rss_bytes"] = 1024
+            with self.subTest(sampled=sampled), self.assertRaises(ValueError):
+                self.p.validate_cell(payload, "A", "fresh-run")
+
     def test_token_order_and_content_are_frozen(self):
         for mutation in (
             lambda p: p["provenance"]["token_ids"].reverse(),

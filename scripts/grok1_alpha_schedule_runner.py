@@ -210,6 +210,17 @@ def _unfinished_descendants(group):
     )
 
 
+def _reap_child(proc):
+    original = sys.exc_info()[1]
+    try:
+        _kill_group(proc.pid)
+        proc.wait(timeout=10)
+    except (Exception, KeyboardInterrupt) as exc:
+        if original is None:
+            raise
+        print(f"child cleanup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
 def run_child(command, log, timeout=CHILD_TIMEOUT_SECONDS):
     """Sample aggregate RSS of the new process group and always reap its leader."""
     started, peak, timed_out, unfinished = time.monotonic(), 0, False, False
@@ -237,8 +248,7 @@ def run_child(command, log, timeout=CHILD_TIMEOUT_SECONDS):
         finally:
             # Includes grandchildren when a child exits early, on timeout, and
             # operator interruption. The fixed Linux session owns no other job.
-            _kill_group(proc.pid)
-            proc.wait(timeout=10)
+            _reap_child(proc)
     return {
         "returncode": proc.returncode if not unfinished else -signal.SIGKILL,
         "leader_returncode": proc.returncode,
@@ -255,8 +265,11 @@ def interrupt_handlers():
     def interrupted(signum, frame):
         raise KeyboardInterrupt(f"supervisor signal {signum}")
 
-    old = {s: signal.signal(s, interrupted) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    old = {}
     try:
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            old[signum] = signal.getsignal(signum)
+            signal.signal(signum, interrupted)
         yield
     finally:
         for signum, handler in old.items():
@@ -292,14 +305,11 @@ def _collect_cell(command, dest, cell, run_id, context):
 def supervise(out, prepare, command, gate):
     """Run four fresh children; callbacks bind the CLI's input/preflight boundary."""
     out = validate_output_path(out)
-    with output_lock(out, nonblocking=True), interrupt_handlers():
-        out.mkdir(parents=True, exist_ok=True)
-        run_id = uuid.uuid4().hex
-        run_dir = out / "runs" / run_id
-        run_dir.mkdir(parents=True)
+    with output_lock(out, nonblocking=True):
+        run_dir = None
         payload = {
             "protocol": PROTOCOL,
-            "run_id": run_id,
+            "run_id": None,
             "status": "inconclusive",
             "error": "run started; not all cells validated",
             "cells": {},
@@ -310,25 +320,31 @@ def supervise(out, prepare, command, gate):
             # old success before expensive preparation or model work starts.
             atomic_json(out / "outcome.json", payload)
             atomic_text(out / "results.md", render_report(payload))
-            atomic_json(run_dir / "outcome.json", payload)
+            if run_dir is not None:
+                atomic_json(run_dir / "outcome.json", payload)
 
-        publish()
         try:
-            gate()
-            context = prepare()
-            for cell in CELLS:
-                dest = run_dir / cell
-                dest.mkdir()
-                gate()
-                evidence = _collect_cell(
-                    command(cell, dest, run_id, context), dest, cell, run_id, context
-                )
-                payload["cells"][cell] = evidence
-                atomic_json(dest / "validated.json", evidence)
+            with interrupt_handlers():
+                run_id = uuid.uuid4().hex
+                payload["run_id"] = run_id
+                run_dir = out / "runs" / run_id
+                # Atomic writers create their parents here, inside the guarded lifecycle.
                 publish()
-            payload = analyze(payload["cells"])
-            publish()
-            return 0
+                gate()
+                context = prepare()
+                for cell in CELLS:
+                    dest = run_dir / cell
+                    dest.mkdir()
+                    gate()
+                    evidence = _collect_cell(
+                        command(cell, dest, run_id, context), dest, cell, run_id, context
+                    )
+                    payload["cells"][cell] = evidence
+                    atomic_json(dest / "validated.json", evidence)
+                    publish()
+                payload = analyze(payload["cells"])
+                publish()
+                return 0
         except (Exception, KeyboardInterrupt) as exc:
             payload.update(status="inconclusive", error=f"{type(exc).__name__}: {exc}")
             payload.pop("paired_contrasts", None)

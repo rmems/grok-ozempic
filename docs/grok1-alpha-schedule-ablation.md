@@ -57,6 +57,11 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 scripts/grok1_alpha_schedule_ab
 Preflight reads array headers and checks resources and implementation; it does
 not perform a forward or claim whole-file input verification. Only after it
 passes, launch with the identical command **without `--preflight-only`**.
+Destination/source overlap is rejected before locks, directory creation or
+publication, including preflight-only mode. Published preflight records redact
+known host paths; disk requirements retain device identifiers and byte reservations,
+not the local paths used for the free-space probes. Launch manifests remain local
+execution records with resolved paths, not portable public preflight reports.
 An optional `--int4-side-root /dedicated/cache/path` reuses content-bound caches.
 Default caches live below the new output directory. The internal `--cell`
 entry point requires a launch manifest and live parent supervisor.
@@ -80,6 +85,10 @@ produce a complete outcome and paired contrasts. `results.md` renders that
 record; partial output is retained on failure, and old run directories remain
 auditable. Restart starts a new run and reuses only verified weight caches.
 Output locks prevent concurrent supervisors from owning one report directory.
+Catchable interruptions during handler installation, directory creation or the
+first authoritative write also publish an inconclusive result under that lock.
+No cleanup can guarantee replacement during uncatchable SIGKILL, host loss or
+an unwritable filesystem before the first authoritative write.
 
 Children have a fixed 24-hour lifetime. Catchable supervisor interrupts kill
 and reap the child process group; nonzero exits, kill signals, missing or
@@ -112,7 +121,15 @@ can miss shorter peaks; shared pages may be counted more than once. Runtime
 FP32 dequantization/reference allocations and cache retention are not the
 logical precision payload. Disk totals sum file `stat().st_size` at child
 completion before final metric publication; they exclude filesystem allocation
-overhead and later report writes. Hypothetical nibble packing is explicitly separate
+overhead and later report writes. In the normal launcher, cache is
+`out/int4-side` and each child's scratch is `out/runs/<run-id>/<cell>`: these
+are disjoint trees, so cache bytes are not included in the scratch total.
+`actual_resources()` reports each supplied tree independently; direct callers
+passing overlapping trees must not add those disk totals as distinct storage.
+Missing positive process-group RSS remains invalid evidence; direct-child RSS
+is not silently substituted. A secondary child-cleanup timeout is reported to
+stderr without masking the original failure (and is fatal when no earlier failure
+exists). Hypothetical nibble packing is explicitly separate
 and is not a GOZ1 format or implemented side-table representation. A mixed
 schedule's quality gain is not automatically an equal-byte compression win.
 

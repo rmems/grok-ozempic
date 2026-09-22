@@ -30,6 +30,7 @@ from grok1_multiblock_experiment import (  # noqa: E402
     run_chain,
 )
 from grok1_multiblock_lib import npy_dir_fingerprint, resolve_path  # noqa: E402
+from grok1_multiblock_v4_supervisor import _portable_failure_value  # noqa: E402
 
 
 def build_parser():
@@ -86,8 +87,8 @@ def _validate_destinations(destinations, sources):
 
 
 def inspect_inputs(paths, out, side):
+    validate_destinations(paths, out, side)
     inventory = []
-    sources = [paths.embedding_shard]
     _validate_embedding_shard(paths.embedding_shard)
     for block in BLOCKS:
         folder = resolve_path(paths.npy_root, paths.npy_pattern, block).resolve()
@@ -95,9 +96,21 @@ def inspect_inputs(paths, out, side):
         require(folder.is_dir() and pack.is_file(), f"missing input for block {block}")
         experts = _expert_arrays(folder, block)
         inventory.extend(runner.tensor_inventory(p, block) for p in experts)
-        sources.extend([folder, pack])
-    _validate_destinations((out, side), sources)
     return inventory
+
+
+def validate_destinations(paths, out, side):
+    """Resolve source paths without opening inputs or creating any filesystem entries."""
+    sources = [paths.embedding_shard]
+    for block in BLOCKS:
+        sources.extend(
+            resolve_path(root, pattern, block).resolve()
+            for root, pattern in (
+                (paths.npy_root, paths.npy_pattern),
+                (paths.pack_root, paths.pack_pattern),
+            )
+        )
+    _validate_destinations((out, side), sources)
 
 
 def runtime_identity():
@@ -157,7 +170,13 @@ def make_gate(paths, out, side):
         requirements = runner.disk_requirements(out, side, inventory)
         snapshot = runner.resource_snapshot(requirements)
         runner.atomic_json(
-            out / "resource-preflight.json", {"snapshot": snapshot, "requirements": requirements}
+            out / "resource-preflight.json",
+            {
+                "snapshot": snapshot,
+                "requirements": {
+                    k: {"additional": row["additional"]} for k, row in requirements.items()
+                },
+            },
         )
         runner.check_resources(snapshot, {k: r["additional"] for k, r in requirements.items()})
         return inventory
@@ -276,12 +295,28 @@ def run_cell(args, paths, out, side):
     return 0
 
 
+def portable_preflight(args, paths, out, side, result):
+    """Reuse historical path redaction only at the public preflight boundary."""
+    resolved = argparse.Namespace(
+        **{
+            **vars(args),
+            "npy_root": paths.npy_root,
+            "pack_root": paths.pack_root,
+            "embedding_shard": paths.embedding_shard,
+            "out": out,
+            "int4_side_root": side,
+        }
+    )
+    return _portable_failure_value(resolved, result)
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         out = runner.validate_output_path(args.out)
         side = runner.validate_output_path(args.int4_side_root or out / "int4-side")
         paths = paths_for(args)
+        validate_destinations(paths, out, side)
         if args.cell:
             return run_cell(args, paths, out, side)
         require(args.manifest is None, "manifest is internal to a supervised cell")
@@ -309,6 +344,7 @@ def main(argv=None):
                         "model_forward_executed": False,
                     }
                     code = 1
+                result = portable_preflight(args, paths, out, side, result)
                 runner.atomic_json(out / "preflight.json", result)
                 print(json.dumps(result, indent=2))
                 return code

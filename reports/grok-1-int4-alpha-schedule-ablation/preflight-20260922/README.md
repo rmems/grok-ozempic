@@ -9,6 +9,10 @@ was substituted for A, B, C, D or a precision control.
 
 The launcher returned exit 1: `free swap below 2 GiB`. Its JSON outputs are
 preserved alongside this note. No model forward or SAAQ threshold sweep ran.
+Privacy correction, 2026-09-22: the machine-local disk probe `path` was removed
+from `resource-preflight.json`, and the reproduction example now uses a supplied
+model root. All observed values, device identity, implementation identity and
+failure status remain unchanged. This redaction is not a new measurement.
 
 ## Implementation and qualification
 
@@ -57,10 +61,11 @@ From a clean checkout containing the implementation, with the existing NumPy
 environment active:
 
 ```bash
+GROK_MODEL_ROOT=/path/to/xai-grok-1
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 scripts/grok1_alpha_schedule_ablation.py \
-  --npy-root /home/raulmc/.models/xai-grok-1/export-npy \
-  --pack-root /home/raulmc/.models/xai-grok-1/artifacts/multiblock-68 \
-  --embedding-shard /home/raulmc/.models/xai-grok-1/export-npy/embedding__slot_00__token_embedding.npy \
+  --npy-root "$GROK_MODEL_ROOT/export-npy" \
+  --pack-root "$GROK_MODEL_ROOT/artifacts/multiblock-68" \
+  --embedding-shard "$GROK_MODEL_ROOT/export-npy/embedding__slot_00__token_embedding.npy" \
   --out reports/grok-1-int4-alpha-schedule-ablation/new-run \
   --preflight-only
 ```

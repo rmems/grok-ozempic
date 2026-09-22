@@ -1,8 +1,7 @@
 {
   "requirements": {
     "49": {
-      "additional": 19412860928,
-      "path": "/home/raulmc/rmems/grok-ozempic/.worktrees/125-alpha-schedule/reports/grok-1-int4-alpha-schedule-ablation/preflight-20260922"
+      "additional": 19412860928
     }
   },
   "snapshot": {

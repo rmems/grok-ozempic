@@ -45,6 +45,7 @@ def _validate_settings(chain, spec):
 def _validate_chain_metrics(chain):
     require([r["block"] for r in chain["per_block"]] == list(BLOCKS), "invalid block order")
     for row in chain["per_block"]:
+        require(integer(row["block"]), "noninteger metric block identifier")
         _metrics(row["expert_only"])
         _metrics(row["fp16_control"], control=True)
     for key in ("expert_only_chain_exit", "fp16_chain_exit"):
@@ -81,6 +82,7 @@ def _validate_pack(row, block, spec, cell):
 def _validate_packs(packs, spec, cell):
     require([r["block"] for r in packs] == list(BLOCKS), "invalid source coverage")
     for block, row in enumerate(packs):
+        require(integer(row["block"]), "noninteger source block identifier")
         _validate_pack(row, block, spec, cell)
 
 
