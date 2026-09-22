@@ -1,7 +1,7 @@
 """Frozen GH125 four-cell analysis; historical GH85 decisions are not inputs."""
 
 # Keep the existing public API while separating validation responsibilities.
-from grok1_alpha_schedule_contract import (  # noqa: F401
+from grok1_alpha_schedule_contract import (
     BLOCKS,
     CELLS,
     CONTRAST_KEYS,
@@ -20,7 +20,30 @@ from grok1_alpha_schedule_contract import (  # noqa: F401
     sha,
 )
 from grok1_alpha_schedule_evidence import validate_cell
-from grok1_alpha_schedule_measurements import validate_resources  # noqa: F401
+from grok1_alpha_schedule_measurements import validate_resources
+
+__all__ = [
+    "BLOCKS",
+    "CELLS",
+    "CONTRAST_KEYS",
+    "DIRECTIONS",
+    "INTERACTION",
+    "MARGIN_BANDS",
+    "PROTOCOL",
+    "RESOURCE_SCOPE",
+    "SEED",
+    "TOKENS",
+    "TOKEN_IDS_SHA256",
+    "TOP_K",
+    "Cell",
+    "analyze",
+    "number",
+    "paired_contrasts",
+    "require",
+    "sha",
+    "validate_cell",
+    "validate_resources",
+]
 
 
 def paired_contrasts(values):
