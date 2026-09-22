@@ -14,6 +14,7 @@
 .vscode/
 .idea/
 .opencode/
+.worktrees/
 
 # Unreferenced duplicate of .claude/skills/ (GH #96). It is not wired to any
 # tool in this repo, nothing tracked references it, and its copy had already
