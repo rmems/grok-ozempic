@@ -28,13 +28,13 @@ Run the registered Python suite in the task worktree before launch:
 
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 just _python-tests
-ruff check scripts/grok1_alpha_schedule_protocol.py scripts/grok1_alpha_schedule_runner.py scripts/grok1_alpha_schedule_ablation.py scripts/test_grok1_alpha_schedule_protocol.py scripts/test_grok1_alpha_schedule_runner.py
+ruff check scripts/grok1_alpha_schedule_*.py scripts/test_grok1_alpha_schedule_*.py
 ```
 
 Commit the verified implementation before measurement:
 
 ```bash
-git add scripts/grok1_alpha_schedule_protocol.py scripts/grok1_alpha_schedule_runner.py scripts/grok1_alpha_schedule_ablation.py scripts/test_grok1_alpha_schedule_protocol.py scripts/test_grok1_alpha_schedule_runner.py docs/grok1-alpha-schedule-ablation.md justfile .github/workflows/python-scripts.yml CLAUDE.md
+git add scripts/grok1_alpha_schedule_*.py scripts/test_grok1_alpha_schedule_*.py docs/grok1-alpha-schedule-ablation.md justfile .github/workflows/python-scripts.yml CLAUDE.md
 git commit -m "Add matched Grok-1 alpha and schedule ablation harness" --trailer "Co-authored-by: Codex <noreply@openai.com>"
 git status --porcelain --untracked-files=all -- scripts src
 ```
