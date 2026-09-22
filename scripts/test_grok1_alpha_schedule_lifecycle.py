@@ -75,37 +75,35 @@ class LifecycleTests(unittest.TestCase):
     def test_startup_interrupts_replace_stale_success_and_restore_handlers(self):
         for boundary in ("mkdir", "handler"):
             with self.subTest(boundary=boundary):
-                out = self.root / boundary
-                out.mkdir()
-                self.r.atomic_json(out / "outcome.json", {"status": "complete"})
-                old = self.r.signal.getsignal(self.r.signal.SIGTERM)
-                real_mkdir, real_signal = Path.mkdir, self.r.signal.signal
-                fired = False
+                self.check_startup_interrupt(boundary)
 
-                def mkdir(path, *args, **kwargs):
-                    nonlocal fired
-                    if boundary == "mkdir" and path == out and not fired:
-                        fired = True
-                        raise KeyboardInterrupt("startup mkdir")
-                    return real_mkdir(path, *args, **kwargs)
+    def check_startup_interrupt(self, boundary):
+        out = self.root / boundary
+        out.mkdir()
+        self.r.atomic_json(out / "outcome.json", {"status": "complete"})
+        old = self.r.signal.getsignal(self.r.signal.SIGTERM)
+        real_mkdir, real_signal = Path.mkdir, self.r.signal.signal
+        fired = False
 
-                def install(signum, handler):
-                    nonlocal fired
-                    result = real_signal(signum, handler)
-                    if boundary == "handler" and not fired:
-                        fired = True
-                        raise KeyboardInterrupt("startup handler")
-                    return result
+        def mkdir(path, *args, **kwargs):
+            nonlocal fired
+            if boundary == "mkdir" and path == out and not fired:
+                fired = True
+                raise KeyboardInterrupt("startup mkdir")
+            return real_mkdir(path, *args, **kwargs)
 
-                with (
-                    patch.object(Path, "mkdir", mkdir),
-                    patch.object(self.r.signal, "signal", install),
-                ):
-                    self.assertEqual(self.r.supervise(out, Mock(), Mock(), Mock()), 1)
-                self.assertEqual(self.r.signal.getsignal(self.r.signal.SIGTERM), old)
-                self.assertEqual(
-                    json.loads((out / "outcome.json").read_text())["status"], "inconclusive"
-                )
+        def install(signum, handler):
+            nonlocal fired
+            result = real_signal(signum, handler)
+            if boundary == "handler" and not fired:
+                fired = True
+                raise KeyboardInterrupt("startup handler")
+            return result
+
+        with patch.object(Path, "mkdir", mkdir), patch.object(self.r.signal, "signal", install):
+            self.assertEqual(self.r.supervise(out, Mock(), Mock(), Mock()), 1)
+        self.assertEqual(self.r.signal.getsignal(self.r.signal.SIGTERM), old)
+        self.assertEqual(json.loads((out / "outcome.json").read_text())["status"], "inconclusive")
 
     def test_cleanup_timeout_without_original_failure_is_not_suppressed(self):
         proc = Mock(pid=987654321, returncode=0)
