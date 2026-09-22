@@ -10,10 +10,32 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_grok1_alpha_schedule_runner import write_small_inputs
 
 GIB = 1024**3
+
+
+def resource_records(runner, root):
+    inventory = []
+    side = root / "side"
+    side.mkdir()
+    for b in range(4):
+        path = root / f"block_{b:03d}__slot_00__moe_expert__gate.npy"
+        np.save(path, np.ones((2, 3, 4), dtype=np.float32))
+        inventory.append(runner.tensor_inventory(path, b))
+        for base in (side / f"block_{b:03d}", side / "ls-alpha" / f"block_{b:03d}"):
+            base.mkdir(parents=True)
+            np.save(base / f"{path.stem}__scale_f32.npy", np.ones((2, 4), dtype=np.float32))
+        np.save(
+            side / f"block_{b:03d}" / f"{path.stem}__q_int8.npy",
+            np.ones((2, 3, 4), dtype=np.int8),
+        )
+    a = runner.actual_resources(inventory, "A", side, root)
+    d = runner.actual_resources(inventory, "D", side, root)
+    return inventory, a, d
 
 
 class LifecycleTests(unittest.TestCase):
@@ -24,6 +46,23 @@ class LifecycleTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+
+    def test_actual_resource_files_and_hp_retention(self):
+        inventory, a, d = resource_records(self.r, self.root)
+        self.assertEqual(a["actual_code_payload_bytes"], 96)
+        self.assertEqual(a["scale_payload_bytes"], 128)
+        self.assertEqual(a["fp16_expert_payload_bytes"], 0)
+        self.assertEqual(d["fp16_expert_payload_bytes"], 144)
+        self.assertEqual(d["measured_expert_payload_bytes"], 200)
+        for resources in (a, d):
+            self.assertNotIn(str(self.root), json.dumps(resources))
+            for source, published in zip(inventory, resources["tensors"], strict=True):
+                self.assertNotIn("path", published)
+                self.assertEqual(published["tensor_name"], Path(source["path"]).name)
+                for key, value in source.items():
+                    if key != "path":
+                        self.assertEqual(published[key], value)
+                self.assertTrue(Path(source["path"]).is_absolute())
 
     def test_initial_publication_interrupt_replaces_stale_success(self):
         out = self.root / "early-interrupt"
