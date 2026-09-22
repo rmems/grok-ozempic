@@ -41,6 +41,7 @@ from grok1_alpha_schedule_report import render_report  # noqa: E402
 from grok1_multiblock_v4_supervisor import (  # noqa: E402
     _atomic_write_json as atomic_json,
     _atomic_write_text as atomic_text,
+    _portable_failure_value,
     _supervisor_output_lock as output_lock,
 )
 
@@ -221,20 +222,34 @@ def _reap_child(proc):
         print(f"child cleanup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
+@contextmanager
+def _block_child_launch_signals():
+    """Ignore supervisor signals until the child handle is ready for cleanup."""
+    blocked = {}
+    try:
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            blocked[signum] = signal.signal(signum, signal.SIG_IGN)
+        yield
+    finally:
+        for signum, handler in blocked.items():
+            signal.signal(signum, handler)
+
+
 def run_child(command, log, timeout=CHILD_TIMEOUT_SECONDS):
     """Sample aggregate RSS of the new process group and always reap its leader."""
     started, peak, timed_out, unfinished = time.monotonic(), 0, False, False
     with Path(log).open("wb") as stream:
-        # The CLI's command factory fixes the interpreter/script and encodes
-        # validated cell identities and paths as argv elements, never shell text.
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
-        proc = subprocess.Popen(
-            command,
-            stdout=stream,
-            stderr=subprocess.STDOUT,  # nosec B603  # noqa: S603
-            start_new_session=True,
-            shell=False,
-        )
+        with _block_child_launch_signals():
+            # The CLI's command factory fixes the interpreter/script and encodes
+            # validated cell identities and paths as argv elements, never shell text.
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
+            proc = subprocess.Popen(
+                command,
+                stdout=stream,
+                stderr=subprocess.STDOUT,  # nosec B603  # noqa: S603
+                start_new_session=True,
+                shell=False,
+            )
         try:
             while True:
                 peak = max(peak, _group_rss(proc.pid))
@@ -302,7 +317,7 @@ def _collect_cell(command, dest, cell, run_id, context):
     return evidence
 
 
-def supervise(out, prepare, command, gate):
+def supervise(out, prepare, command, gate, portable_args=None):
     """Run four fresh children; callbacks bind the CLI's input/preflight boundary."""
     out = validate_output_path(out)
     with output_lock(out, nonblocking=True):
@@ -318,10 +333,15 @@ def supervise(out, prepare, command, gate):
         def publish():
             # JSON is authoritative. Writing inconclusive first invalidates any
             # old success before expensive preparation or model work starts.
-            atomic_json(out / "outcome.json", payload)
-            atomic_text(out / "results.md", render_report(payload))
+            published = (
+                _portable_failure_value(portable_args, payload)
+                if portable_args is not None
+                else payload
+            )
+            atomic_json(out / "outcome.json", published)
+            atomic_text(out / "results.md", render_report(published))
             if run_dir is not None:
-                atomic_json(run_dir / "outcome.json", payload)
+                atomic_json(run_dir / "outcome.json", published)
 
         try:
             with interrupt_handlers():

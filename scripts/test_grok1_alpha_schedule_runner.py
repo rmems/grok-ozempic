@@ -377,7 +377,10 @@ class RunnerTests(unittest.TestCase):
         # Fixed local CLI help probe; no shell and no caller-supplied argv.
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
         help_result = subprocess.run(  # nosec B603
-            [sys.executable, str(script), "--help"], capture_output=True, text=True
+            [sys.executable, str(script), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         import grok1_alpha_schedule_ablation as cli
@@ -543,6 +546,20 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(data["provenance"]["token_ids"][-1], 131061)
         self.assertEqual(data["resources"]["actual_code_payload_bytes"], 72)
         self.assertEqual(data["resources"]["fp16_expert_payload_bytes"], 432)
+
+
+    def test_contrast_row_formats_missing_contrasts_as_unavailable(self):
+        from grok1_alpha_schedule_report import _contrast_row
+
+        row = {
+            "favorable_direction": "lower",
+            "values": {"A": None, "B": 1.0, "C": None, "D": 2.0},
+            "contrasts": None,
+        }
+        line = _contrast_row("metric/name", row)
+        self.assertEqual(line.count("empty band"), 2)
+        self.assertEqual(line.count("unavailable"), 5)
+        self.assertNotIn("empty band", line.split("|")[-5:])
 
 
 if __name__ == "__main__":

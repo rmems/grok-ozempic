@@ -222,6 +222,106 @@ class LifecycleTests(unittest.TestCase):
             self.assertNotIn(str(self.root), (out / name).read_text())
         self.assertEqual(len(json.loads((out / "preflight.json").read_text())["inventory"]), 12)
 
+    def test_int4_side_root_equal_out_rejected_without_writes(self):
+        import grok1_alpha_schedule_ablation as cli
+
+        source = self.root / "sources"
+        source.mkdir()
+        out = self.root / "report"
+        args = [
+            "--npy-root",
+            str(source),
+            "--pack-root",
+            str(source),
+            "--embedding-shard",
+            str(source / "missing.npy"),
+            "--out",
+            str(out),
+            "--int4-side-root",
+            str(out),
+            "--preflight-only",
+        ]
+        before = sorted(self.root.rglob("*"))
+        with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(args), 1)
+        self.assertEqual(sorted(self.root.rglob("*")), before)
+
+    def test_int4_side_root_under_runs_rejected_without_writes(self):
+        import grok1_alpha_schedule_ablation as cli
+
+        source = self.root / "sources"
+        source.mkdir()
+        out = self.root / "report"
+        side = out / "runs" / "run-id" / "A"
+        args = [
+            "--npy-root",
+            str(source),
+            "--pack-root",
+            str(source),
+            "--embedding-shard",
+            str(source / "missing.npy"),
+            "--out",
+            str(out),
+            "--int4-side-root",
+            str(side),
+            "--preflight-only",
+        ]
+        before = sorted(self.root.rglob("*"))
+        with redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(args), 1)
+        self.assertEqual(sorted(self.root.rglob("*")), before)
+
+    def test_preflight_interrupt_replaces_stale_passed(self):
+        import grok1_alpha_schedule_ablation as cli
+
+        npy, packs, embedding = write_small_inputs(self.root)
+        out = self.root / "preflight-stale"
+        out.mkdir()
+        (out / "preflight.json").write_text(json.dumps({"status": "preflight_passed"}))
+        args = [
+            "--npy-root",
+            str(npy),
+            "--pack-root",
+            str(packs),
+            "--embedding-shard",
+            str(embedding),
+            "--out",
+            str(out),
+            "--preflight-only",
+        ]
+
+        with (
+            patch.object(self.r, "resource_snapshot", side_effect=KeyboardInterrupt("preflight")),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(cli.main(args), 1)
+        self.assertEqual(json.loads((out / "preflight.json").read_text())["status"], "inconclusive")
+
+    def test_supervise_failure_redacts_machine_local_paths(self):
+        import argparse
+
+        npy, packs, embedding = write_small_inputs(self.root)
+        out = self.root / "failed-run"
+        portable = argparse.Namespace(
+            npy_root=npy.resolve(),
+            pack_root=packs.resolve(),
+            embedding_shard=embedding.resolve(),
+            out=out.resolve(),
+            int4_side_root=(out / "int4-side").resolve(),
+            npy_pattern="goz68-block_{block:03d}-attn",
+            pack_pattern="block_{block:03d}-attention_plus_expert.goz1",
+        )
+
+        def gate():
+            raise FileNotFoundError(f"missing tensor under {npy}")
+
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.r.supervise(out, Mock(), Mock(), gate, portable), 1)
+        published = (out / "outcome.json").read_text()
+        self.assertNotIn(str(npy), published)
+        self.assertIn("<NPY_ROOT>", published)
+        self.assertNotIn(str(npy), (out / "results.md").read_text())
+
     def test_source_overlap_rejected_without_any_writes(self):
         import grok1_alpha_schedule_ablation as cli
 

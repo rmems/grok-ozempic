@@ -5,11 +5,17 @@ from grok1_alpha_schedule_contract import CELLS, CONTRAST_KEYS
 
 def _contrast_row(name, row):
     vals = [row["values"][cell] for cell in CELLS]
-    deltas = [None] * len(CONTRAST_KEYS)
-    if row["contrasts"]:
-        deltas = [row["contrasts"][key] for key in CONTRAST_KEYS]
-    formatted = ["empty band" if v is None else f"{v:.9g}" for v in vals + deltas]
-    return "| " + " | ".join([name, row["favorable_direction"], *formatted]) + " |"
+    formatted_vals = ["empty band" if v is None else f"{v:.9g}" for v in vals]
+    contrasts = row.get("contrasts")
+    if contrasts:
+        formatted_deltas = [f"{contrasts[key]:.9g}" for key in CONTRAST_KEYS]
+    else:
+        formatted_deltas = ["unavailable"] * len(CONTRAST_KEYS)
+    return (
+        "| "
+        + " | ".join([name, row["favorable_direction"], *formatted_vals, *formatted_deltas])
+        + " |"
+    )
 
 
 def _attribution_lines(contrasts):

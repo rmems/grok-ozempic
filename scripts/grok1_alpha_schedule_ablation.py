@@ -86,6 +86,18 @@ def _validate_destinations(destinations, sources):
             )
 
 
+def _validate_cache_scratch_layout(out, side):
+    """Keep INT4 cache accounting disjoint from supervised cell scratch under out/runs."""
+    resolved_out = out.resolve()
+    resolved_side = side.resolve()
+    runs_root = resolved_out / "runs"
+    require(resolved_side != resolved_out, "int4-side-root must not equal --out")
+    require(
+        not runs_root.is_relative_to(resolved_side) and not resolved_side.is_relative_to(runs_root),
+        "int4-side-root overlaps supervised cell scratch under --out/runs",
+    )
+
+
 def inspect_inputs(paths, out, side):
     validate_destinations(paths, out, side)
     inventory = []
@@ -110,6 +122,7 @@ def validate_destinations(paths, out, side):
                 (paths.pack_root, paths.pack_pattern),
             )
         )
+    _validate_cache_scratch_layout(out, side)
     _validate_destinations((out, side), sources)
 
 
@@ -295,9 +308,9 @@ def run_cell(args, paths, out, side):
     return 0
 
 
-def portable_preflight(args, paths, out, side, result):
-    """Reuse historical path redaction only at the public preflight boundary."""
-    resolved = argparse.Namespace(
+def portable_args(args, paths, out, side):
+    """Resolved CLI paths for portable failure publication."""
+    return argparse.Namespace(
         **{
             **vars(args),
             "npy_root": paths.npy_root,
@@ -307,7 +320,11 @@ def portable_preflight(args, paths, out, side, result):
             "int4_side_root": side,
         }
     )
-    return _portable_failure_value(resolved, result)
+
+
+def portable_preflight(args, paths, out, side, result):
+    """Reuse historical path redaction only at the public preflight boundary."""
+    return _portable_failure_value(portable_args(args, paths, out, side), result)
 
 
 def main(argv=None):
@@ -323,36 +340,58 @@ def main(argv=None):
         gate = make_gate(paths, out, side)
         if args.preflight_only:
             with runner.output_lock(out, nonblocking=True):
-                out.mkdir(parents=True, exist_ok=True)
-                try:
-                    inventory = gate()
-                    implementation = runner.clean_implementation()
-                    result = {
-                        "protocol": PROTOCOL,
-                        "status": "preflight_passed",
-                        "inventory": inventory,
-                        "implementation": implementation,
-                        "model_forward_executed": False,
-                        "content_hashes_verified": False,
-                    }
-                    code = 0
-                except (Exception, KeyboardInterrupt) as exc:
-                    result = {
-                        "protocol": PROTOCOL,
-                        "status": "inconclusive",
-                        "error": str(exc),
-                        "model_forward_executed": False,
-                    }
-                    code = 1
-                result = portable_preflight(args, paths, out, side, result)
-                runner.atomic_json(out / "preflight.json", result)
-                print(json.dumps(result, indent=2))
-                return code
+                with runner.interrupt_handlers():
+                    out.mkdir(parents=True, exist_ok=True)
+                    result = portable_preflight(
+                        args,
+                        paths,
+                        out,
+                        side,
+                        {
+                            "protocol": PROTOCOL,
+                            "status": "inconclusive",
+                            "error": "preflight started; not yet validated",
+                            "model_forward_executed": False,
+                        },
+                    )
+                    runner.atomic_json(out / "preflight.json", result)
+
+                    def publish_preflight(record):
+                        runner.atomic_json(
+                            out / "preflight.json",
+                            portable_preflight(args, paths, out, side, record),
+                        )
+
+                    try:
+                        inventory = gate()
+                        implementation = runner.clean_implementation()
+                        result = {
+                            "protocol": PROTOCOL,
+                            "status": "preflight_passed",
+                            "inventory": inventory,
+                            "implementation": implementation,
+                            "model_forward_executed": False,
+                            "content_hashes_verified": False,
+                        }
+                        code = 0
+                    except (Exception, KeyboardInterrupt) as exc:
+                        result = {
+                            "protocol": PROTOCOL,
+                            "status": "inconclusive",
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "model_forward_executed": False,
+                        }
+                        code = 1
+                    publish_preflight(result)
+                    print(json.dumps(portable_preflight(args, paths, out, side, result), indent=2))
+                    return code
+        portable = portable_args(args, paths, out, side)
         return runner.supervise(
             out,
             lambda: prepare_context(paths, inspect_inputs(paths, out, side)),
             make_command(args, side),
             gate,
+            portable,
         )
     except (Exception, KeyboardInterrupt) as exc:
         print(f"inconclusive: {exc}", file=sys.stderr)
