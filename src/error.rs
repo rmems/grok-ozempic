@@ -59,6 +59,9 @@ pub enum GrokOzempicError {
 
     #[error("backend not available: {0}")]
     BackendNotAvailable(String),
+
+    #[error("hybrid stage planning error: {0}")]
+    StagePlan(String),
 }
 
 pub type Result<T> = std::result::Result<T, GrokOzempicError>;

@@ -18,6 +18,10 @@ pub use core::dry_run::{
     CoverageStatus, CoverageSummary, DryRunPlanner, DryRunReport, PlannedKernelCall,
 };
 pub use core::inventory::{InventoryTensor, ModelInventory};
+pub use core::stage_planner::{
+    HybridStagePlanner, PrecisionTier, StagePlan, StagePlanningReport, StageRequest,
+    StubStagePlanner,
+};
 pub use types::{
     GROK1_HIDDEN_DIM, HybridConfig, HybridOutput, QuantizationConfig, QuantizationInputFormat,
     TelemetrySnapshot, TensorPrecision, quantize_goz1_config, validate_gif_threshold,
