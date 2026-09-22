@@ -44,6 +44,7 @@ _python-tests:
       scripts.test_grok1_multiblock_v4_supervisor
       scripts.test_grok1_alpha_schedule_protocol
       scripts.test_grok1_alpha_schedule_runner
+      scripts.test_grok1_alpha_schedule_lifecycle
       scripts.test_grok1_block_forward
       scripts.test_grok1_block_weights
       scripts.test_grok1_tau_quality_sweep
