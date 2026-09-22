@@ -26,7 +26,7 @@ use crate::{
     core::{
         manifest::{DissectManifest, embedded_grok1_baseline, load_manifest},
         npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
-        precision::decide as precision_decide,
+        precision::decide_for_tensor as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
         selection::{TensorClass, classify},
         weight_pack::{
@@ -367,6 +367,16 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
         "oz.gif_threshold_scope".into(),
         PackMetaValue::Str("baseline_only_not_applied".into()),
     );
+    // Provenance marker for the SAAQ τ source: when a saaq-tau-map was
+    // supplied, per-tensor gif_threshold values may come from it (precedence
+    // 2 — see core::saaq). The applied values remain in the v3 tensor rows;
+    // this key just records that the source was active.
+    if let Some(map) = &config.saaq_tau_map {
+        metadata.insert(
+            "oz.saaq_tau_entries".into(),
+            PackMetaValue::U32(map.entries.len() as u32),
+        );
+    }
     append_grok1_arch_metadata(&mut metadata);
 
     let out_file = File::create(&config.output_path).map_err(GrokOzempicError::Io)?;
@@ -585,7 +595,7 @@ fn classify_and_decide(
     {
         return Err(GrokOzempicError::ManifestV2UnmatchedTensor { name: name.into() });
     }
-    let (precision, gif_threshold) = precision_decide(&class, dissect_manifest, config)?;
+    let (precision, gif_threshold) = precision_decide(name, &class, dissect_manifest, config)?;
     Ok((class, precision, gif_threshold))
 }
 

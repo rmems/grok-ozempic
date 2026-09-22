@@ -9,23 +9,24 @@ use std::path::{Path, PathBuf};
 
 use crate::CliInputFormat;
 
+/// Option-bearing `quantize-goz1` flags bundled so function arity stays under
+// the clippy/qlty thresholds as new τ sources are added.
+pub(crate) struct QuantizeGoz1Options {
+    pub manifest: Option<PathBuf>,
+    pub gif_threshold: Option<f32>,
+    pub use_embedded_baseline: bool,
+    pub saaq_tau_map: Option<PathBuf>,
+    pub verify: bool,
+}
+
 pub(crate) fn cmd_quantize_goz1(
     input_dir: PathBuf,
     output: PathBuf,
-    manifest: Option<PathBuf>,
     input_format: CliInputFormat,
-    gif_threshold: Option<f32>,
-    use_embedded_baseline: bool,
-    verify: bool,
+    options: QuantizeGoz1Options,
 ) -> anyhow::Result<()> {
-    let config = prepare_quantize_goz1(
-        &input_dir,
-        &output,
-        manifest,
-        input_format,
-        gif_threshold,
-        use_embedded_baseline,
-    )?;
+    let verify = options.verify;
+    let config = prepare_quantize_goz1(&input_dir, &output, input_format, options)?;
     let stats =
         run_quantization(&config).map_err(|e| anyhow::anyhow!("GOZ1 quantization failed: {e}"))?;
     print_quantize_goz1_summary(&output, &stats);
@@ -88,23 +89,35 @@ fn validate_goz1_cli_paths(
 fn prepare_quantize_goz1(
     input_dir: &Path,
     output: &Path,
-    manifest: Option<PathBuf>,
     input_format: CliInputFormat,
-    gif_threshold: Option<f32>,
-    use_embedded_baseline: bool,
+    options: QuantizeGoz1Options,
 ) -> anyhow::Result<QuantizationConfig> {
+    let QuantizeGoz1Options {
+        manifest,
+        gif_threshold,
+        use_embedded_baseline,
+        saaq_tau_map,
+        verify: _,
+    } = options;
     let (input_dir_s, output_s) =
         validate_goz1_cli_paths(input_dir, output, manifest.as_deref(), gif_threshold)?;
     // Match resolve_manifest precedence messaging (env wins over embedded).
     note_manifest_policy(manifest.is_none(), use_embedded_baseline);
-    Ok(goz1_config_from_cli(
+    let saaq_tau_map = saaq_tau_map
+        .as_deref()
+        .map(grok_ozempic::load_saaq_tau_map)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("SAAQ tau map load failed: {e}"))?;
+    let mut config = goz1_config_from_cli(
         input_dir_s,
         output_s,
         input_format,
         manifest,
         gif_threshold,
         use_embedded_baseline,
-    ))
+    );
+    config.saaq_tau_map = saaq_tau_map;
+    Ok(config)
 }
 
 fn print_quantize_goz1_summary(output: &Path, stats: &[ShardStats]) {
@@ -423,6 +436,51 @@ mod tests {
         assert!(
             err.to_string().contains("collides"),
             "expected manifest/output identity collision, got {err}"
+        );
+    }
+
+    #[test]
+    fn prepare_loads_saaq_tau_map_into_config() {
+        let dir = tempfile_dir();
+        let map_path = dir.join("tau.json");
+        fs::write(
+            &map_path,
+            r#"{"entries": [{"pattern": "a.b", "gif_threshold": 0.65}]}"#,
+        )
+        .unwrap();
+        let opts = QuantizeGoz1Options {
+            manifest: None,
+            gif_threshold: None,
+            use_embedded_baseline: true,
+            saaq_tau_map: Some(map_path),
+            verify: false,
+        };
+        let cfg =
+            prepare_quantize_goz1(&dir, &dir.join("out.goz1"), CliInputFormat::Npy, opts).unwrap();
+        assert_eq!(cfg.saaq_tau_map.unwrap().lookup("a.b"), Some(0.65));
+    }
+
+    #[test]
+    fn prepare_rejects_bad_saaq_tau_map() {
+        let dir = tempfile_dir();
+        let map_path = dir.join("bad.json");
+        fs::write(
+            &map_path,
+            r#"{"entries": [{"pattern": "a.b", "gif_threshold": -0.1}]}"#,
+        )
+        .unwrap();
+        let opts = QuantizeGoz1Options {
+            manifest: None,
+            gif_threshold: None,
+            use_embedded_baseline: true,
+            saaq_tau_map: Some(map_path),
+            verify: false,
+        };
+        let err = prepare_quantize_goz1(&dir, &dir.join("out.goz1"), CliInputFormat::Npy, opts)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("SAAQ tau map"),
+            "expected saaq map error, got {err}"
         );
     }
 

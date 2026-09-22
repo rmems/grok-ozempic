@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::saaq::SaaqTauMap;
+
 // ---------------------------------------------------------------------------
 // Quantization pipeline types
 // ---------------------------------------------------------------------------
@@ -127,6 +129,19 @@ pub struct QuantizationConfig {
     /// pick up the reference manifest without pointing at a file.
     #[serde(default)]
     pub use_embedded_baseline: bool,
+    /// Optional SAAQ-derived per-tensor `gif_threshold` source.
+    ///
+    /// When set, [`crate::core::precision::decide_for_tensor`] resolves the
+    /// effective threshold as: explicit `ternary_candidates[].gif_threshold`,
+    /// then this map, then `manifest.defaults.gif_threshold`, then
+    /// [`Self::gif_threshold`]. See [`crate::core::saaq`] for the file format
+    /// and the dry-run caveat.
+    ///
+    /// The map is produced externally (corinth-canal `saaq-tau-map` JSON) and
+    /// loaded via [`crate::core::saaq::load_saaq_tau_map`]; it is runtime-only
+    /// state, never (de)serialized as part of this config.
+    #[serde(skip)]
+    pub saaq_tau_map: Option<SaaqTauMap>,
 }
 
 impl Default for QuantizationConfig {
@@ -139,6 +154,7 @@ impl Default for QuantizationConfig {
             input_format: QuantizationInputFormat::Safetensors,
             manifest_path: None,
             use_embedded_baseline: false,
+            saaq_tau_map: None,
         }
     }
 }

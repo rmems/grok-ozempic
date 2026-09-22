@@ -12,6 +12,7 @@ pub mod ozempic;
 pub mod precision;
 pub mod projector;
 pub mod quantizer;
+pub mod saaq;
 pub mod selection;
 pub mod stream;
 pub mod weight_pack;
