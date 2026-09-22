@@ -392,9 +392,12 @@ def actual_resources(inventory, cell, side_root, out):
     nonexpert = _nonexpert_bytes(inventory)
     records = []
     for row in inventory:
+        # Keep local paths in the input inventory only; reports travel across hosts.
+        record = {key: value for key, value in row.items() if key != "path"}
+        record["tensor_name"] = Path(row["path"]).name
         if row["block"] in spec.hp:
             fp16 += row["parameters"] * np.dtype("float16").itemsize
-            records.append({**row, "representation": "FP16 weight roundtrip; FP32 compute"})
+            records.append({**record, "representation": "FP16 weight roundtrip; FP32 compute"})
             continue
         parameters, scale_bytes, code_file_bytes, scale_file_bytes = _quantized_tensor_cost(
             row, spec, side_root
@@ -405,7 +408,7 @@ def actual_resources(inventory, cell, side_root, out):
         scalefiles += scale_file_bytes
         records.append(
             {
-                **row,
+                **record,
                 "representation": "int8 codes / float32 scales",
                 "code_file_bytes": code_file_bytes,
                 "scale_file_bytes": scale_file_bytes,

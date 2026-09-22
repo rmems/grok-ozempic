@@ -368,6 +368,35 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(a["fp16_expert_payload_bytes"], 0)
         self.assertEqual(d["fp16_expert_payload_bytes"], 144)
         self.assertEqual(d["measured_expert_payload_bytes"], 200)
+        for resources in (a, d):
+            self.assertNotIn(str(self.root), json.dumps(resources))
+            for source, published in zip(inventory, resources["tensors"], strict=True):
+                self.assertNotIn("path", published)
+                self.assertEqual(published["tensor_name"], Path(source["path"]).name)
+                for key, value in source.items():
+                    if key != "path":
+                        self.assertEqual(published[key], value)
+                self.assertTrue(Path(source["path"]).is_absolute())
+
+        def command(cell, dest, run_id, context):
+            data = fixture(cell)
+            data["run_id"] = run_id
+            data["resources"] = a if cell in "AB" else d
+            return self.metrics_command(dest, json.dumps(data))
+
+        out = self.root / "portable-evidence"
+        self.assertEqual(self.r.supervise(out, lambda: {}, command, lambda: None), 0)
+        outcome = json.loads((out / "outcome.json").read_text())
+        self.assertEqual(outcome["status"], "complete")
+        artifacts = list(out.glob("runs/*/*/metrics.json"))
+        artifacts += list(out.glob("runs/*/*/validated.json"))
+        artifacts += list(out.glob("runs/*/outcome.json")) + [out / "outcome.json"]
+        self.assertEqual(len(artifacts), 10)
+        for artifact in artifacts:
+            self.assertNotIn(str(self.root), artifact.read_text())
+        for cell in "ABCD":
+            expected = a if cell in "AB" else d
+            self.assertEqual(outcome["cells"][cell]["resources"]["tensors"], expected["tensors"])
 
     def test_cli_help_and_preflight_failure_without_model_or_git(self):
         script = Path(__file__).with_name("grok1_alpha_schedule_ablation.py")
