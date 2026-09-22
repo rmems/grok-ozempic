@@ -547,7 +547,6 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(data["resources"]["actual_code_payload_bytes"], 72)
         self.assertEqual(data["resources"]["fp16_expert_payload_bytes"], 432)
 
-
     def test_contrast_row_formats_missing_contrasts_as_unavailable(self):
         from grok1_alpha_schedule_report import _contrast_row
 

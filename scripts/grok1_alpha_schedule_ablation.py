@@ -327,6 +327,52 @@ def portable_preflight(args, paths, out, side, result):
     return _portable_failure_value(portable_args(args, paths, out, side), result)
 
 
+def run_preflight_only(args, paths, out, side, gate):
+    """Fail-closed preflight with stale-record invalidation and portable publication."""
+    with runner.output_lock(out, nonblocking=True):
+        with runner.interrupt_handlers():
+            out.mkdir(parents=True, exist_ok=True)
+            starter = {
+                "protocol": PROTOCOL,
+                "status": "inconclusive",
+                "error": "preflight started; not yet validated",
+                "model_forward_executed": False,
+            }
+            runner.atomic_json(
+                out / "preflight.json", portable_preflight(args, paths, out, side, starter)
+            )
+
+            def publish_preflight(record):
+                runner.atomic_json(
+                    out / "preflight.json",
+                    portable_preflight(args, paths, out, side, record),
+                )
+
+            try:
+                inventory = gate()
+                implementation = runner.clean_implementation()
+                result = {
+                    "protocol": PROTOCOL,
+                    "status": "preflight_passed",
+                    "inventory": inventory,
+                    "implementation": implementation,
+                    "model_forward_executed": False,
+                    "content_hashes_verified": False,
+                }
+                code = 0
+            except (Exception, KeyboardInterrupt) as exc:
+                result = {
+                    "protocol": PROTOCOL,
+                    "status": "inconclusive",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "model_forward_executed": False,
+                }
+                code = 1
+            publish_preflight(result)
+            print(json.dumps(portable_preflight(args, paths, out, side, result), indent=2))
+            return code
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
@@ -339,52 +385,7 @@ def main(argv=None):
         require(args.manifest is None, "manifest is internal to a supervised cell")
         gate = make_gate(paths, out, side)
         if args.preflight_only:
-            with runner.output_lock(out, nonblocking=True):
-                with runner.interrupt_handlers():
-                    out.mkdir(parents=True, exist_ok=True)
-                    result = portable_preflight(
-                        args,
-                        paths,
-                        out,
-                        side,
-                        {
-                            "protocol": PROTOCOL,
-                            "status": "inconclusive",
-                            "error": "preflight started; not yet validated",
-                            "model_forward_executed": False,
-                        },
-                    )
-                    runner.atomic_json(out / "preflight.json", result)
-
-                    def publish_preflight(record):
-                        runner.atomic_json(
-                            out / "preflight.json",
-                            portable_preflight(args, paths, out, side, record),
-                        )
-
-                    try:
-                        inventory = gate()
-                        implementation = runner.clean_implementation()
-                        result = {
-                            "protocol": PROTOCOL,
-                            "status": "preflight_passed",
-                            "inventory": inventory,
-                            "implementation": implementation,
-                            "model_forward_executed": False,
-                            "content_hashes_verified": False,
-                        }
-                        code = 0
-                    except (Exception, KeyboardInterrupt) as exc:
-                        result = {
-                            "protocol": PROTOCOL,
-                            "status": "inconclusive",
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "model_forward_executed": False,
-                        }
-                        code = 1
-                    publish_preflight(result)
-                    print(json.dumps(portable_preflight(args, paths, out, side, result), indent=2))
-                    return code
+            return run_preflight_only(args, paths, out, side, gate)
         portable = portable_args(args, paths, out, side)
         return runner.supervise(
             out,
