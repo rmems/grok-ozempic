@@ -19,6 +19,7 @@ from grok1_ordered_inputs import (  # noqa: E402
     SCHEMA_VERSION,
     SEED,
     InputManifestError,
+    OrderedWindow,
     load_ordered_windows,
     sha256_file,
     token_content_sha256,
@@ -126,7 +127,14 @@ class OrderedInputTests(unittest.TestCase):
 
     def test_window_is_hashable_without_hashing_token_ids(self):
         _, windows = load_ordered_windows(self.write(), allow_fixture=True)
-        self.assertEqual(len({windows[0], windows[0]}), 1)
+        loaded = windows[0]
+        clone = OrderedWindow(
+            loaded.window_id, loaded.partition, loaded.document_id, loaded.token_ids
+        )
+        self.assertEqual(hash(loaded), hash(clone))
+        unique = {loaded}
+        unique.add(clone)
+        self.assertEqual(len(unique), 1)
 
     def test_historical_sampled_id_path_remains_sorted_without_replacement(self):
         # Regression fence: the new loader must not silently "fix" old evidence.
