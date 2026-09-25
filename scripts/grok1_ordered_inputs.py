@@ -38,7 +38,26 @@ class OrderedWindow:
     window_id: str
     partition: str
     document_id: str
-    token_ids: np.ndarray = field(hash=False)
+    token_ids: np.ndarray = field(compare=False, hash=False)
+
+
+@dataclass(frozen=True)
+class _SourceSpan:
+    document_id: str
+    start: int
+    end: int
+    partition: str
+    window_id: str
+
+
+@dataclass(frozen=True)
+class _WindowLoadState:
+    root: Path
+    vocab_size: int
+    expected_count: int
+    ids_seen: set[str] = field(compare=False, hash=False)
+    content_seen: dict[str, str] = field(compare=False, hash=False)
+    ranges: list[_SourceSpan] = field(compare=False, hash=False)
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -208,19 +227,16 @@ def _source_range(spec: dict[str, Any], window_id: str) -> tuple[int, int]:
     return start, end
 
 
-def _record_range(
-    ranges: list[tuple[str, int, int, str, str]],
-    document_id: str,
-    start: int,
-    end: int,
-    partition: str,
-    window_id: str,
-) -> None:
-    for old_doc, old_start, old_end, old_partition, old_id in ranges:
-        if document_id == old_doc and max(start, old_start) < min(end, old_end):
-            detail = "split leakage" if partition != old_partition else "overlapping source ranges"
-            raise InputManifestError(f"{detail}: {window_id} overlaps {old_id}")
-    ranges.append((document_id, start, end, partition, window_id))
+def _record_range(ranges: list[_SourceSpan], span: _SourceSpan) -> None:
+    for old in ranges:
+        if span.document_id == old.document_id and max(span.start, old.start) < min(
+            span.end, old.end
+        ):
+            detail = (
+                "split leakage" if span.partition != old.partition else "overlapping source ranges"
+            )
+            raise InputManifestError(f"{detail}: {span.window_id} overlaps {old.window_id}")
+    ranges.append(span)
 
 
 def _verify_window_digests(
@@ -264,23 +280,16 @@ def _parse_window_header(
     return spec, window_id, partition, document_id, start, end
 
 
-def _load_one_window(
-    raw: Any,
-    index: int,
-    root: Path,
-    vocab_size: int,
-    expected_count: int,
-    ids_seen: set[str],
-    content_seen: dict[str, str],
-    ranges: list[tuple[str, int, int, str, str]],
-) -> OrderedWindow:
-    spec, window_id, partition, document_id, start, end = _parse_window_header(raw, index, ids_seen)
-    token_path = _relative_file(root, spec.get("token_path"), f"{window_id}.token_path")
-    ids = _load_ids(token_path, vocab_size, window_id, expected_count)
+def _load_one_window(raw: Any, index: int, state: _WindowLoadState) -> OrderedWindow:
+    spec, window_id, partition, document_id, start, end = _parse_window_header(
+        raw, index, state.ids_seen
+    )
+    token_path = _relative_file(state.root, spec.get("token_path"), f"{window_id}.token_path")
+    ids = _load_ids(token_path, state.vocab_size, window_id, state.expected_count)
     if spec.get("token_count") != ids.size:
-        raise InputManifestError(f"{window_id}: expected exactly {expected_count} tokens")
-    _verify_window_digests(spec, token_path, ids, window_id, content_seen)
-    _record_range(ranges, document_id, start, end, partition, window_id)
+        raise InputManifestError(f"{window_id}: expected exactly {state.expected_count} tokens")
+    _verify_window_digests(spec, token_path, ids, window_id, state.content_seen)
+    _record_range(state.ranges, _SourceSpan(document_id, start, end, partition, window_id))
     return OrderedWindow(window_id, partition, document_id, ids)
 
 
@@ -290,17 +299,8 @@ def _load_windows(
     raw_windows = manifest.get("windows")
     if not isinstance(raw_windows, list) or not raw_windows:
         raise InputManifestError("windows must be a non-empty array")
-    windows: list[OrderedWindow] = []
-    ids_seen: set[str] = set()
-    content_seen: dict[str, str] = {}
-    ranges: list[tuple[str, int, int, str, str]] = []
-    for index, raw in enumerate(raw_windows):
-        windows.append(
-            _load_one_window(
-                raw, index, root, vocab_size, expected_count, ids_seen, content_seen, ranges
-            )
-        )
-    return tuple(windows)
+    state = _WindowLoadState(root, vocab_size, expected_count, set(), {}, [])
+    return tuple(_load_one_window(raw, index, state) for index, raw in enumerate(raw_windows))
 
 
 def _require_v1_partitions(windows: tuple[OrderedWindow, ...]) -> None:
