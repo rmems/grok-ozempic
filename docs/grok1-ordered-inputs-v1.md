@@ -19,14 +19,18 @@ Exactly one `calibration` and two `held_out` windows are accepted. Each window
 pins a unique ID, document ID, source range (`start`, exclusive `end`),
 `sequence_boundary: "independent"`, a relative `.npy` token path, token count,
 whole-file SHA-256, order-sensitive token SHA-256, and order-independent
-multiset/content SHA-256. Arrays must be one-dimensional integer arrays with
-every ID in the declared vocabulary. The loader returns owned, read-only int64
-arrays without sorting or deduplication, so causal order and repeats survive.
+multiset/content SHA-256. Arrays must be one-dimensional integer `.npy` arrays with
+every ID in the declared vocabulary and representable in `int64`. The loader
+returns owned, read-only int64 arrays without sorting or deduplication, so
+causal order and repeats survive.
 
-Validation fails closed on digest changes, non-integer/out-of-range IDs,
+Validation fails closed on digest changes, non-`.npy` token files, token
+counts that do not match `window_tokens` (checked before the owned copy),
+non-integer/out-of-range IDs, IDs that wrap when canonicalized to `int64`,
 overlapping ranges in a document, cross-partition range leakage, identical
 token multisets, short/missing partitions, non-independent boundaries, absolute
-or parent-traversing paths, and sampled/mixed input modes. The content check is
+or parent-traversing paths, resolved paths that leave the manifest directory
+(including via symlinks), and sampled/mixed input modes. The content check is
 exact-token-multiset equality only; it does not detect semantic, substring, or
 general near duplicates. Window producers must perform and document stronger
 near-duplicate review before freezing a production manifest.
