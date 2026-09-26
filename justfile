@@ -48,6 +48,7 @@ _python-tests:
       scripts.test_grok1_block_forward
       scripts.test_grok1_block_weights
       scripts.test_grok1_tau_quality_sweep
+      scripts.test_grok1_ordered_inputs
     )
     for m in "${mods[@]}"; do
       echo "+ python3 -m unittest ${m} -v"

@@ -91,6 +91,9 @@ jobs:
       - name: Unit tests (tau quality sweep)
         run: python3 -m unittest scripts.test_grok1_tau_quality_sweep -v
 
+      - name: Unit tests (ordered text inputs)
+        run: python3 -m unittest scripts.test_grok1_ordered_inputs -v
+
       - name: Codex co-author hook contract
         run: |
           jq empty .codex/hooks.json
