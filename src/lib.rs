@@ -27,6 +27,10 @@ pub use core::inventory::{InventoryTensor, ModelInventory, VecInventory};
 pub use core::model::ModelProfile;
 pub use core::models::grok1::Grok1Profile;
 pub use core::models::toy_moe::{ToyMoeInventory, ToyMoeProfile};
+pub use core::stage_planner::{
+    HybridStagePlanner, PrecisionTier, StagePlan, StagePlanningReport, StageRequest,
+    StubStagePlanner,
+};
 pub use types::{
     GROK1_HIDDEN_DIM, HybridConfig, HybridOutput, QuantizationConfig, QuantizationInputFormat,
     TelemetrySnapshot, TensorPrecision, quantize_goz1_config, validate_gif_threshold,

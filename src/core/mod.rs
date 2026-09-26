@@ -14,6 +14,7 @@ pub mod projector;
 pub mod quantizer;
 pub mod saaq;
 pub mod selection;
+pub mod stage_planner;
 pub mod stream;
 pub mod weight_pack;
 pub mod weight_pack_read;
