@@ -47,12 +47,25 @@ pub enum GrokOzempicError {
     ManifestInvalidPrecision { got: String },
 
     #[error(
-        "tensor {name:?} matches no rule in the V2 structural manifest; refusing defaults \
-         fallthrough so preserve tensors (routers/norms) cannot be silently ternary-quantized. \
-         Use structural input names (block_{{NNN}}.slot_{{SS}}.{{kind}}, e.g. export-script npy \
-         stems) or supply a V1 manifest for legacy-named inputs"
+        "tensor {name:?} matches no explicit rule in a fail-closed manifest; refusing \
+         defaults fallthrough so preserve tensors (routers/norms) cannot be silently \
+         ternary-quantized. Use names that match the manifest convention, or supply a \
+         V1 `blk.*` manifest if defaults fallthrough is intended"
     )]
     ManifestV2UnmatchedTensor { name: String },
+
+    #[error(
+        "no explicit default precision is configured; refusing to silently ternary-quantize \
+         unclassified tensors. Set manifest defaults.precision to ternary_snn, fp16, or \
+         preserve, or list the tensor under preserve / fp16 / ternary_candidates"
+    )]
+    MissingDefaultPrecision,
+
+    #[error(
+        "ternary rule {pattern:?} matches mixed or unknown inventory dtypes; \
+         wrap-vs-quantize cannot be decided from dtype"
+    )]
+    MixedInventoryDtype { pattern: String },
 
     #[error("artifact validation error: {0}")]
     ArtifactValidation(String),

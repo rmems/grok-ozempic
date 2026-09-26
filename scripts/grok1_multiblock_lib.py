@@ -33,6 +33,7 @@ from grok1_block_weights import (
     NpyWeights,
     PackWeights,
 )
+from json_canonical import canonical_json  # noqa: E402
 from route_preservation_io import TENSOR_TERNARY, read_trits
 
 
@@ -783,7 +784,7 @@ def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     temp_path = _temp_sibling(path)
     try:
         with temp_path.open("w", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, indent=2) + "\n")
+            handle.write(canonical_json(payload))
             handle.flush()
             os.fsync(handle.fileno())
         _durable_replace(temp_path, path)
@@ -1703,12 +1704,12 @@ def _build_rationale(
     baseline = BASELINE_64["expert_only"]["block_output_cosine"]
     topk_key = _topk_label(top_k)
     return [
-        f"block_output_cosine sequence={['%.6f' % c for c in m['cos']]}",
-        f"residual_in_drift sequence={['%.6f' % d for d in m['resid_in']]}",
-        f"block_output_drift sequence={['%.6f' % d for d in m['out_drift']]}",
-        f"router_top1 sequence={['%.6f' % t for t in m['top1']]}",
-        f"{topk_key} sequence={['%.6f' % t for t in m['topk']]}",
-        f"expert_load_js_bits sequence={['%.6f' % j for j in m['js']]}",
+        f"block_output_cosine sequence={[f'{c:.6f}' for c in m['cos']]}",
+        f"residual_in_drift sequence={[f'{d:.6f}' for d in m['resid_in']]}",
+        f"block_output_drift sequence={[f'{d:.6f}' for d in m['out_drift']]}",
+        f"router_top1 sequence={[f'{t:.6f}' for t in m['top1']]}",
+        f"{topk_key} sequence={[f'{t:.6f}' for t in m['topk']]}",
+        f"expert_load_js_bits sequence={[f'{j:.6f}' for j in m['js']]}",
         f"compounding_heuristic={compounding}",
         f"end_block_output_cosine={end_cos:.6f}",
         f"last_block_residual_in_drift={last_resid_in}",

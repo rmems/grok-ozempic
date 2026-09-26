@@ -18,6 +18,33 @@ GitHub #40 / RM-191, with a fail-closed rule for unmatched tensors (see below).
 - `grok-ozempic` **never writes manifests** and never depends on
   `xai-dissect` as a Cargo crate.
 
+## Inventory scan vs policy manifest (reports)
+
+The policy document described below (`xai-dissect.manifest`) is a
+classification contract. Its `blocks` entries carry only `index` /
+`experts` / `role` — no shapes, dtypes, or byte counts — and that block
+*count* is advisory.
+
+Per-tensor dtype and byte counts already live in a **different**
+xai-dissect document: `exports/<slug>/inventory.json` (`ModelInventory`
+schema v2; see xai-dissect `docs/tensor-schema.md` and
+`docs/export-contracts.md`). `grok-ozempic artifacts generate --inventory`
+feeds that catalog to `reports::scan`, derives IR totals from the
+`tensors` array, and hard-errors if declared `totals` (or block
+summaries) disagree with that sum. `validate_ir` still asserts the
+`GROK1_*` spec constants, so a scan that is not Grok-1 fails instead of
+the detector and validator reading the same constants.
+
+When `--weights-dir` and `--inventory` are both set, their shard counts
+must agree; a mismatch is a hard error rather than mixing two
+checkpoints. Checkpoint provenance still prefers `--checkpoint` / the
+weights-directory name over `inventory.json`'s `checkpoint_path`,
+because the latter is an export-time filesystem path and is not
+comparable as a string to the CLI's short provenance name.
+
+Do not add those fields to in-tree `dissect/grok-1/*.json`. Those files
+are policy-manifest fallbacks, not inventory scans.
+
 ## Delivery
 
 Runtime resolution is implemented in `stream::resolve_manifest` (first hit wins):
@@ -115,6 +142,32 @@ remains supported only when no manifest is resolved.
 | `fp16`         | Force FP16 passthrough (current router behavior).       |
 | `ternary_snn` | Ternary {-1, 0, +1} with GIF saliency threshold.         |
 
+### Precision → backend mapping
+
+Classification is an orchestration decision. The planned kernel verb lives
+on `DryRunPlanner` / `OperationKind` in [`src/core/dry_run.rs`](../src/core/dry_run.rs);
+the deployable kernel interface is the `BackendKernel` trait in
+[`src/core/backend.rs`](../src/core/backend.rs). Full ownership table:
+[`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+| Manifest tier | JSON operation | `BackendKernel` method (when the live path dispatches) |
+| ------------- | -------------- | ------------------------------------------------------- |
+| `preserve`    | `convert_fp16`  | `convert_f32_to_f16_bytes` / `passthrough_f16` (GOZ1 still stores `TENSOR_F16`) |
+| `fp16`        | `convert_fp16`  | same |
+| `ternary_snn` on float source | `quantize_ternary` | `quantize_f32` or `quantize_f16` (already returns packed `QuantizedTensor`) |
+| `ternary_snn` on already-quantized `i8`/`int8`/`u8` | `wrap_existing_quantized` | none — wrap the payload; do not re-quantize |
+
+`JSON operation` is the serde / `OperationKind::as_str` wire form
+(`quantize_ternary` ↔ `OperationKind::QuantizeTernary`). Do not call
+`pack_ternary` after `quantize_f32` / `quantize_f16`; that method accepts an
+uncompressed `&[f32]` ternary slice, not a `QuantizedTensor`.
+
+`quantize-goz1` today calls `quantizer.rs` directly rather than
+`LocalBackend` / `MyelinBackend`. The mapping above is what a backend-switched
+pack would invoke; `MyelinBackend` is still a stub. A name mismatch that
+ternary-quantizes a router or norm is a **matcher bug** — fix the glob, do not
+paper over it with `defaults`.
+
 ### Per-tensor fields
 
 - `rank` — optional hint in `[0, 1]`. Higher = stronger ternary candidate.
@@ -128,22 +181,27 @@ remains supported only when no manifest is resolved.
 Reject with typed errors rather than best-effort parse:
 
 - `schema_version` other than `1`.
-- `model.tensor_name_convention` other than V1 `"blk.{L}.{role}.weight"` **or**
-  V2 `"block_{NNN}.slot_{SS}.{kind}"` (both parse; unknown conventions fail).
+- `model.tensor_name_convention` other than an entry in
+  `ACCEPTED_NAME_CONVENTIONS` (currently V1 `"blk.{L}.{role}.weight"`, V2
+  `"block_{NNN}.slot_{SS}.{kind}"`, and HuggingFace-style MoE
+  `"model.layers.{L}.{module}.{param}"`). Unknown conventions fail.
 - Non-existent / unreadable manifest file.
 - Malformed JSON / invalid precision strings.
 
 Unknown top-level fields are **tolerated** for forward compatibility.
 
-### Runtime GOZ1 stream (V2 fail-closed classification)
+### Runtime GOZ1 stream (fail-closed classification)
 
-`stream::resolve_manifest` accepts both V1 and V2 manifests (#40 / RM-191).
-Under a **V2** manifest, classification is fail-closed: any input tensor that
-matches no `preserve` / `fp16` / `ternary_candidates` rule aborts the run with
-`GrokOzempicError::ManifestV2UnmatchedTensor` naming the tensor. V2 manifests
-are authored for full explicit coverage, so an unmatched name means the inputs
-do not follow the structural convention (or a rule is missing) — the exact
-scenario that would otherwise ternary-quantize a router/norm via `defaults`.
+`stream::resolve_manifest` accepts V1, V2, and other registered conventions
+(#40 / RM-191, #32 / RM-65). Under any **non-V1** manifest, classification is
+fail-closed: any input tensor that matches no `preserve` / `fp16` /
+`ternary_candidates` rule aborts the run with
+`GrokOzempicError::ManifestV2UnmatchedTensor` naming the tensor. Those
+manifests are authored for full explicit coverage, so an unmatched name means
+the inputs do not follow the declared convention (or a rule is missing) — the
+exact scenario that would otherwise ternary-quantize a router/norm via
+`defaults`. V1 manifests keep defaults fallthrough.
+
 Alignment and dry-run continue to load embedded V2 fixtures via their own
 entry points (`alignment.rs`).
 
@@ -152,3 +210,10 @@ entry points (`alignment.rs`).
 Future schema versions bump `schema_version`. Loaders must refuse any
 version they do not explicitly understand. This prevents silent drift
 between `xai-dissect` and `grok-ozempic`.
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — manifest → selection → `BackendKernel` → myelin
+- [`grok1-saaq-artifact-flow.md`](./grok1-saaq-artifact-flow.md) — copyable ingest / pack commands
+- [`artifact-compatibility-plan.md`](./artifact-compatibility-plan.md) — inventory IR and `DryRunPlanner` coverage JSON
+- [`first-quantization-target.md`](./first-quantization-target.md) — first real-weight embedding contract

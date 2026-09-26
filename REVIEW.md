@@ -23,8 +23,9 @@ just review
 
 This is the default **pre-push** recipe. It runs, in order:
 
-1. **`just ci`** — GHA parity for Rust + the five CI Python unittests + `bash -n`
-   on `scripts/*.sh` + optional `actionlint` / `shellcheck` when installed
+1. **`just ci`** — GHA parity for Rust + the **fifteen** CI Python unittests +
+   `bash -n` on `scripts/*.sh` + `actionlint` / `shellcheck` (blocking in CI via
+   `.github/workflows/lint.yml` since GH #98; still skipped locally when not installed)
 2. **`cargo audit`** — if `cargo-audit` is on `PATH` (matches
    `.github/workflows/cargo-audit.yml`); otherwise prints `skip:` and continues
 3. **Extra Python unittests** not yet in `python-scripts.yml` / `just ci`:
@@ -54,16 +55,47 @@ just experiment-smoke   # release CLI --help + CKPT / run3 path presence
 
 ## 2. Git hooks (call `just`)
 
-Hooks live in **`.githooks/`** (tracked). Enable once per clone:
+Hooks live in **`.githooks/`** (tracked).
 
-```bash
-git config core.hooksPath .githooks
+⚠ **`core.hooksPath` is owned by beads, not by `.githooks`.** Beads installs its
+own hooks and points `core.hooksPath` at `.beads/hooks`. Git consults **only**
+that directory — `.git/hooks` and `.githooks` are then ignored entirely. So
+`git config core.hooksPath .githooks` (what this file used to say) would
+silently disable beads sync, while leaving it as beads set it silently disabled
+`just review`. Neither is what you want, which is why the two are **chained**.
+
+Since GH #97, each tracked `.beads/hooks/{pre-commit,pre-push}` runs the beads
+block first and then invokes the matching `.githooks/` script:
+
 ```
+.beads/hooks/pre-push
+  ├── BEADS INTEGRATION block   → bd hooks run pre-push   (sync)
+  └── PROJECT QUALITY GATE block → .githooks/pre-push → just review
+```
+
+The gate block sits **outside** the beads markers on purpose: `bd hooks install`
+preserves user content outside its markers across installs and upgrades. The one
+command that would destroy it is `bd hooks install --force`; if you ever run
+that, re-apply the block and check with `just doctor`.
 
 | Hook | Runs | Skip |
 |------|------|------|
-| `.githooks/pre-push` | `just review` | `git push --no-verify` (escape hatch only) |
-| `.githooks/pre-commit` | `just check` | `git commit --no-verify` |
+| `.beads/hooks/pre-push` | beads sync, then `just review` | `git push --no-verify` |
+| `.beads/hooks/pre-commit` | beads export, then `just check` | `git commit --no-verify` |
+
+`BEADS_SKIP_PROJECT_GATE=1` skips only the `just` half while still running the
+beads sync — use it when you need the export but not a 2–4 minute gate.
+
+### Bootstrap (once per clone)
+
+`core.hooksPath` lives in `.git/config`, which is **not** shared by git, and
+beads writes it as an **absolute** path — so it does not survive a fresh clone
+and is wrong inside a worktree. Set it explicitly:
+
+```bash
+git config core.hooksPath "$(git rev-parse --show-toplevel)/.beads/hooks"
+just doctor    # confirms the path AND that the project gate is chained
+```
 
 Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 (`python3 -m pip install --user 'numpy>=1.26,<3'`).
@@ -71,8 +103,9 @@ Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 Verify:
 
 ```bash
-git config --get core.hooksPath   # expect: .githooks
-just review                       # same gate the hook will run
+git config --get core.hooksPath   # expect: <repo>/.beads/hooks
+just doctor                       # expect: "project gate chained into both hooks"
+bd github status                  # should not say "Not configured"
 ```
 
 Agents: if `core.hooksPath` is unset, still run `just review` before any push.
@@ -82,8 +115,8 @@ Do not disable hooks permanently; use `--no-verify` only for documented emergenc
 
 ## 3. Local Qodana CLI
 
-Config: root [`qodana.yaml`](qodana.yaml) (`linter: qodana-rust`). CI workflow:
-[`.github/workflows/qodana.yml`](.github/workflows/qodana.yml).
+Config: root [`qodana.yaml`](qodana.yaml) (`linter: qodana-python-community`).
+CI workflow: [`.github/workflows/qodana.yml`](.github/workflows/qodana.yml).
 
 ### Install
 
@@ -96,7 +129,7 @@ command -v qodana && qodana --version
 Docker is used when the CLI runs the linter in a container (`--within-docker=true`
 or default depending on environment). Native mode: `--within-docker=false`.
 
-Optional Cloud upload needs `QODANA_TOKEN` (same secret as GHA). Local reports
+Community Python does not need `QODANA_TOKEN` (no Cloud upload). Local reports
 do not require a token.
 
 ### Recipes
@@ -111,7 +144,7 @@ Equivalent manual CLI (kept for environments without the new recipes):
 ```bash
 # Full project (matches CI pr-mode: false intent — whole tree, not PR-diff-only)
 qodana scan \
-  --linter qodana-rust \
+  --linter qodana-python-community \
   --project-dir . \
   --results-dir .qodana/results \
   --report-dir .qodana/report \
@@ -123,7 +156,7 @@ qodana show --report-dir .qodana/report
 # or: qodana view --sarif .qodana/results/qodana.sarif.json
 
 # Diff-only against main (optional, faster feedback while iterating)
-qodana scan --linter qodana-rust --diff-start origin/main --print-problems
+qodana scan --linter qodana-python-community --diff-start origin/main --print-problems
 ```
 
 `.qodana/` is gitignored (local cache/results). Do not commit SARIF or HTML
@@ -152,22 +185,31 @@ GHA `rust.yml` omits `--locked`; local `just` is **stricter** (intentional).
 
 ### Python
 
-CI / `just ci` only run five modules. Also run (and **`just review` does**):
+`just test`, `just ci`, `just review` and `python-scripts.yml` all run the same
+**fifteen** modules. Until GH #98 the last two (79 tests) lived in a separate
+`_python-tests-extra` recipe reachable only through `just review`, and were
+gated by nothing in CI; that recipe is gone and there is now one list.
+
+Path-scoped re-runs (already inside `just test` / `just ci` — run one directly
+when you touched only its script):
 
 ```bash
 python3 -c 'import numpy; print(numpy.__version__)'   # required for all modules below
-python3 -m unittest scripts.test_grok1_block_forward -v
-python3 -m unittest scripts.test_grok1_block_weights -v
-```
-
-Path-scoped re-runs (same modules as CI — already inside `just test` / `just ci`):
-
-```bash
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_select -v
 python3 -m unittest scripts.test_route_preservation_surface -v
 python3 -m unittest scripts.test_route_preservation_io -v
+python3 -m unittest scripts.test_route_preservation_completeness -v
+python3 -m unittest scripts.test_json_canonical -v
+python3 -m unittest scripts.test_grok1_multiblock_experiment -v
+python3 -m unittest scripts.test_grok1_multiblock_progress -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_decision -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table -v
+python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
+python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
+python3 -m unittest scripts.test_grok1_block_forward -v
+python3 -m unittest scripts.test_grok1_block_weights -v
 ```
 
 Manual script syntax checks (stdlib-only scripts; not unittest):
@@ -237,7 +279,7 @@ python3 -m unittest scripts.test_grok1_block_forward -v
 python3 -m unittest scripts.test_grok1_block_weights -v
 
 # --- optional full ---
-qodana scan --linter qodana-rust --project-dir . \
+qodana scan --linter qodana-python-community --project-dir . \
   --results-dir .qodana/results --report-dir .qodana/report \
   --print-problems --save-report
 ```

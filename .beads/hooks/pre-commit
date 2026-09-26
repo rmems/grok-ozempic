@@ -22,3 +22,29 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.0.4 ---
+
+# --- BEGIN PROJECT QUALITY GATE (GH #97) ---
+# Deliberately OUTSIDE the beads markers above. `bd hooks install` preserves
+# user content outside its markers across installs and upgrades, so this block
+# survives a beads upgrade. `bd hooks install --force` would destroy it.
+#
+# Why this exists: beads owns core.hooksPath (it points at .beads/hooks), and
+# git consults ONLY that directory -- .git/hooks and .githooks are ignored
+# entirely. Without this block the tracked .githooks/pre-commit never runs, so
+# the `just check` gate documented in REVIEW.md silently never fired.
+#
+# Escape hatch: git commit --no-verify, or BEADS_SKIP_PROJECT_GATE=1 to skip
+# only this block while still running the beads export above.
+_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+_gate="${_root}/.githooks/pre-commit"
+if [ -n "${BEADS_SKIP_PROJECT_GATE:-}" ]; then
+  echo "pre-commit: project gate skipped (BEADS_SKIP_PROJECT_GATE set)" >&2
+elif [ -x "$_gate" ]; then
+  "$_gate" "$@" || exit $?
+elif [ -f "$_gate" ]; then
+  echo "pre-commit: $_gate is not executable; running via sh" >&2
+  sh "$_gate" "$@" || exit $?
+else
+  echo "pre-commit: warning: $_gate not found; project gate skipped" >&2
+fi
+# --- END PROJECT QUALITY GATE (GH #97) ---

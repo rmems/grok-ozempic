@@ -42,6 +42,16 @@ jobs:
       - name: Unit tests (GOZ1 pack readback)
         run: python3 -m unittest scripts.test_route_preservation_io -v
 
+      # The documented under-packing guard (GH #107). Fail-closed cannot see an
+      # absent tensor, so this is the check that stands between a short pack and
+      # a published "certified" result.
+      - name: Unit tests (pack completeness gate)
+        run: python3 -m unittest scripts.test_route_preservation_completeness -v
+      # Committed artifacts must stay in canonical form (GH #108) -- the guard
+      # that stops three writers disagreeing on sort_keys again.
+      - name: Unit tests (canonical JSON + committed artifacts)
+        run: python3 -m unittest scripts.test_json_canonical -v
+
       - name: Unit tests (multi-block remedy decisions)
         run: python3 -m unittest scripts.test_grok1_multiblock_experiment -v
 
@@ -59,6 +69,27 @@ jobs:
 
       - name: Unit tests (v4 out-of-process supervisor)
         run: python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
+
+      - name: Unit tests (matched alpha and schedule protocol)
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_protocol -v
+
+      - name: Unit tests (matched alpha and schedule runner)
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_runner -v
+
+      - name: Matched alpha/schedule lifecycle regressions
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_lifecycle -v
+
+      # These two were reachable only through `just review` (GH #98). They cover
+      # the block-forward and block-weight kernels behind every published
+      # forward-pass number, and no CI workflow ran them.
+      - name: Unit tests (block forward pass)
+        run: python3 -m unittest scripts.test_grok1_block_forward -v
+
+      - name: Unit tests (block weight loading)
+        run: python3 -m unittest scripts.test_grok1_block_weights -v
+
+      - name: Unit tests (tau quality sweep)
+        run: python3 -m unittest scripts.test_grok1_tau_quality_sweep -v
 
       - name: Codex co-author hook contract
         run: |

@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run against the real working tree, never an inherited one.
+#
+# Git exports GIT_DIR (and friends) to every hook it runs, and `git -C <path>`
+# does NOT override GIT_DIR. This script builds a throwaway repo under mktemp
+# and commits fixtures into it -- so when it runs from a hook, every `git -C
+# "$repo" commit` landed in the REAL repository instead.
+#
+# That is not hypothetical: it is how `initial`, `staged`, `partial`,
+# `disabled`, `compound` and `reported` -- this script's own fixture messages,
+# authored by `Tester` and touching `tracked.txt` -- ended up as commits on
+# main. `just review` runs this via `_codex-hook-tests` during pre-push, so
+# every gated push risked contaminating the branch it was pushing.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 for required in git jq; do
   command -v "$required" >/dev/null 2>&1 || {
     echo "missing required command: $required" >&2
@@ -9,6 +24,24 @@ for required in git jq; do
 done
 
 repo_root=$(git rev-parse --show-toplevel)
+
+# Resolve repo_root above from the ambient environment, then drop every git
+# environment variable before touching the throwaway repo created below.
+#
+# This is load-bearing, not hygiene. A pre-push hook exports GIT_DIR (and
+# friends), and GIT_DIR takes precedence over `git -C <path>` when git locates a
+# repository -- so `git init "$repo"`, `git -C "$repo" commit` and everything
+# after it operate on the REAL repository instead of the temp one.
+#
+# That is not hypothetical. Running `just review` from the pre-push hook
+# committed this script's own fixtures -- tracked.txt, staged.txt, partial.txt,
+# compound.txt -- onto the project's main as "Tester <tester@example.com>",
+# carrying this file's commit messages (initial, staged, partial, compound), and
+# left core.bare=true behind from the redirected `git init`, which breaks every
+# subsequent worktree command in the real checkout.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 pre_hook="$repo_root/.codex/hooks/coauthor-record-head.sh"
 post_hook="$repo_root/.codex/hooks/coauthor-commit.sh"
 muse_pre_hook="$repo_root/.muse/hooks/coauthor-record-head.sh"

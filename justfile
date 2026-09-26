@@ -34,30 +34,20 @@ _python-tests:
       scripts.test_export_grok1_int8_select
       scripts.test_route_preservation_surface
       scripts.test_route_preservation_io
+      scripts.test_route_preservation_completeness
+      scripts.test_json_canonical
       scripts.test_grok1_multiblock_experiment
       scripts.test_grok1_multiblock_progress
       scripts.test_grok1_multiblock_v4_decision
       scripts.test_grok1_multiblock_side_table
       scripts.test_grok1_multiblock_side_table_binding
       scripts.test_grok1_multiblock_v4_supervisor
-    )
-    for m in "${mods[@]}"; do
-      echo "+ python3 -m unittest ${m} -v"
-      python3 -m unittest "${m}" -v
-    done
-
-# Block-forward / block-weights unittests (not yet in python-scripts.yml / just ci)
-_python-tests-extra:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! python3 -c 'import numpy' >/dev/null 2>&1; then
-      echo "error: numpy is required for Python script unittests" >&2
-      echo "       install: python3 -m pip install --user 'numpy>=1.26,<3'" >&2
-      exit 1
-    fi
-    mods=(
+      scripts.test_grok1_alpha_schedule_protocol
+      scripts.test_grok1_alpha_schedule_runner
+      scripts.test_grok1_alpha_schedule_lifecycle
       scripts.test_grok1_block_forward
       scripts.test_grok1_block_weights
+      scripts.test_grok1_tau_quality_sweep
     )
     for m in "${mods[@]}"; do
       echo "+ python3 -m unittest ${m} -v"
@@ -137,22 +127,36 @@ _codex-hook-tests:
 _optional-linters:
     #!/usr/bin/env bash
     # Fail-fast when an installed optional linter finds issues (just ci must not greenwash).
+    #
+    # Optional *locally only*. Since GH #98/#101 all three run unconditionally in
+    # .github/workflows/lint.yml, so a `skip:` here means "not checked on this
+    # machine", not "not checked at all" — CI will still fail the PR.
+    # The shellcheck file list below is identical to lint.yml's, so an installed
+    # local shellcheck reproduces CI's shell coverage exactly. Install all three
+    # binaries (actionlint, ruff, shellcheck) for the full local gate.
     set -euo pipefail
     if command -v actionlint >/dev/null 2>&1; then
       echo "+ actionlint"
       actionlint
     else
-      echo "skip: actionlint not installed"
+      echo "skip: actionlint not installed (lint.yml enforces it in CI)"
+    fi
+    if command -v ruff >/dev/null 2>&1; then
+      echo "+ ruff check scripts/"
+      ruff check scripts/
+    else
+      echo "skip: ruff not installed (lint.yml enforces it in CI; pip install 'ruff==0.15.14')"
     fi
     if command -v shellcheck >/dev/null 2>&1; then
       shopt -s nullglob
-      scripts=(scripts/*.sh)
+      scripts=(scripts/*.sh .githooks/pre-commit .githooks/pre-push \
+               .codex/hooks/*.sh .beads/hooks/pre-commit .beads/hooks/pre-push)
       if [[ ${#scripts[@]} -gt 0 ]]; then
         echo "+ shellcheck ${scripts[*]}"
         shellcheck "${scripts[@]}"
       fi
     else
-      echo "skip: shellcheck not installed"
+      echo "skip: shellcheck not installed (lint.yml enforces it in CI)"
     fi
 
 # ---------------------------------------------------------------------------
@@ -207,10 +211,9 @@ ci:
 review:
     @just ci
     @just _cargo-audit
-    @just _python-tests-extra
     @just _py-compile
 
-# Local JetBrains Qodana (qodana-rust). Needs `qodana` on PATH; results under .qodana/
+# Local JetBrains Qodana (qodana-python-community). Needs `qodana` on PATH; results under .qodana/
 qodana:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -221,9 +224,9 @@ qodana:
       exit 1
     fi
     mkdir -p .qodana/results .qodana/report
-    echo "+ qodana scan --linter qodana-rust --print-problems (results → .qodana/)"
+    echo "+ qodana scan --linter qodana-python-community --print-problems (results → .qodana/)"
     qodana scan \
-      --linter qodana-rust \
+      --linter qodana-python-community \
       --project-dir . \
       --results-dir .qodana/results \
       --report-dir .qodana/report \
@@ -354,10 +357,39 @@ doctor:
     else
       status warn "shellcheck not installed (optional for just ci)"
     fi
+    if command -v ruff >/dev/null 2>&1; then
+      status ok "ruff $(ruff --version 2>/dev/null | head -1)"
+    else
+      status warn "ruff not installed (blocking in CI since #101; pip install 'ruff==0.15.14')"
+    fi
     if command -v jq >/dev/null 2>&1; then
       status ok "jq $(jq --version 2>/dev/null | head -1)"
     else
       status missing "jq not on PATH (required for just ci coauthor hook tests)"
+    fi
+
+    echo "=== git hooks (GH #97) ==="
+    # Nothing used to detect a broken pre-push gate. beads owns core.hooksPath,
+    # and git consults only that directory, so .githooks runs only if the beads
+    # hooks chain to it. Verify the chain, not just the path.
+    hp="$(git config --get core.hooksPath 2>/dev/null || true)"
+    if [[ -z "${hp}" ]]; then
+      status warn "core.hooksPath unset — no hook runs; see REVIEW.md bootstrap"
+    else
+      status ok "core.hooksPath=${hp}"
+      chained=0
+      for h in pre-commit pre-push; do
+        if [[ -f "${hp}/${h}" ]] && grep -q 'PROJECT QUALITY GATE' "${hp}/${h}" 2>/dev/null; then
+          chained=$((chained + 1))
+        fi
+      done
+      if [[ "${chained}" -eq 2 ]]; then
+        status ok "project gate chained into both hooks (just check / just review)"
+      elif [[ "${chained}" -eq 1 ]]; then
+        status warn "project gate chained into only 1 of 2 hooks — re-apply GH #97 block"
+      else
+        status missing "project gate NOT chained: .githooks never runs, so 'just review' does not gate pushes (GH #97)"
+      fi
     fi
 
     echo "=== crate / CLI ==="

@@ -45,7 +45,7 @@ enum Commands {
         #[arg(long)]
         manifest: PathBuf,
 
-        /// Output directory for manifest.used.json, artifact.index.json, checksums, warnings, summary
+        /// Output directory for manifest.used.json, artifact.index.json, plan_fingerprints, warnings, summary
         #[arg(long)]
         output_root: PathBuf,
 
@@ -87,7 +87,7 @@ enum Commands {
         #[arg(long, action = ArgAction::Set, default_value_t = true)]
         include_final_norm: bool,
 
-        /// Output directory for smoke summary/index/checksum/warnings files
+        /// Output directory for smoke summary/index/plan-fingerprint/warnings files
         #[arg(long)]
         output_root: PathBuf,
 
@@ -105,9 +105,10 @@ enum Commands {
         #[arg(long)]
         artifact_index: PathBuf,
 
-        /// Optional checksums.json emitted by convert-grok1
-        #[arg(long)]
-        checksums: Option<PathBuf>,
+        /// Optional plan-fingerprint map emitted by convert-grok1 (name/length/policy).
+        /// Not a payload sha256. `--checksums` is a compatibility alias for this sidecar.
+        #[arg(long = "plan-fingerprints", visible_alias = "checksums")]
+        plan_fingerprints: Option<PathBuf>,
 
         /// Output directory for validation.summary/report/failures/warnings
         #[arg(long)]
@@ -148,6 +149,14 @@ enum Commands {
         /// Use embedded Grok-1 baseline when `--manifest` is omitted
         #[arg(long, default_value_t = false)]
         use_embedded_baseline: bool,
+
+        /// Optional SAAQ τ map JSON (corinth-canal `saaq-tau-map` schema):
+        /// per-tensor/per-tier `gif_threshold` values derived from
+        /// `saaq_delta_q_target`. Precedence: explicit per-tensor manifest
+        /// `gif_threshold` > this map > `manifest.defaults` > `--gif-threshold`.
+        /// Applied values land in each GOZ1 v3 tensor row.
+        #[arg(long)]
+        saaq_tau_map: Option<PathBuf>,
 
         /// Verify GOZ1 container after write
         #[arg(long, default_value_t = false)]
@@ -192,14 +201,18 @@ fn run_cli(command: Commands) -> anyhow::Result<()> {
             checkpoint, manifest, block, include_embedding, include_final_norm, output_root, dry_run,
         ),
         Commands::ValidateGrok1Artifact {
-            manifest, artifact_index, checksums, output_root, strict_router_protection,
+            manifest, artifact_index, plan_fingerprints, output_root, strict_router_protection,
         } => cmd_validate_grok1_artifact(
-            manifest, artifact_index, checksums, output_root, strict_router_protection,
+            manifest, artifact_index, plan_fingerprints, output_root, strict_router_protection,
         ),
         Commands::QuantizeGoz1 {
-            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline, verify,
+            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline,
+            saaq_tau_map, verify,
         } => cmd_quantize_goz1(
-            input_dir, output, manifest, input_format, gif_threshold, use_embedded_baseline, verify,
+            input_dir, output, input_format,
+            quantize::QuantizeGoz1Options {
+                manifest, gif_threshold, use_embedded_baseline, saaq_tau_map, verify,
+            },
         ),
         Commands::Artifacts { cmd } => cmd_artifacts(cmd),
     }
@@ -271,14 +284,14 @@ fn cmd_smoke_grok1(
 fn cmd_validate_grok1_artifact(
     manifest: PathBuf,
     artifact_index: PathBuf,
-    checksums: Option<PathBuf>,
+    plan_fingerprints: Option<PathBuf>,
     output_root: Option<PathBuf>,
     strict_router_protection: bool,
 ) -> anyhow::Result<()> {
     let report = artifact::validate_grok1_artifact(
         &manifest,
         &artifact_index,
-        checksums.as_deref(),
+        plan_fingerprints.as_deref(),
         output_root.as_deref(),
         strict_router_protection,
     )

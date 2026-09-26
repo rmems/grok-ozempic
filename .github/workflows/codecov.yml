@@ -1,13 +1,13 @@
 name: Codecov Coverage
 
 on:
+  # No `branches:` filter on pull_request -- it matches the *target* branch, so
+  # restricting it to main silently skipped this workflow on stacked PRs (GH #98).
   pull_request:
-    branches: [main, refactor-tests-docs]
   push:
     branches:
       - main
-      - narrow-crest
-      - refactor-tests-docs
+      - "releases/*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}

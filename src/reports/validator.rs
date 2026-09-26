@@ -8,6 +8,22 @@ use crate::types::{
 use std::collections::HashSet;
 const CRITICAL_ROUTER_RISK_THRESHOLD: f64 = 0.5;
 
+/// Check an [`ArtifactIR`] against the Grok-1 spec constants.
+///
+/// On an IR from [`super::detector::build_grok1_spec_ir`] (no scan) this is a
+/// schema/self-consistency check: that builder writes the same `GROK1_*`
+/// constants, so the happy path is a tautology. It still catches a mutated IR
+/// and pins the constants against each other.
+///
+/// On an IR from [`super::detector::build_artifact_ir`] **with an
+/// [`super::scan::InventoryScan`]**, totals come from the xai-dissect
+/// `inventory.json` tensor list. This function still asserts `GROK1_*`, so
+/// producer and validator no longer share a source: a scan that does not
+/// describe Grok-1 fails here. That is the verification #113 / RM-984 added.
+///
+/// This module still does not read checkpoint payloads. A green result with a
+/// scan means the catalog's derived totals match the spec, not that pickle
+/// bytes on disk were re-parsed here.
 pub fn validate_ir(ir: &ArtifactIR) -> Result<(), GrokOzempicError> {
     if ir.hyperparameters.d_model != GROK1_HIDDEN_DIM {
         return Err(GrokOzempicError::ArtifactValidation(format!(

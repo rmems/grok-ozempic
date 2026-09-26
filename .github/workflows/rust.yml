@@ -1,13 +1,15 @@
 name: Rust
 
 on:
+  # No `branches:` filter on pull_request. That filter matches the *target*
+  # branch, so restricting it to main silently skipped this whole workflow on
+  # any stacked PR (one targeting another PR's branch) -- Rust fmt/clippy/test/
+  # build/doc never ran until the stack was retargeted at main. See GH #98.
   pull_request:
-    branches: [main, refactor-tests-docs]
   push:
     branches:
       - main
-      - narrow-crest
-      - refactor-tests-docs
+      - "releases/*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}

@@ -1,7 +1,10 @@
+use crate::core::dry_run::OperationKind;
 use crate::core::manifest::{DissectManifest, parse_manifest_bytes};
 use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT};
 use crate::error::{GrokOzempicError, Result};
-use crate::types::{GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES};
+use crate::types::{
+    GROK1_BLOCK_SLOTS, GROK1_HIDDEN_DIM, GROK1_TENSOR_TOTAL, GROK1_TENSOR_TOTAL_BYTES,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -19,12 +22,11 @@ pub const GROK1_UNKNOWN_DENSE_PER_BLOCK: usize = 4;
 
 const EMBEDDING_BYTES: u64 = 3_221_225_472;
 const FINAL_NORM_BYTES: u64 = 24_576;
-const EXPERT_BYTES: u64 = 1_610_612_736;
-const ATTN_MODEL_WIDTH_BYTES: u64 = 37_748_736;
-const ATTN_NARROW_BYTES: u64 = 6_291_456;
 const NORM_BYTES: u64 = 24_576;
 const ROUTER_BYTES: u64 = 196_608;
 const CHECKSUMS_FILE: &str = "checksums.json";
+const PLAN_FINGERPRINTS_FILE: &str = "plan_fingerprints.json";
+const SMOKE_PLAN_FINGERPRINTS_FILE: &str = "smoke.plan_fingerprints.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactIndex {
@@ -52,7 +54,9 @@ pub struct ArtifactIndexEntry {
     pub shape: Vec<usize>,
     pub byte_len: u64,
     pub source_checksum: Option<String>,
-    pub output_checksum: String,
+    /// Fingerprint of `source_tensor_name`, `byte_len`, and `quant_policy_applied`.
+    /// Lowercase hex with no scheme prefix. This is not a payload sha256.
+    pub plan_fingerprint: String,
     pub quant_policy_applied: String,
     pub artifact_path: String,
     pub artifact_offset: u64,
@@ -84,7 +88,9 @@ pub struct ValidationReport {
     pub protected_norm_violations: usize,
     pub expert_association_count: usize,
     pub unknown_unresolved_warning_count: usize,
-    pub checksum_coverage: String,
+    /// Independently verified plan-fingerprint matches (name/length/policy).
+    /// This is not payload-digest coverage.
+    pub plan_fingerprint_coverage: String,
     pub source_total_bytes: u64,
     pub artifact_total_bytes: u64,
     pub byte_accounting_result: String,
@@ -197,10 +203,14 @@ pub fn smoke_grok1(options: SmokeOptions<'_>) -> Result<ArtifactIndex> {
     Ok(index)
 }
 
+/// Validate a converted `saaq-g1-v0` index.
+///
+/// `plan_fingerprints` is an optional sidecar of name → plan fingerprint
+/// (name/length/policy hex). Matching it is not payload-digest coverage.
 pub fn validate_grok1_artifact(
     manifest: &Path,
     artifact_index: &Path,
-    checksums: Option<&Path>,
+    plan_fingerprints: Option<&Path>,
     output_root: Option<&Path>,
     strict_router_protection: bool,
 ) -> Result<ValidationReport> {
@@ -215,7 +225,7 @@ pub fn validate_grok1_artifact(
         ))
     })?;
 
-    let checksum_map = if let Some(path) = checksums {
+    let plan_fingerprint_map = if let Some(path) = plan_fingerprints {
         Some(load_checksums_file(path)?)
     } else {
         None
@@ -228,7 +238,7 @@ pub fn validate_grok1_artifact(
         strict_router_protection,
         true,
         Some(&expected_entries),
-        checksum_map.as_ref(),
+        plan_fingerprint_map.as_ref(),
     );
     if let Some(dir) = output_root {
         write_validation_outputs(dir, &report)?;
@@ -352,6 +362,40 @@ fn normalize_checksum(value: &str) -> String {
     lower.strip_prefix("sha256:").unwrap_or(&lower).to_string()
 }
 
+/// True when a value is dressed as a content digest (`sha256:…`).
+/// Plan fingerprints must not use that prefix; stripping it would restore
+/// the self-compare-as-sha256 theater this field was renamed to end.
+fn has_content_digest_prefix(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower.starts_with("sha256:") || lower.starts_with("sha-256:")
+}
+
+fn push_plan_fingerprint_failures(
+    failures: &mut Vec<FailureRecord>,
+    tensor: &str,
+    actual: &str,
+    expected: &str,
+    context: &str,
+) {
+    if has_content_digest_prefix(actual) || has_content_digest_prefix(expected) {
+        failures.push(failure(
+            "plan_fingerprint_kind_mismatch",
+            Some(tensor.to_string()),
+            format!(
+                "{context}: plan_fingerprint is a name/length/policy fingerprint, not a payload digest; refuse sha256: prefix (expected {expected}, got {actual})"
+            ),
+        ));
+        return;
+    }
+    if !actual.eq_ignore_ascii_case(expected) {
+        failures.push(failure(
+            "plan_fingerprint_mismatch",
+            Some(tensor.to_string()),
+            format!("{context}: expected plan fingerprint {expected}, got {actual}"),
+        ));
+    }
+}
+
 fn resolve_checkpoint_checksum_entry_path(checkpoint: &Path, relative: &str) -> Result<PathBuf> {
     let relative_path = Path::new(relative);
     if relative_path.is_absolute()
@@ -450,55 +494,15 @@ fn push_block_entries(
     protect_norms: bool,
 ) {
     let prefix = format!("block_{block:03}");
-    for (slot, kind, shape, bytes) in [
-        (
-            0,
-            "moe_expert.unresolved",
-            vec![8, GROK1_HIDDEN_DIM, 32_768],
-            EXPERT_BYTES,
-        ),
-        (
-            1,
-            "moe_expert.down",
-            vec![8, 32_768, GROK1_HIDDEN_DIM],
-            EXPERT_BYTES,
-        ),
-        (
-            2,
-            "moe_expert.unresolved",
-            vec![8, GROK1_HIDDEN_DIM, 32_768],
-            EXPERT_BYTES,
-        ),
-        (
-            3,
-            "attn_proj_i8.narrow",
-            vec![GROK1_HIDDEN_DIM, 1024],
-            ATTN_NARROW_BYTES,
-        ),
-        (
-            4,
-            "attn_proj_i8.model_width",
-            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
-            ATTN_MODEL_WIDTH_BYTES,
-        ),
-        (
-            5,
-            "attn_proj_i8.model_width",
-            vec![GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM],
-            ATTN_MODEL_WIDTH_BYTES,
-        ),
-        (
-            6,
-            "attn_proj_i8.narrow",
-            vec![GROK1_HIDDEN_DIM, 1024],
-            ATTN_NARROW_BYTES,
-        ),
-    ] {
-        let policy = if kind.starts_with("moe_expert") {
-            "wrap_existing_int8_expert"
-        } else {
-            "wrap_existing_int8_unknown"
-        };
+    // Slots 00..=06 come from the shared table (GH #106). This used to be a
+    // hardcoded copy whose slots 00 and 02 read `moe_expert.unresolved`, while
+    // the canonical structural manifest had already resolved them to `.gate`
+    // and `.up`.
+    for bs in GROK1_BLOCK_SLOTS.iter().filter(|s| s.is_int8) {
+        let (slot, kind, shape, bytes) = (bs.slot, bs.kind, bs.shape.to_vec(), bs.bytes);
+        let policy = OperationKind::for_ternary_source_dtype("int8")
+            .expect("int8 expert/attn slots are already quantized")
+            .as_str();
         push_entry(
             entries,
             offset,
@@ -603,7 +607,7 @@ impl<'a> TensorPlan<'a> {
 }
 
 fn push_entry(entries: &mut Vec<ArtifactIndexEntry>, offset: &mut u64, plan: TensorPlan<'_>) {
-    let output_checksum = planned_checksum(
+    let plan_fingerprint = plan_fingerprint(
         plan.source_tensor_name,
         plan.byte_len,
         plan.quant_policy_applied,
@@ -618,7 +622,7 @@ fn push_entry(entries: &mut Vec<ArtifactIndexEntry>, offset: &mut u64, plan: Ten
         shape: plan.shape,
         byte_len: plan.byte_len,
         source_checksum: None,
-        output_checksum,
+        plan_fingerprint,
         quant_policy_applied: plan.quant_policy_applied.to_string(),
         artifact_path: "artifact.saaq-g1-v0.meta".to_string(),
         artifact_offset: *offset,
@@ -628,12 +632,13 @@ fn push_entry(entries: &mut Vec<ArtifactIndexEntry>, offset: &mut u64, plan: Ten
     *offset += plan.byte_len;
 }
 
-fn planned_checksum(name: &str, byte_len: u64, policy: &str) -> String {
+/// Hash of name, planned byte length, and quant policy. Not a payload digest.
+fn plan_fingerprint(name: &str, byte_len: u64, policy: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(name.as_bytes());
     hasher.update(byte_len.to_le_bytes());
     hasher.update(policy.as_bytes());
-    format!("sha256:{}", hex_lower(&hasher.finalize()))
+    hex_lower(&hasher.finalize())
 }
 
 fn build_index(
@@ -756,7 +761,7 @@ fn build_validation_report(
     require_router_protection: bool,
     require_norm_protection: bool,
     expected_entries: Option<&BTreeMap<String, ArtifactIndexEntry>>,
-    checksums: Option<&BTreeMap<String, String>>,
+    plan_fingerprints: Option<&BTreeMap<String, String>>,
 ) -> ValidationReport {
     let mut failures = Vec::new();
     let warnings = planned_warnings();
@@ -931,18 +936,13 @@ fn build_validation_report(
                     ),
                 ));
             }
-            if normalize_checksum(&entry.output_checksum)
-                != normalize_checksum(&expected.output_checksum)
-            {
-                failures.push(failure(
-                    "checksum_mismatch",
-                    Some(entry.source_tensor_name.clone()),
-                    format!(
-                        "expected output checksum {}, got {}",
-                        expected.output_checksum, entry.output_checksum
-                    ),
-                ));
-            }
+            push_plan_fingerprint_failures(
+                &mut failures,
+                &entry.source_tensor_name,
+                &entry.plan_fingerprint,
+                &expected.plan_fingerprint,
+                "artifact index",
+            );
         }
     }
 
@@ -1151,50 +1151,62 @@ fn build_validation_report(
         ));
     }
 
-    let checksum_coverage = if let Some(checksums) = checksums {
-        let mut covered = 0usize;
+    let independent_covered = match expected_entries {
+        Some(expected_entries) => index
+            .entries
+            .iter()
+            .filter(|entry| {
+                expected_entries
+                    .get(&entry.source_tensor_name)
+                    .is_some_and(|expected| {
+                        !has_content_digest_prefix(&entry.plan_fingerprint)
+                            && !has_content_digest_prefix(&expected.plan_fingerprint)
+                            && entry
+                                .plan_fingerprint
+                                .eq_ignore_ascii_case(&expected.plan_fingerprint)
+                    })
+            })
+            .count(),
+        None => index
+            .entries
+            .iter()
+            .filter(|entry| {
+                !entry.plan_fingerprint.is_empty()
+                    && !has_content_digest_prefix(&entry.plan_fingerprint)
+            })
+            .count(),
+    };
+    if let Some(sidecar) = plan_fingerprints {
         for entry in &index.entries {
-            match checksums.get(&entry.source_tensor_name) {
+            match sidecar.get(&entry.source_tensor_name) {
                 Some(expected) => {
-                    if normalize_checksum(expected) == normalize_checksum(&entry.output_checksum) {
-                        covered += 1;
-                    } else {
-                        failures.push(failure(
-                            "checksum_mismatch",
-                            Some(entry.source_tensor_name.clone()),
-                            format!(
-                                "checksums file expected {}, got {}",
-                                expected, entry.output_checksum
-                            ),
-                        ));
-                    }
+                    push_plan_fingerprint_failures(
+                        &mut failures,
+                        &entry.source_tensor_name,
+                        &entry.plan_fingerprint,
+                        expected,
+                        "plan_fingerprints sidecar",
+                    );
                 }
                 None => failures.push(failure(
-                    "checksum_missing",
+                    "plan_fingerprint_missing",
                     Some(entry.source_tensor_name.clone()),
-                    "checksums file is missing this tensor entry",
+                    "plan_fingerprints file is missing this tensor entry",
                 )),
             }
         }
-        for unexpected in checksums
-            .keys()
-            .filter(|name| !actual_names.contains(*name))
-        {
+        for unexpected in sidecar.keys().filter(|name| !actual_names.contains(*name)) {
             failures.push(failure(
-                "checksum_mismatch",
+                "plan_fingerprint_mismatch",
                 Some(unexpected.clone()),
-                "checksums file contains a tensor not present in artifact index",
+                "plan_fingerprints file contains a tensor not present in artifact index",
             ));
         }
-        format!("{covered}/{} source tensors", index.entries.len())
-    } else {
-        let covered = index
-            .entries
-            .iter()
-            .filter(|entry| entry.source_checksum.is_some())
-            .count();
-        format!("{covered}/{} source tensors", index.entries.len())
-    };
+    }
+    let plan_fingerprint_coverage = format!(
+        "{independent_covered}/{} plan fingerprints (name/length/policy; not a payload digest)",
+        index.entries.len()
+    );
 
     ValidationReport {
         status: if failures.is_empty() { "PASS" } else { "FAIL" }.to_string(),
@@ -1209,7 +1221,7 @@ fn build_validation_report(
         protected_norm_violations,
         expert_association_count,
         unknown_unresolved_warning_count: warnings.len(),
-        checksum_coverage,
+        plan_fingerprint_coverage,
         source_total_bytes,
         artifact_total_bytes: index.artifact_total_bytes,
         byte_accounting_result: if source_total_bytes == index.artifact_total_bytes {
@@ -1234,16 +1246,6 @@ fn failure(category: &str, tensor: Option<String>, message: impl Into<String>) -
 fn planned_warnings() -> Vec<WarningRecord> {
     vec![
         WarningRecord {
-            category: "unresolved_expert_projection".to_string(),
-            tensor: Some("*.slot_00.moe_expert.unresolved".to_string()),
-            message: "expert slot 00 is structurally preserved but projection label remains unresolved".to_string(),
-        },
-        WarningRecord {
-            category: "unresolved_expert_projection".to_string(),
-            tensor: Some("*.slot_02.moe_expert.unresolved".to_string()),
-            message: "expert slot 02 is structurally preserved but projection label remains unresolved".to_string(),
-        },
-        WarningRecord {
             category: "attn_proj_i8_slot".to_string(),
             tensor: Some("*.slot_03/04/05/06".to_string()),
             message: "attention projection slots (attn_proj_i8.*) are wrapped as existing int8 payloads unless shape/dtype/count drift occurs".to_string(),
@@ -1261,7 +1263,10 @@ fn write_conversion_outputs(
     fs::create_dir_all(output_root)?;
     fs::copy(manifest_path, output_root.join("manifest.used.json"))?;
     write_json(output_root.join("artifact.index.json"), index)?;
-    write_json(output_root.join("checksums.json"), &output_checksums(index))?;
+    write_json(
+        output_root.join(PLAN_FINGERPRINTS_FILE),
+        &plan_fingerprint_map(index),
+    )?;
     write_json(output_root.join("warnings.json"), warnings)?;
     if !dry_run {
         fs::write(
@@ -1285,8 +1290,8 @@ fn write_smoke_outputs(
     fs::create_dir_all(output_root)?;
     write_json(output_root.join("smoke.index.json"), index)?;
     write_json(
-        output_root.join("smoke.checksums.json"),
-        &output_checksums(index),
+        output_root.join(SMOKE_PLAN_FINGERPRINTS_FILE),
+        &plan_fingerprint_map(index),
     )?;
     write_json(output_root.join("smoke.warnings.json"), warnings)?;
     if !dry_run {
@@ -1317,14 +1322,14 @@ fn write_validation_outputs(output_root: &Path, report: &ValidationReport) -> Re
     Ok(())
 }
 
-fn output_checksums(index: &ArtifactIndex) -> BTreeMap<String, String> {
+fn plan_fingerprint_map(index: &ArtifactIndex) -> BTreeMap<String, String> {
     index
         .entries
         .iter()
         .map(|entry| {
             (
                 entry.source_tensor_name.clone(),
-                entry.output_checksum.clone(),
+                entry.plan_fingerprint.clone(),
             )
         })
         .collect()
@@ -1428,7 +1433,7 @@ fn smoke_summary(index: &ArtifactIndex) -> String {
 
 fn validation_summary(report: &ValidationReport) -> String {
     format!(
-        "# Grok-1 artifact validation summary\n\n- status: {}\n- source tensor count: {}\n- artifact tensor count: {}\n- router count: {}\n- protected router violations: {}\n- protected norm violations: {}\n- expert association count: {}\n- unknown/unresolved warning count: {}\n- checksum coverage: {}\n- byte accounting result: {}\n- source total bytes: {}\n- artifact total bytes: {}\n- failure count: {}\n",
+        "# Grok-1 artifact validation summary\n\n- status: {}\n- source tensor count: {}\n- artifact tensor count: {}\n- router count: {}\n- protected router violations: {}\n- protected norm violations: {}\n- expert association count: {}\n- unknown/unresolved warning count: {}\n- plan fingerprint coverage: {}\n- byte accounting result: {}\n- source total bytes: {}\n- artifact total bytes: {}\n- failure count: {}\n",
         report.status,
         report.source_tensor_count,
         report.artifact_tensor_count,
@@ -1437,7 +1442,7 @@ fn validation_summary(report: &ValidationReport) -> String {
         report.protected_norm_violations,
         report.expert_association_count,
         report.unknown_unresolved_warning_count,
-        report.checksum_coverage,
+        report.plan_fingerprint_coverage,
         report.byte_accounting_result,
         report.source_total_bytes,
         report.artifact_total_bytes,
@@ -1466,6 +1471,38 @@ mod tests {
         let path = dir.join("manifest.json");
         fs::write(&path, GROK1_BASELINE_JSON).expect("manifest write");
         path
+    }
+
+    fn dry_convert(name: &str) -> (PathBuf, ArtifactIndex) {
+        let dir = temp_dir(name);
+        let manifest = write_manifest(&dir);
+        let out = dir.join("out");
+        let index = convert_grok1(ConvertOptions {
+            checkpoint: None,
+            manifest: &manifest,
+            output_root: &out,
+            format: GROK1_ARTIFACT_FORMAT,
+            protect_routers: true,
+            protect_norms: true,
+            dry_run: true,
+        })
+        .expect("convert");
+        (out, index)
+    }
+
+    fn full_validation_report(
+        index: &ArtifactIndex,
+        sidecar: Option<&BTreeMap<String, String>>,
+    ) -> ValidationReport {
+        let expected_entries = expected_full_entry_map().expect("expected entries");
+        build_validation_report(
+            index,
+            GROK1_ARTIFACT_FORMAT,
+            true,
+            true,
+            Some(&expected_entries),
+            sidecar,
+        )
     }
 
     #[test]
@@ -1523,9 +1560,82 @@ mod tests {
         assert_eq!(index.source_total_bytes, GROK1_TENSOR_TOTAL_BYTES);
         assert!(out.join("artifact.index.json").is_file());
         assert!(out.join("conversion.summary.md").is_file());
-        assert!(out.join("checksums.json").is_file());
+        assert!(out.join("plan_fingerprints.json").is_file());
+        assert!(!out.join("checksums.json").exists());
         assert!(out.join("warnings.json").is_file());
         assert!(!out.join("artifact.saaq-g1-v0.meta").exists());
+    }
+
+    #[test]
+    fn plan_fingerprint_is_not_emitted_as_sha256_content_digest() {
+        let (out, index) = dry_convert("plan_fingerprint_emit");
+        let entry = index.entries.first().expect("entry");
+        assert!(
+            !entry.plan_fingerprint.starts_with("sha256:"),
+            "plan_fingerprint must not use a sha256: prefix: {}",
+            entry.plan_fingerprint
+        );
+        assert_eq!(
+            entry.plan_fingerprint,
+            plan_fingerprint(
+                &entry.source_tensor_name,
+                entry.byte_len,
+                &entry.quant_policy_applied
+            )
+        );
+        let raw = fs::read_to_string(out.join("artifact.index.json")).expect("index json");
+        assert!(raw.contains("\"plan_fingerprint\""));
+        assert!(!raw.contains("\"output_checksum\""));
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("index parse");
+        let fp = parsed["entries"][0]["plan_fingerprint"]
+            .as_str()
+            .expect("plan_fingerprint string");
+        assert!(!fp.to_ascii_lowercase().starts_with("sha256:"));
+        let sidecar = fs::read_to_string(out.join(PLAN_FINGERPRINTS_FILE)).expect("sidecar");
+        assert!(!sidecar.to_ascii_lowercase().contains("sha256:"));
+    }
+
+    #[test]
+    fn validation_reports_plan_fingerprint_coverage_not_checksum() {
+        let (_out, index) = dry_convert("plan_fingerprint_coverage");
+        let sidecar = plan_fingerprint_map(&index);
+        let report = full_validation_report(&index, Some(&sidecar));
+        assert_eq!(report.status, "PASS");
+        assert!(
+            report
+                .plan_fingerprint_coverage
+                .contains("plan fingerprints (name/length/policy; not a payload digest)")
+        );
+        assert!(
+            !report
+                .plan_fingerprint_coverage
+                .to_ascii_lowercase()
+                .contains("sha256")
+        );
+        let report_json = serde_json::to_string(&report).expect("report json");
+        assert!(report_json.contains("\"plan_fingerprint_coverage\""));
+        assert!(!report_json.contains("\"checksum_coverage\""));
+    }
+
+    #[test]
+    fn validation_rejects_sha256_prefix_as_kind_mismatch() {
+        let (_out, mut theater) = dry_convert("plan_fingerprint_kind");
+        let sidecar = plan_fingerprint_map(&theater);
+        if let Some(entry) = theater.entries.first_mut() {
+            entry.plan_fingerprint = format!("sha256:{}", entry.plan_fingerprint);
+        }
+        let report = full_validation_report(&theater, Some(&sidecar));
+        assert_eq!(report.status, "FAIL");
+        assert!(report.failures.iter().any(|failure| {
+            failure.category == "plan_fingerprint_kind_mismatch"
+                && failure.message.contains("not a payload digest")
+        }));
+        assert!(
+            !report
+                .failures
+                .iter()
+                .any(|failure| failure.category == "checksum_mismatch")
+        );
     }
 
     #[test]
@@ -1555,6 +1665,8 @@ mod tests {
         );
         assert!(out.join("smoke.index.json").is_file());
         assert!(out.join("smoke.summary.md").is_file());
+        assert!(out.join("smoke.plan_fingerprints.json").is_file());
+        assert!(!out.join("smoke.checksums.json").exists());
     }
 
     #[test]
@@ -1732,7 +1844,7 @@ mod tests {
             dry_run: true,
         })
         .expect("convert");
-        let checksums = output_checksums(&index);
+        let fingerprints = plan_fingerprint_map(&index);
         index.format = "custom-grok1".to_string();
         index.schema = "foreign.artifact_index".to_string();
         index.schema_version = 9;
@@ -1750,14 +1862,14 @@ mod tests {
         if let Some(entry) = index
             .entries
             .iter_mut()
-            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_qkv")
+            .find(|entry| entry.source_tensor_name == "block_002.slot_03.attn_proj_i8.narrow")
         {
             entry.structural_name = "block_002.slot_03.tampered".to_string();
         }
         if let Some(entry) = index
             .entries
             .iter_mut()
-            .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.unresolved")
+            .find(|entry| entry.source_tensor_name == "block_001.slot_00.moe_expert.gate")
         {
             entry.artifact_path = "tampered.meta".to_string();
             entry.artifact_offset += 123;
@@ -1770,7 +1882,7 @@ mod tests {
             final_norm.source_tensor_name = "final_norm.slot_00.renamed".to_string();
         }
         if let Some(entry) = index.entries.first_mut() {
-            entry.output_checksum = "sha256:deadbeef".to_string();
+            entry.plan_fingerprint = format!("sha256:{}", entry.plan_fingerprint);
         }
         let expected_entries = expected_full_entry_map().expect("expected entries");
         let report = build_validation_report(
@@ -1779,7 +1891,7 @@ mod tests {
             true,
             true,
             Some(&expected_entries),
-            Some(&checksums),
+            Some(&fingerprints),
         );
         for category in [
             "schema_mismatch",
@@ -1790,8 +1902,8 @@ mod tests {
             "missing_tensor",
             "manifest_artifact_mismatch",
             "artifact_location_mismatch",
-            "checksum_mismatch",
-            "checksum_missing",
+            "plan_fingerprint_kind_mismatch",
+            "plan_fingerprint_missing",
             "router_count_mismatch",
         ] {
             assert!(
@@ -1803,12 +1915,27 @@ mod tests {
                 report.failures
             );
         }
+        // Target the specific tampered entry, not just any mismatch.
+        //
+        // `manifest_artifact_mismatch` is raised by a compound OR over
+        // structural_name / block / slot / kind / policy, and every branch emits
+        // the same message prefix. Asserting only `contains("expected
+        // structural_name")` was therefore satisfied by the *router* mutation
+        // above (which trips the `block` branch), so the structural_name branch
+        // itself was never actually pinned -- and until this commit the entry
+        // this block tampers with was looked up under a name the code never
+        // produces, so the mutation did not even happen. Both halves are fixed:
+        // the lookup uses the real name, and the assertion names the entry and
+        // the tampered value.
         assert!(
             report.failures.iter().any(|failure| {
                 failure.category == "manifest_artifact_mismatch"
-                    && failure.message.contains("expected structural_name")
+                    && failure.tensor.as_deref() == Some("block_002.slot_03.attn_proj_i8.narrow")
+                    && failure
+                        .message
+                        .contains("got structural_name block_002.slot_03.tampered")
             }),
-            "missing structural_name mismatch failure: {:?}",
+            "missing structural_name mismatch for the tampered attn_proj_i8.narrow entry: {:?}",
             report.failures
         );
     }

@@ -15,7 +15,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use half::f16;
@@ -26,7 +26,7 @@ use crate::{
     core::{
         manifest::{DissectManifest, embedded_grok1_baseline, load_manifest},
         npy::{MmapNpy, NpyDtype, npy_stem_to_tensor_name},
-        precision::decide as precision_decide,
+        precision::decide_for_tensor as precision_decide,
         quantizer::{convert_f32_to_f16_bytes, passthrough_f16, quantize_f16, quantize_f32},
         selection::{TensorClass, classify},
         weight_pack::{
@@ -367,6 +367,16 @@ pub fn run_quantization(config: &QuantizationConfig) -> Result<Vec<ShardStats>> 
         "oz.gif_threshold_scope".into(),
         PackMetaValue::Str("baseline_only_not_applied".into()),
     );
+    // Provenance marker for the SAAQ τ source: when a saaq-tau-map was
+    // supplied, per-tensor gif_threshold values may come from it (precedence
+    // 2 — see core::saaq). The applied values remain in the v3 tensor rows;
+    // this key just records that the source was active.
+    if let Some(map) = &config.saaq_tau_map {
+        metadata.insert(
+            "oz.saaq_tau_entries".into(),
+            PackMetaValue::U32(map.entries.len() as u32),
+        );
+    }
     append_grok1_arch_metadata(&mut metadata);
 
     let out_file = File::create(&config.output_path).map_err(GrokOzempicError::Io)?;
@@ -464,7 +474,7 @@ fn quantize_safetensors_entry(
     if dtype == SourceDtype::Other {
         // i8/Other tensors from xai-dissect inventory are covered by structural manifest for alignment
         // (see grok1_inventory.rs:NOTE and structural-manifest.json _i8_streaming_note); they arrive
-        // via artifact wrapping (wrap_existing_int8_*), not this float-only stream path.
+        // via artifact wrapping (OperationKind::WrapExistingQuantized), not this float-only stream path.
         // Kilo agent xAI/Grok Build 0.1 addressing Codex P1 on PR #26.
         return Err(GrokOzempicError::InvalidConfig(format!(
             "tensor {} has unsupported dtype",
@@ -472,38 +482,7 @@ fn quantize_safetensors_entry(
         )));
     }
 
-    if entry.emits_fp16_bytes() {
-        let fp16_bytes = encode_fp16_bytes(dtype, view.data())?;
-        Ok(QuantizedPayload {
-            bytes: fp16_bytes,
-            ternary_sparsity: None,
-            stats: TensorRowStats::fp16(),
-        })
-    } else {
-        let qt = match dtype {
-            SourceDtype::F32 => {
-                let f32_slice = bytemuck_cast_f32(view.data());
-                quantize_f32(f32_slice, entry.gif_threshold)
-            }
-            SourceDtype::F16 => {
-                let f16_slice: &[f16] = bytemuck_cast_f16(view.data());
-                quantize_f16(f16_slice, entry.gif_threshold)
-            }
-            SourceDtype::BF16 => {
-                let f32_vals = bf16_bytes_to_f32(view.data());
-                quantize_f32(&f32_vals, entry.gif_threshold)
-            }
-            SourceDtype::Other => unreachable!(),
-        };
-        Ok(QuantizedPayload {
-            bytes: qt.packed,
-            ternary_sparsity: Some(qt.sparsity),
-            // The applied multiplier comes back from the quantizer rather than
-            // being re-read from `entry`, so the row records what the gate
-            // actually used.
-            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
-        })
-    }
+    quantize_raw(dtype, view.data(), entry)
 }
 
 fn quantize_npy_entry(
@@ -518,40 +497,55 @@ fn quantize_npy_entry(
             entry.source_path.display()
         )));
     }
-    let raw = npy.data();
+    quantize_raw(dtype, npy.data(), entry)
+}
+
+/// Turn one tensor's raw source bytes into its GOZ1 payload.
+///
+/// Format-independent by construction: everything past "give me the bytes and
+/// their dtype" was byte-identical between the safetensors and npy paths, and
+/// keeping two copies is how the GH #40 fail-closed guard ended up tested on
+/// only one of them (GH #103). The callers keep exactly what genuinely differs
+/// — how the source is opened, how its dtype is read, and their distinct
+/// unsupported-dtype messages, which are user-visible and not interchangeable.
+///
+/// `dtype` must not be [`SourceDtype::Other`]; callers reject that first so
+/// they can name the offending file in the format's own vocabulary.
+fn quantize_raw(dtype: SourceDtype, raw: &[u8], entry: &ManifestEntry) -> Result<QuantizedPayload> {
+    debug_assert_ne!(
+        dtype,
+        SourceDtype::Other,
+        "callers must reject Other before calling quantize_raw"
+    );
 
     if entry.emits_fp16_bytes() {
-        let fp16_bytes = encode_fp16_bytes(dtype, raw)?;
-        Ok(QuantizedPayload {
-            bytes: fp16_bytes,
+        return Ok(QuantizedPayload {
+            bytes: encode_fp16_bytes(dtype, raw)?,
             ternary_sparsity: None,
             stats: TensorRowStats::fp16(),
-        })
-    } else {
-        let qt = match dtype {
-            SourceDtype::F32 => {
-                let f32_slice = bytemuck_cast_f32(raw);
-                quantize_f32(f32_slice, entry.gif_threshold)
-            }
-            SourceDtype::F16 => {
-                let f16_slice: &[f16] = bytemuck_cast_f16(raw);
-                quantize_f16(f16_slice, entry.gif_threshold)
-            }
-            SourceDtype::BF16 => {
-                let f32_vals = bf16_bytes_to_f32(raw);
-                quantize_f32(&f32_vals, entry.gif_threshold)
-            }
-            SourceDtype::Other => unreachable!(),
-        };
-        Ok(QuantizedPayload {
-            bytes: qt.packed,
-            ternary_sparsity: Some(qt.sparsity),
-            // The applied multiplier comes back from the quantizer rather than
-            // being re-read from `entry`, so the row records what the gate
-            // actually used.
-            stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
-        })
+        });
     }
+
+    let qt = match dtype {
+        SourceDtype::F32 => quantize_f32(bytemuck_cast_f32(raw), entry.gif_threshold),
+        SourceDtype::F16 => {
+            let f16_slice: &[f16] = bytemuck_cast_f16(raw);
+            quantize_f16(f16_slice, entry.gif_threshold)
+        }
+        SourceDtype::BF16 => {
+            let f32_vals = bf16_bytes_to_f32(raw);
+            quantize_f32(&f32_vals, entry.gif_threshold)
+        }
+        SourceDtype::Other => unreachable!("rejected by the caller"),
+    };
+    Ok(QuantizedPayload {
+        bytes: qt.packed,
+        ternary_sparsity: Some(qt.sparsity),
+        // The applied multiplier comes back from the quantizer rather than
+        // being re-read from `entry`, so the row records what the gate
+        // actually used.
+        stats: TensorRowStats::ternary(qt.scale, qt.gif_threshold, qt.threshold),
+    })
 }
 
 /// Encode raw source bytes as FP16 for tensors that emit through the
@@ -590,17 +584,18 @@ fn classify_and_decide(
         &config.router_patterns
     };
     let class = classify(name, dissect_manifest, legacy_patterns);
-    // V2 structural manifests are fail-closed: they are authored for full
-    // explicit coverage, so a Default classification means the input name
-    // does not follow the structural convention (or a rule is missing).
+    // V2 and other non-V1 conventions are fail-closed: they are authored for
+    // full explicit coverage, so a Default classification means the input name
+    // does not follow the declared convention (or a rule is missing).
     // Falling through to defaults here is how routers/norms would get
-    // silently ternary-quantized — hard-error instead (GH #40 / RM-191).
+    // silently ternary-quantized — hard-error instead (GH #40 / RM-191,
+    // GH #32 / RM-65).
     if matches!(class, TensorClass::Default)
-        && dissect_manifest.is_some_and(|m| m.is_structural_v2())
+        && dissect_manifest.is_some_and(|m| m.unmatched_tensors_fail_closed())
     {
         return Err(GrokOzempicError::ManifestV2UnmatchedTensor { name: name.into() });
     }
-    let (precision, gif_threshold) = precision_decide(&class, dissect_manifest, config)?;
+    let (precision, gif_threshold) = precision_decide(name, &class, dissect_manifest, config)?;
     Ok((class, precision, gif_threshold))
 }
 
@@ -618,28 +613,29 @@ fn build_manifest_safetensors(
                 .map_err(GrokOzempicError::Io)?
         };
         let tensors = SafeTensors::deserialize(&mmap).map_err(GrokOzempicError::Safetensors)?;
-        for (name, view) in tensors.tensors() {
+        // Sort by tensor name before building entries (GH #115).
+        //
+        // `SafeTensors::tensors()` walks `Metadata::index_map`, a
+        // `std::collections::HashMap<String, usize>` whose `RandomState` is
+        // seeded per instance — so iteration order differs between processes
+        // and even between two `deserialize` calls in one process. That order
+        // becomes the manifest order, which becomes the GOZ1 tensor table and
+        // the data-section layout, so two runs over the same shard produced
+        // byte-different packs.
+        //
+        // The npy path has always been deterministic (`paths.sort()` in
+        // `collect_npy_files`); sorting here makes the two documented input
+        // formats agree, and makes pack *bytes* reproducible so a hash or a
+        // diff of a pack means something. Note `file_size` specifically was
+        // already order-invariant — permuting tensors rearranges the container
+        // without changing its length — so it is the byte-level evidence this
+        // fixes, not the size figure.
+        let mut named = tensors.tensors();
+        named.sort_by(|(a, _), (b, _)| a.cmp(b));
+        for (name, view) in named {
             let dtype = parse_safetensors_dtype(view.dtype());
-            if dtype == SourceDtype::Other {
-                // i8/Other covered for alignment via structural manifest (see grok1_inventory NOTE);
-                // skipped in float stream; int8 via artifact wraps. Kilo agent xAI/Grok Build 0.1 (Codex P1 PR#26).
-                // Under V2 still classify the name so fail-closed applies to *all* present tensors
-                // (including unsupported dtypes) before the intentional skip — GH #40 / RM-191.
-                if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
-                    let _ = classify_and_decide(&name, dissect_manifest, config)?;
-                }
-                continue;
-            }
-            let (_class, precision, gif_threshold) =
-                classify_and_decide(&name, dissect_manifest, config)?;
             let shape: Vec<u64> = view.shape().iter().map(|&d| d as u64).collect();
-            v.push(ManifestEntry {
-                source_path: shard.clone(),
-                tensor_name: name,
-                shape,
-                precision,
-                gif_threshold,
-            });
+            push_classified_entry(&mut v, shard, name, dtype, shape, dissect_manifest, config)?;
         }
     }
     Ok(v)
@@ -658,28 +654,64 @@ fn build_manifest_npy(
             GrokOzempicError::InvalidConfig(format!("bad npy filename: {}", path.display()))
         })?;
         let tensor_name = npy_stem_to_tensor_name(stem);
-        if dtype == SourceDtype::Other {
-            // i8/Other from xai-dissect inventory covered in structural manifest for alignment only
-            // (grok1_inventory.rs NOTE + structural _i8_streaming_note). Skipped here; enter via artifact wraps.
-            // Kilo agent xAI/Grok Build 0.1 (Codex P1 on PR #26).
-            // Under V2 still classify the name so fail-closed applies before the skip (GH #40 / RM-191).
-            if dissect_manifest.is_some_and(|m| m.is_structural_v2()) {
-                let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
-            }
-            continue;
-        }
-        let (_class, precision, gif_threshold) =
-            classify_and_decide(&tensor_name, dissect_manifest, config)?;
         let shape: Vec<u64> = npy.shape().iter().map(|&d| d as u64).collect();
-        v.push(ManifestEntry {
-            source_path: path.clone(),
+        push_classified_entry(
+            &mut v,
+            path,
             tensor_name,
+            dtype,
             shape,
-            precision,
-            gif_threshold,
-        });
+            dissect_manifest,
+            config,
+        )?;
     }
     Ok(v)
+}
+
+/// Classify one source tensor and append its [`ManifestEntry`], or skip it.
+///
+/// This is the single place the GH #40 / RM-191 fail-closed rule is applied to
+/// a discovered tensor. It used to be copy-pasted once per input format, which
+/// is exactly how the safetensors copy ended up exercised by nothing until
+/// GH #103 — the raise in `classify_and_decide` was shared, but the call that
+/// reaches it for unsupported dtypes was not.
+///
+/// Unsupported (`SourceDtype::Other`) tensors are skipped by the float stream:
+/// i8/Other from the xai-dissect inventory are covered by the structural
+/// manifest for alignment only (see `grok1_inventory.rs` NOTE and
+/// `structural-manifest.json` `_i8_streaming_note`) and enter through the
+/// artifact wrapping path, not here. Under a fail-closed (non-V1) manifest
+/// their names are still classified **before** that skip, so a legacy or
+/// misspelled stem cannot silently disappear past fail-closed.
+///
+/// Note this rejects on *misclassification*, never on *absence*: a tensor that
+/// is simply missing from the input produces no name to match. Completeness is
+/// enforced separately — see `.claude/rules/goz1-pipeline.md`.
+fn push_classified_entry(
+    out: &mut Vec<ManifestEntry>,
+    source_path: &Path,
+    tensor_name: String,
+    dtype: SourceDtype,
+    shape: Vec<u64>,
+    dissect_manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<()> {
+    if dtype == SourceDtype::Other {
+        if dissect_manifest.is_some_and(|m| m.unmatched_tensors_fail_closed()) {
+            let _ = classify_and_decide(&tensor_name, dissect_manifest, config)?;
+        }
+        return Ok(());
+    }
+    let (_class, precision, gif_threshold) =
+        classify_and_decide(&tensor_name, dissect_manifest, config)?;
+    out.push(ManifestEntry {
+        source_path: source_path.to_path_buf(),
+        tensor_name,
+        shape,
+        precision,
+        gif_threshold,
+    });
+    Ok(())
 }
 
 fn collect_safetensor_shards(dir: &str) -> Result<Vec<PathBuf>> {
@@ -818,6 +850,80 @@ mod tests {
     }
 
     /// Per-test unique scratch dir.
+    /// Minimal `*.safetensors` shard writer — the safetensors twin of
+    /// [`write_npy_f32`] / [`write_npy_i8`].
+    ///
+    /// Built with `safetensors::serialize` rather than hand-rolled bytes on
+    /// purpose. `bytemuck_cast_f32` / `bytemuck_cast_f16` reinterpret
+    /// `view.data()` as `&[f32]` / `&[f16]` with no alignment check, and the
+    /// safetensors format does not guarantee the data section is 4- or 2-byte
+    /// aligned. Letting the library lay the file out keeps these fixtures on
+    /// the aligned happy path; a hand-built shard could be UB rather than a
+    /// test failure. Do not replace this with a byte literal.
+    ///
+    /// Unlike `.npy` (one tensor per file), a shard holds many tensors and the
+    /// names live inside the file — the filename only has to end in
+    /// `.safetensors` so `collect_safetensor_shards` picks it up.
+    fn write_safetensors_raw(
+        path: &std::path::Path,
+        tensors: &[(&str, safetensors::Dtype, &[usize], &[u8])],
+    ) {
+        use safetensors::tensor::TensorView;
+        let views: Vec<(&str, TensorView<'_>)> = tensors
+            .iter()
+            .map(|&(name, dtype, shape, data)| {
+                let view = TensorView::new(dtype, shape.to_vec(), data)
+                    .expect("safetensors fixture: data length must match dtype x shape");
+                (name, view)
+            })
+            .collect();
+        let bytes = safetensors::serialize(views, None).expect("serialize safetensors fixture");
+        std::fs::write(path, bytes).expect("write safetensors fixture");
+    }
+
+    /// F32 shard: `&[(tensor_name, shape, data)]`.
+    fn write_safetensors_f32(path: &std::path::Path, tensors: &[(&str, &[usize], &[f32])]) {
+        let payloads: Vec<Vec<u8>> = tensors
+            .iter()
+            .map(|(_, shape, data)| {
+                let expected: usize = shape.iter().product();
+                assert_eq!(expected, data.len(), "data length must match shape");
+                data.iter().flat_map(|v| v.to_le_bytes()).collect()
+            })
+            .collect();
+        let rows: Vec<(&str, safetensors::Dtype, &[usize], &[u8])> = tensors
+            .iter()
+            .zip(&payloads)
+            .map(|((name, shape, _), bytes)| {
+                (*name, safetensors::Dtype::F32, *shape, bytes.as_slice())
+            })
+            .collect();
+        write_safetensors_raw(path, &rows);
+    }
+
+    /// I8 shard — `parse_safetensors_dtype` maps I8 to [`SourceDtype::Other`],
+    /// which is the branch that exercises the V2 pre-skip classification at
+    /// `build_manifest_safetensors`. The safetensors counterpart of
+    /// [`write_npy_i8`].
+    fn write_safetensors_i8(path: &std::path::Path, tensors: &[(&str, &[usize], &[i8])]) {
+        let payloads: Vec<Vec<u8>> = tensors
+            .iter()
+            .map(|(_, shape, data)| {
+                let expected: usize = shape.iter().product();
+                assert_eq!(expected, data.len(), "data length must match shape");
+                data.iter().map(|v| *v as u8).collect()
+            })
+            .collect();
+        let rows: Vec<(&str, safetensors::Dtype, &[usize], &[u8])> = tensors
+            .iter()
+            .zip(&payloads)
+            .map(|((name, shape, _), bytes)| {
+                (*name, safetensors::Dtype::I8, *shape, bytes.as_slice())
+            })
+            .collect();
+        write_safetensors_raw(path, &rows);
+    }
+
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -1344,6 +1450,47 @@ mod tests {
         }
     }
 
+    /// HF MoE plugins share fail-closed unmatched handling with V2
+    /// (CodeAnt on PR #138 / GH #32).
+    #[test]
+    fn hf_moe_manifest_fails_closed_on_unmatched_name() {
+        let dir = scratch_dir("hf-moe-fail-closed-input");
+        write_npy_f32(
+            &dir.join("blk__0__moe_gate__weight.npy"),
+            &[2, 2],
+            &[0.1f32, -0.2, 0.3, -0.4],
+        );
+        let manifest_path = scratch_dir("hf-moe-fail-closed-manifest").join("m.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+                "schema": "xai-dissect.manifest",
+                "schema_version": 1,
+                "model": {
+                    "family": "toy-moe",
+                    "tensor_name_convention": "model.layers.{L}.{module}.{param}"
+                },
+                "defaults": { "precision": "ternary_snn" },
+                "preserve": [
+                    { "name": "model.layers.*.block_sparse_moe.gate.weight" }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let out = scratch_dir("hf-moe-fail-closed-out").join("bad.goz1");
+
+        let mut config = base_config(&dir, &out);
+        config.manifest_path = Some(manifest_path);
+        let err = run_quantization(&config)
+            .expect_err("legacy name under an HF MoE manifest must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
     /// Unsupported dtypes are skipped by the float stream, but under V2 their
     /// names must still be classified so a legacy/misspelled stem cannot
     /// silently disappear past fail-closed (Codex/CodeAnt on PR #55).
@@ -1369,6 +1516,241 @@ mod tests {
         }
     }
 
+    // ---------- safetensors input path (GH #103) ----------
+    //
+    // Until #103 the safetensors half of `quantize-goz1` had zero coverage,
+    // although it is one of the two documented production input formats. The
+    // V2 fail-closed *raise* is shared with npy (`classify_and_decide`), but
+    // the pre-skip call that applies it to unsupported dtypes before the
+    // intentional `continue` is duplicated per format, and only the npy copy
+    // was exercised.
+    //
+    // ORDERING. `SafeTensors::tensors()` iterates a randomly-seeded
+    // `std::collections::HashMap`, so the order it hands back still varies run
+    // to run. `build_manifest_safetensors` now sorts by tensor name before
+    // building entries (GH #115), so the resulting manifest — and therefore the
+    // GOZ1 tensor table and data layout — is deterministic, and
+    // `safetensors_packs_are_byte_reproducible` below asserts exactly that.
+    //
+    // These tests were originally written order-agnostically, before that sort
+    // existed. Two habits from then are still worth keeping:
+    //
+    // - Assert on aggregate counts or named lookups rather than on position.
+    //   Nothing here depends on *which* index a tensor lands at, only that the
+    //   whole pack is stable, so the tests stay honest if the ordering rule
+    //   ever changes from name to offset.
+    // - The fail-closed fixtures carry exactly ONE unmatched tensor. Under V2 a
+    //   shard with several unmatched names would still report an arbitrary one,
+    //   because the error is raised on the first match failure during the sorted
+    //   walk and the fixture's intent is to pin *which* name is named.
+
+    fn safetensors_config(dir: &std::path::Path, out: &std::path::Path) -> QuantizationConfig {
+        let mut config = base_config(dir, out);
+        config.input_format = QuantizationInputFormat::Safetensors;
+        config
+    }
+
+    /// End-to-end twin of [`v2_structural_manifest_end_to_end_npy`]. One shard
+    /// holds all four structural tensors, so unlike the npy fixture (one file
+    /// per tensor) there is a single `ShardStats` carrying aggregate counts —
+    /// which is order-independent, and the right shape of assertion here.
+    #[test]
+    fn v2_structural_manifest_end_to_end_safetensors() {
+        let dir = scratch_dir("v2-st-e2e-input");
+        write_safetensors_f32(
+            &dir.join("shard.safetensors"),
+            &[
+                (
+                    "block_000.slot_00.moe_expert.gate",
+                    &[2, 2],
+                    &[0.1f32, -0.2, 0.3, -0.4],
+                ),
+                (
+                    "block_000.slot_07.block_norm",
+                    &[2, 2],
+                    &[1.0f32, -1.0, 0.5, -0.5],
+                ),
+                (
+                    "block_000.slot_11.router",
+                    &[2, 2],
+                    &[0.05f32, 0.9, -0.05, -0.9],
+                ),
+                (
+                    "embedding.slot_00.token_embedding",
+                    &[2, 2],
+                    &[0.3f32, -0.3, 0.01, -0.01],
+                ),
+            ],
+        );
+        let out = scratch_dir("v2-st-e2e-out").join("v2st.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let stats = run_quantization(&config)
+            .expect("V2 structural manifest must be accepted for safetensors");
+
+        assert_eq!(stats.len(), 1, "one ShardStats per safetensors shard");
+        // router + block_norm preserve (fp16-at-rest); gate + embedding ternary.
+        assert_eq!(
+            (stats[0].tensors_fp16, stats[0].tensors_ternary),
+            (2, 2),
+            "routers/norms preserved and candidates ternary, counted per shard"
+        );
+        assert!(out.exists(), "pack must be written");
+    }
+
+    /// Two runs over the same shard must produce byte-identical packs (GH #115).
+    ///
+    /// `SafeTensors::tensors()` iterates a randomly-seeded `HashMap`, so before
+    /// the sort in `build_manifest_safetensors` this failed — tensor order, and
+    /// therefore the GOZ1 tensor table and data layout, varied per run. The npy
+    /// path has always been deterministic via `paths.sort()`.
+    ///
+    /// Enough tensors that a random permutation is overwhelmingly unlikely to
+    /// coincide: 8! = 40320 orderings, so a regression is caught ~99.998% of
+    /// the time per run rather than being a coin flip.
+    #[test]
+    fn safetensors_packs_are_byte_reproducible() {
+        let dir = scratch_dir("st-repro-input");
+        let names = [
+            "block_000.slot_00.moe_expert.gate",
+            "block_000.slot_01.moe_expert.down",
+            "block_000.slot_02.moe_expert.up",
+            "block_000.slot_07.block_norm",
+            "block_000.slot_08.block_norm",
+            "block_000.slot_11.router",
+            "embedding.slot_00.token_embedding",
+            "final_norm.slot_00.final_norm",
+        ];
+        let payload = [0.1f32, -0.2, 0.3, -0.4];
+        let rows: Vec<(&str, &[usize], &[f32])> = names
+            .iter()
+            .map(|n| (*n, &[2usize, 2][..], &payload[..]))
+            .collect();
+        write_safetensors_f32(&dir.join("shard.safetensors"), &rows);
+
+        let out_a = scratch_dir("st-repro-a").join("a.goz1");
+        let out_b = scratch_dir("st-repro-b").join("b.goz1");
+
+        let mut cfg_a = safetensors_config(&dir, &out_a);
+        cfg_a.manifest_path = Some(in_tree_structural_manifest());
+        run_quantization(&cfg_a).expect("first pack");
+
+        // Fresh config and a fresh deserialize -- a new HashMap instance, so a
+        // new random seed. This is what makes the test meaningful.
+        let mut cfg_b = safetensors_config(&dir, &out_b);
+        cfg_b.manifest_path = Some(in_tree_structural_manifest());
+        run_quantization(&cfg_b).expect("second pack");
+
+        assert_eq!(
+            goz1_bytes(&out_a),
+            goz1_bytes(&out_b),
+            "two runs over the same safetensors shard must produce identical packs; \
+             tensor order must not depend on HashMap iteration order (GH #115)"
+        );
+    }
+
+    /// Fail-closed on a supported dtype through the safetensors builder. Twin
+    /// of [`v2_manifest_fails_closed_on_unmatched_name`].
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_name_safetensors() {
+        let dir = scratch_dir("v2-st-fail-closed-input");
+        write_safetensors_f32(
+            &dir.join("shard.safetensors"),
+            &[("blk.0.moe_gate.weight", &[2, 2], &[0.1f32, -0.2, 0.3, -0.4])],
+        );
+        let out = scratch_dir("v2-st-fail-closed-out").join("bad.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("V1-named safetensors input under a V2 manifest must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// The test this issue exists for: the Other-dtype pre-skip block in
+    /// `build_manifest_safetensors` is the code that had no coverage. An I8
+    /// tensor is skipped by the float stream, but under V2 its name must still
+    /// be classified first, so a legacy stem cannot vanish past fail-closed.
+    ///
+    /// Deleting the `unmatched_tensors_fail_closed()` pre-check in the
+    /// safetensors builder makes this test fail and leaves every other test green.
+    #[test]
+    fn v2_manifest_fails_closed_on_unmatched_other_dtype_safetensors() {
+        let dir = scratch_dir("v2-st-fail-closed-other-input");
+        write_safetensors_i8(
+            &dir.join("shard.safetensors"),
+            &[("blk.0.moe_gate.weight", &[4], &[1i8, -1, 0, 2])],
+        );
+        let out = scratch_dir("v2-st-fail-closed-other-out").join("bad.goz1");
+
+        let mut config = safetensors_config(&dir, &out);
+        config.manifest_path = Some(in_tree_structural_manifest());
+        let err = run_quantization(&config)
+            .expect_err("unmatched Other-dtype safetensors name under V2 must fail closed");
+        match err {
+            GrokOzempicError::ManifestV2UnmatchedTensor { ref name } => {
+                assert_eq!(name, "blk.0.moe_gate.weight");
+            }
+            other => panic!("expected ManifestV2UnmatchedTensor, got {other:?}"),
+        }
+    }
+
+    /// Counterpart to the fail-closed pair: with **no** manifest there is no
+    /// V2 rule to violate, so an unsupported dtype is silently dropped from the
+    /// pack. This is deliberate (`.claude/rules/goz1-pipeline.md`: "V2
+    /// fail-closed does not detect under-packing"), and pinning it keeps the
+    /// two behaviours from being conflated — the guard is about
+    /// *misclassification*, never about *absence*.
+    #[test]
+    fn safetensors_other_dtype_is_skipped_when_no_manifest_applies() {
+        let dir = scratch_dir("st-other-skip-input");
+        write_safetensors_i8(
+            &dir.join("only-i8.safetensors"),
+            &[("blk.0.moe_gate.weight", &[4], &[1i8, -1, 0, 2])],
+        );
+        let out = scratch_dir("st-other-skip-out").join("empty.goz1");
+
+        let config = safetensors_config(&dir, &out);
+        // Every tensor was skipped, so nothing is quantizable and the run
+        // errors rather than emitting an empty pack. Match the variant only:
+        // the message says "all skipped as unsupported dtype?", which is right
+        // here but is a guess the code cannot actually make.
+        let err = run_quantization(&config)
+            .expect_err("a shard of only unsupported dtypes leaves nothing to pack");
+        assert!(
+            matches!(err, GrokOzempicError::InvalidConfig(_)),
+            "expected InvalidConfig for an all-skipped shard, got {err:?}"
+        );
+    }
+
+    /// `collect_safetensor_shards` filters on the extension only, so a
+    /// directory containing no `*.safetensors` short-circuits before the
+    /// builder runs. Mirrors the npy branch.
+    #[test]
+    fn safetensors_dir_without_shards_is_rejected() {
+        let dir = scratch_dir("st-no-shards-input");
+        write_npy_f32(&dir.join("stray.npy"), &[2], &[1.0f32, 2.0]);
+        let out = scratch_dir("st-no-shards-out").join("none.goz1");
+
+        let err = run_quantization(&safetensors_config(&dir, &out))
+            .expect_err("a directory with no .safetensors must be rejected");
+        match err {
+            GrokOzempicError::InvalidConfig(ref msg) => {
+                assert!(
+                    msg.contains("no .safetensors files found"),
+                    "unexpected message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+    }
+
     /// The `GROK_OZEMPIC_MANIFEST` env path accepts V2 structural
     /// manifests too (same policy as the explicit `manifest_path`).
     #[test]
@@ -1385,36 +1767,142 @@ mod tests {
         assert_structural_fixture_stats(&stats);
     }
 
+    /// The two shapes `GROK_OZEMPIC_DISSECT_RUN` is written as in this repo.
+    ///
+    /// `scripts/block_pilot_goz1.sh:41`, `.claude/rules/goz1-pipeline.md` and
+    /// `reports/grok-1-block-pilot/results.md:481` all export the **run root**
+    /// (`.../LATEST_CORRECT_GROK1_RUN`), while this test historically joined
+    /// `conversion-manifest.json` directly and therefore required the
+    /// **resolved run3 dir** (`.../manifests/xai-grok-1-ckpt-0`). The justfile
+    /// already probed both (`justfile:261-278`), which is how the ambiguity
+    /// stayed invisible. Probe both here too, in the same order.
+    fn resolve_run3_conversion_manifest(base: &std::path::Path) -> Option<std::path::PathBuf> {
+        const RUN3_SUBDIR: &str = "manifests/xai-grok-1-ckpt-0";
+        let direct = base.join("conversion-manifest.json");
+        if direct.is_file() {
+            return Some(direct);
+        }
+        let nested = base.join(RUN3_SUBDIR).join("conversion-manifest.json");
+        if nested.is_file() {
+            return Some(nested);
+        }
+        None
+    }
+
+    /// Both documented shapes of `GROK_OZEMPIC_DISSECT_RUN` resolve, and a
+    /// path that is neither resolves to `None` (which the oracle turns into a
+    /// loud panic rather than a silent skip). Runs everywhere -- no mounted
+    /// xai-dissect run required, which is the point: the resolution contract
+    /// is testable even where the data is not.
+    #[test]
+    fn dissect_run_env_accepts_run_root_and_resolved_run3_dir() {
+        let root = scratch_dir("dissect-run-shapes");
+
+        // (a) already-resolved run3 dir: conversion-manifest.json sits directly
+        //     under the given path. This is the shape stream.rs required before
+        //     GH #102 -- the only one it accepted.
+        let resolved = root.join("resolved");
+        std::fs::create_dir_all(&resolved).unwrap();
+        std::fs::write(resolved.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&resolved),
+            Some(resolved.join("conversion-manifest.json")),
+            "resolved run3 dir must be accepted"
+        );
+
+        // (b) run root: the manifest is nested under manifests/xai-grok-1-ckpt-0.
+        //     This is the shape block_pilot_goz1.sh and the docs export, and the
+        //     one that used to make the oracle skip while passing.
+        let run_root = root.join("LATEST_CORRECT_GROK1_RUN");
+        let nested = run_root.join("manifests/xai-grok-1-ckpt-0");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&run_root),
+            Some(nested.join("conversion-manifest.json")),
+            "run root must be accepted (the documented value)"
+        );
+
+        // (c) neither shape -> None, so the caller can fail loudly.
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&empty),
+            None,
+            "a directory with neither layout must not resolve"
+        );
+
+        // (d) direct hit wins over nested when both exist -- deterministic order.
+        let both = root.join("both");
+        let both_nested = both.join("manifests/xai-grok-1-ckpt-0");
+        std::fs::create_dir_all(&both_nested).unwrap();
+        std::fs::write(both.join("conversion-manifest.json"), b"{}").unwrap();
+        std::fs::write(both_nested.join("conversion-manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            resolve_run3_conversion_manifest(&both),
+            Some(both.join("conversion-manifest.json")),
+            "direct hit must win, matching the justfile probe order"
+        );
+    }
+
     /// Path-gated oracle against the latest authoritative xai-dissect run:
     /// every `structural_name` in run3's `conversion-manifest.json` must
     /// classify to an explicit rule of the in-tree structural manifest
     /// (routers/norms preserve, everything else ternary, zero Default).
     ///
-    /// Skips (passes trivially) when the run directory is absent, e.g. CI.
-    /// Override the location with `GROK_OZEMPIC_DISSECT_RUN`.
+    /// `GROK_OZEMPIC_DISSECT_RUN` may be either the run root or the resolved
+    /// run3 directory; both are accepted (GH #102).
+    ///
+    /// Skip policy, and the reason it is not uniform:
+    ///
+    /// - env **unset** and no usable default → skip. The run is multi-GiB and
+    ///   not mounted in CI; that is the expected case, not a failure.
+    /// - env **set but unresolvable** → **panic**. Before #102 this skipped,
+    ///   so exporting the documented value (the run root) made this oracle
+    ///   silently disable itself and report green. "You configured this and I
+    ///   ignored you" must not look like "not configured".
     #[test]
     fn run3_conversion_manifest_names_fully_classified() {
-        let run_dir = std::env::var("GROK_OZEMPIC_DISSECT_RUN")
-            .map(std::path::PathBuf::from)
-            .ok()
-            .or_else(|| {
-                std::env::var("HOME").ok().map(|h| {
-                    std::path::PathBuf::from(h).join(
-                        "rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0",
+        const RUN3_SUBDIR: &str = "manifests/xai-grok-1-ckpt-0";
+        let conversion = match std::env::var("GROK_OZEMPIC_DISSECT_RUN") {
+            Ok(raw) if !raw.trim().is_empty() => {
+                let base = std::path::PathBuf::from(raw.trim());
+                resolve_run3_conversion_manifest(&base).unwrap_or_else(|| {
+                    panic!(
+                        "GROK_OZEMPIC_DISSECT_RUN={} does not resolve to a run3 \
+                         conversion-manifest.json.\n  probed: {}\n  probed: {}\n\
+                         Set it to either the xai-dissect run root or the \
+                         {RUN3_SUBDIR} directory. Unset it to skip this oracle.",
+                        base.display(),
+                        base.join("conversion-manifest.json").display(),
+                        base.join(RUN3_SUBDIR)
+                            .join("conversion-manifest.json")
+                            .display(),
                     )
                 })
-            });
-        let Some(conversion) = run_dir.map(|d| d.join("conversion-manifest.json")) else {
-            eprintln!("skip: no GROK_OZEMPIC_DISSECT_RUN and no HOME");
-            return;
+            }
+            // Unset, empty, or non-UTF-8: fall back to the conventional
+            // location under HOME and skip quietly if it is not mounted.
+            _ => {
+                let Some(home) = std::env::var("HOME").ok() else {
+                    eprintln!("skip: no GROK_OZEMPIC_DISSECT_RUN and no HOME");
+                    return;
+                };
+                let base = std::path::PathBuf::from(home)
+                    .join("rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN");
+                match resolve_run3_conversion_manifest(&base) {
+                    Some(p) => p,
+                    None => {
+                        eprintln!(
+                            "skip: no conversion-manifest.json under {} (xai-dissect run not mounted)",
+                            base.display()
+                        );
+                        return;
+                    }
+                }
+            }
         };
-        if !conversion.is_file() {
-            eprintln!(
-                "skip: {} not present (xai-dissect run not mounted)",
-                conversion.display()
-            );
-            return;
-        }
+        eprintln!("run3 oracle: using {}", conversion.display());
 
         let bytes = std::fs::read(&conversion).expect("read conversion manifest");
         let doc: serde_json::Value =

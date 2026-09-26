@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_canonical import canonical_json  # noqa: E402
 from export_grok1_int8_npy import (  # noqa: E402
     MODES as EXPORT_MODES,
     PRESERVE_KINDS as EXPORT_PRESERVE_KINDS,
@@ -474,7 +475,7 @@ def _write_json(result: dict, json_out: Path | None) -> None:
     if json_out is None:
         return
     json_out.parent.mkdir(parents=True, exist_ok=True)
-    json_out.write_text(json.dumps(result, indent=2) + "\n")
+    json_out.write_text(canonical_json(result))
     print(f"wrote {json_out}")
 
 if __name__ == "__main__":

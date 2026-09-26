@@ -92,6 +92,19 @@ cargo run --release --features cli --locked -- quantize-goz1 \
 
 Since #40 / RM-191, **runtime** packs prefer the V2 `structural-manifest.json` whenever tensor names are structural (`block_{NNN}.slot_{SS}.{kind}`, export-script stems). V2 is fail-closed: an unmatched name hard-errors instead of defaulting to ternary. For legacy `blk.*`-named inputs use V1 `baseline.json` (defaults fallthrough allowed). Prefer `--verify`. Authoritative structural names / planning surface: `~/rmems/grok-result/xai-dissect/LATEST_CORRECT_GROK1_RUN/manifests/xai-grok-1-ckpt-0/` (tests honor `GROK_OZEMPIC_DISSECT_RUN`).
 
+**`GROK_OZEMPIC_DISSECT_RUN` accepts either shape** (GH #102): the run root
+(`.../LATEST_CORRECT_GROK1_RUN`, what `block_pilot_goz1.sh` and this doc export)
+or the already-resolved run3 dir (`.../manifests/xai-grok-1-ckpt-0`). The Rust
+oracle probes direct-then-nested, matching the justfile.
+
+⚠ Before #102 the Rust side accepted **only** the resolved dir, so exporting the
+documented run root made `run3_conversion_manifest_names_fully_classified` fail
+its `is_file()` probe and **skip while reporting green** — the misclassification
+oracle silently disabled itself for anyone following these instructions. It now
+**panics** when the variable is set but unresolvable. A skip means "not
+configured"; it never means "configured and ignored". If you see `skip:` from
+that test, believe the skip, not the green.
+
 **Evidence sources:**
 
 | Metric | Where |
@@ -108,11 +121,20 @@ Claim ternary only when the CLI ternary counter matches expectation.
 
 ## Container versions (#65)
 
-Packs are **GOZ1 v2**: each tensor row carries the reconstruction-optimal scale
-`α*`, so a pack dequantizes from its own contents (`value = scale × payload`).
+Packs written today are **GOZ1 v3** (`OZ1_VERSION = 3`, `src/core/weight_pack.rs:62`).
+Each tensor row has carried the reconstruction-optimal scale `α*` since **v2**
+(#65), so a pack dequantizes from its own contents (`value = scale × payload`);
+**v3** (#66) appends the applied threshold on top of that. Rows are a strict
+append, so a reader parses the common prefix and reads later fields only when
+the version says they are there.
+
 v1 packs have no scale field and are still readable; consumers fall back to the
 oracle α derived from the source npy **only** there, and must tag it
 (`PackWeights.scale_sources` → `legacy_oracle` vs `pack_v2`).
+
+⚠ The `scale_sources` tag is still spelled `pack_v2` for any pack-stored scale,
+v3 included — the vocabulary froze at v2 while the writer moved on. Read it as
+"the scale came from the pack", not as a version assertion.
 
 An oracle figure is a lower bound no runtime can reproduce, so never report one
 as a pack-only measurement. Full layout and policy: `docs/goz1-format.md`.

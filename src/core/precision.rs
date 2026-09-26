@@ -3,19 +3,23 @@
 //! threshold.
 //!
 //! Threshold resolution order:
-//! 1. Per-tensor `gif_threshold` carried on a `TernaryCandidate`.
-//! 2. `manifest.defaults.gif_threshold` if set.
-//! 3. `config.gif_threshold` (always present).
+//! 1. Per-tensor `gif_threshold` carried on a `TernaryCandidate` — explicit
+//!    manifest authoring always wins.
+//! 2. SAAQ-derived `gif_threshold` from [`QuantizationConfig::saaq_tau_map`]
+//!    (looked up by tensor name; only consulted by [`decide_for_tensor`]).
+//! 3. `manifest.defaults.gif_threshold` if set.
+//! 4. `config.gif_threshold` (always present).
 //!
 //! Precision tier resolution:
 //! - `TensorClass::Preserve`          → [`TensorPrecision::Preserve`]
 //!   (FP16-at-rest in GOZ1 v1; semantically distinct from `Fp16`,
 //!   identical on disk — see the `TensorPrecision::Preserve` docs).
 //! - `TensorClass::Fp16`              → [`TensorPrecision::Fp16`]
-//! - `TensorClass::TernaryCandidate`  → [`TensorPrecision::TernarySnN`]
+//! - `TensorClass::TernaryCandidate`  → [`TensorPrecision::TernarySnn`]
 //! - `TensorClass::Default`           → parsed from
-//!   `manifest.defaults.precision` (if present), else
-//!   [`TensorPrecision::TernarySnN`].
+//!   `manifest.defaults.precision`. Absence of a manifest, or of that
+//!   field, is [`GrokOzempicError::MissingDefaultPrecision`] — not a
+//!   silent ternary fallback.
 //!
 //! Unknown `defaults.precision` strings are a **hard failure**
 //! ([`GrokOzempicError::ManifestInvalidPrecision`]) to match the rest of
@@ -28,7 +32,26 @@ use crate::{
 };
 
 /// Decide `(precision, effective_gif_threshold)` for a single tensor.
+///
+/// Equivalent to [`decide_for_tensor`] with no tensor name, so the optional
+/// [`QuantizationConfig::saaq_tau_map`] source is not consulted. Pack-side
+/// callers should prefer [`decide_for_tensor`] so SAAQ-derived per-tensor
+/// thresholds apply.
 pub fn decide(
+    class: &TensorClass,
+    manifest: Option<&DissectManifest>,
+    config: &QuantizationConfig,
+) -> Result<(TensorPrecision, f32)> {
+    decide_for_tensor("", class, manifest, config)
+}
+
+/// [`decide`] with the tensor name, enabling the SAAQ-derived threshold
+/// source (`config.saaq_tau_map`). SAAQ entries fill the per-tensor
+/// `gif_threshold` slot: they apply only where the manifest carried no
+/// explicit `ternary_candidates[].gif_threshold`, and outrank
+/// `manifest.defaults` / `config.gif_threshold`.
+pub fn decide_for_tensor(
+    tensor_name: &str,
     class: &TensorClass,
     manifest: Option<&DissectManifest>,
     config: &QuantizationConfig,
@@ -36,24 +59,25 @@ pub fn decide(
     let precision = match class {
         TensorClass::Preserve { .. } => TensorPrecision::Preserve,
         TensorClass::Fp16 { .. } => TensorPrecision::Fp16,
-        TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnN,
+        TensorClass::TernaryCandidate { .. } => TensorPrecision::TernarySnn,
         TensorClass::Default => resolve_default_precision(manifest)?,
     };
-    let threshold = resolve_threshold(class, manifest, config)?;
+    let threshold = resolve_threshold(tensor_name, class, manifest, config)?;
     Ok((precision, threshold))
 }
 
 fn resolve_default_precision(manifest: Option<&DissectManifest>) -> Result<TensorPrecision> {
     let Some(m) = manifest else {
-        return Ok(TensorPrecision::TernarySnN);
+        return Err(GrokOzempicError::MissingDefaultPrecision);
     };
     match m.defaults.precision.as_deref() {
-        None => Ok(TensorPrecision::TernarySnN),
+        None => Err(GrokOzempicError::MissingDefaultPrecision),
         Some(s) => parse_precision_str(s),
     }
 }
 
 fn resolve_threshold(
+    tensor_name: &str,
     class: &TensorClass,
     manifest: Option<&DissectManifest>,
     config: &QuantizationConfig,
@@ -64,6 +88,12 @@ fn resolve_threshold(
     } = class
     {
         *t
+    } else if let Some(t) = config
+        .saaq_tau_map
+        .as_ref()
+        .and_then(|map| map.lookup(tensor_name))
+    {
+        t
     } else if let Some(m) = manifest
         && let Some(t) = m.defaults.gif_threshold
     {
@@ -83,7 +113,7 @@ fn resolve_threshold(
 /// Accepted values: `ternary_snn`, `fp16`, `preserve`.
 pub fn parse_precision_str(s: &str) -> Result<TensorPrecision> {
     match s {
-        "ternary_snn" => Ok(TensorPrecision::TernarySnN),
+        "ternary_snn" => Ok(TensorPrecision::TernarySnn),
         "fp16" => Ok(TensorPrecision::Fp16),
         "preserve" => Ok(TensorPrecision::Preserve),
         other => Err(GrokOzempicError::ManifestInvalidPrecision {
@@ -132,7 +162,7 @@ mod tests {
     fn parse_precision_accepts_known_tiers() {
         assert_eq!(
             parse_precision_str("ternary_snn").unwrap(),
-            TensorPrecision::TernarySnN
+            TensorPrecision::TernarySnn
         );
         assert_eq!(parse_precision_str("fp16").unwrap(), TensorPrecision::Fp16);
         assert_eq!(
@@ -175,7 +205,7 @@ mod tests {
             gif_threshold: None,
         };
         let (p, _) = decide(&cls, None, &config).unwrap();
-        assert_eq!(p, TensorPrecision::TernarySnN);
+        assert_eq!(p, TensorPrecision::TernarySnn);
     }
 
     #[test]
@@ -193,7 +223,7 @@ mod tests {
     #[test]
     fn manifest_default_threshold_overrides_config_default() {
         let config = config_with_threshold(0.05);
-        let m = manifest_with_defaults(None, Some(0.08));
+        let m = manifest_with_defaults(Some("ternary_snn"), Some(0.08));
         let cls = TensorClass::Default;
         let (_, t) = decide(&cls, Some(&m), &config).unwrap();
         assert_eq!(t, 0.08);
@@ -202,7 +232,10 @@ mod tests {
     #[test]
     fn config_default_wins_when_no_overrides() {
         let config = config_with_threshold(0.05);
-        let cls = TensorClass::Default;
+        let cls = TensorClass::TernaryCandidate {
+            rank: None,
+            gif_threshold: None,
+        };
         let (_, t) = decide(&cls, None, &config).unwrap();
         assert_eq!(t, 0.05);
     }
@@ -216,10 +249,24 @@ mod tests {
     }
 
     #[test]
-    fn default_precision_falls_back_to_ternary_snn_without_manifest() {
+    fn default_class_without_manifest_is_missing_default_precision() {
         let config = config_with_threshold(0.05);
-        let (p, _) = decide(&TensorClass::Default, None, &config).unwrap();
-        assert_eq!(p, TensorPrecision::TernarySnN);
+        let err = decide(&TensorClass::Default, None, &config).unwrap_err();
+        assert!(
+            matches!(err, GrokOzempicError::MissingDefaultPrecision),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn default_class_without_defaults_precision_is_missing_default_precision() {
+        let config = config_with_threshold(0.05);
+        let m = manifest_with_defaults(None, None);
+        let err = decide(&TensorClass::Default, Some(&m), &config).unwrap_err();
+        assert!(
+            matches!(err, GrokOzempicError::MissingDefaultPrecision),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -236,7 +283,7 @@ mod tests {
     #[test]
     fn negative_manifest_gif_threshold_rejected() {
         let config = config_with_threshold(0.05);
-        let m = manifest_with_defaults(None, Some(-0.5));
+        let m = manifest_with_defaults(Some("preserve"), Some(-0.5));
         let err = decide(&TensorClass::Default, Some(&m), &config).unwrap_err();
         assert!(
             matches!(err, GrokOzempicError::InvalidConfig(_)),

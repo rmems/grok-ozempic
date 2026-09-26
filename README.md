@@ -1,10 +1,26 @@
 # grok-ozempic
 
-**SNN-inspired quantization for Grok-scale Mixture-of-Experts models** — thin down the weights without compromising routing accuracy.
+**Experimental out-of-core Grok-1 quantization with measured routing and residual-fidelity tradeoffs.**
 
-This crate turns heavyweight Grok checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 passthrough where necessary.
+This crate turns heavyweight MoE checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. **Grok-1 is the reference family**; the planner and alignment engine are reusable—see [`docs/adding-a-model.md`](docs/adding-a-model.md). Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
 
-**Think of it as Ozempic for Grok — less bulk, same routing story.**
+**Think of it as Ozempic for Grok — less bulk, with a measured routing tradeoff rather than a guaranteed free lunch.**
+
+---
+
+## Backend and kernel boundary
+
+Trace in under five minutes: **manifest → selection → `DryRunPlanner` → `BackendKernel` → myelin**. The map is [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+| Piece | Where | Status |
+|-------|-------|--------|
+| Manifest classification | [`docs/dissect-manifest.md`](docs/dissect-manifest.md), `stream::resolve_manifest` | Live. V2 unmatched names hard-error. |
+| Planned kernel verbs | `DryRunPlanner` in `src/core/dry_run.rs` | Live planning / coverage JSON. No weight payloads. |
+| Deployable kernel API | `BackendKernel` in `src/core/backend.rs` | `LocalBackend` wraps CPU `quantizer.rs`. `MyelinBackend` is an FFI stub (`BackendNotAvailable`). |
+| Live `quantize-goz1` | `src/core/stream.rs` | Calls `quantizer.rs` **directly**. Same math as `LocalBackend`; not dispatched through the trait. |
+| CUDA / packed GEMV | [`Limen-Neural/myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator) | Host `bitpacking` is public; device ternary matmul is myelin [#9](https://github.com/Limen-Neural/myelin-accelerator/issues/9). Do not grow a parallel CUDA tree here. |
+
+A green SAAQ metadata report is not a weight-fidelity experiment. A GOZ1 file is not a myelin benchmark. INT4 expert side tables from the #85 research harness are **not** shipped GOZ1 INT4.
 
 ---
 
@@ -87,9 +103,9 @@ Official Grok-1 pickle shards are **not** accepted by `quantize-goz1`. Export fi
 [RM-189](https://linear.app/rpd-34/issue/RM-189); PR
 [#42](https://github.com/rmems/grok-ozempic/pull/42)).
 
-### Grok-1 SAAQ artifact sprint commands
+### Grok-1 SAAQ metadata commands
 
-The combined sprint path for ingest validation, one-block smoke validation,
+The combined path for ingest validation, one-block smoke validation,
 full `saaq-g1-v0` metadata conversion, and final structural validation is
 documented in [`docs/grok1-saaq-artifact-flow.md`](docs/grok1-saaq-artifact-flow.md).
 
@@ -102,7 +118,7 @@ Key CLI entry points are available behind the `cli` feature:
 cargo run --features cli -- validate-ingest --manifest dissect/grok-1/baseline.json
 cargo run --features cli -- smoke-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-smoke --dry-run
 cargo run --features cli -- convert-grok1 --manifest dissect/grok-1/baseline.json --output-root /tmp/grok1-artifact --dry-run
-cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --checksums /tmp/grok1-artifact/checksums.json --output-root /tmp/grok1-validation
+cargo run --features cli -- validate-grok1-artifact --manifest dissect/grok-1/baseline.json --artifact-index /tmp/grok1-artifact/artifact.index.json --plan-fingerprints /tmp/grok1-artifact/plan_fingerprints.json --output-root /tmp/grok1-validation
 ```
 
 ### Export Grok-1 embedding for GOZ1 (pickle → `.npy`)
@@ -159,6 +175,30 @@ tensors use `0.0`. Writers and `--verify` reject invalid scales and threshold
 metadata. Older v1/v2 packs remain readable under their versioned layouts. See
 [`docs/goz1-format.md`](docs/goz1-format.md).
 
+## Measured status
+
+The canonical four-block result is GitHub [#85](https://github.com/rmems/grok-ozempic/issues/85)
+(PR #89): [`reports/grok-1-expert-precision-remedy-v4/results.md`](reports/grok-1-expert-precision-remedy-v4/results.md)
+and [`metrics.json`](reports/grok-1-expert-precision-remedy-v4/metrics.json).
+**Option 2** — stacked INT4 + channel-α on experts — improved on the same-budget
+INT4 baseline but missed the approximately 0.95 top-1 band (best tested
+candidate **P1** `expert_int4_channel_alpha_123`: INT4 + channel-α on block 0,
+FP16 experts on blocks 1–3, block-3 top-1 **0.887329**).
+Those INT4 code/scale **side tables are research caches**, not a shipped GOZ1
+INT4 payload and not full-model generation.
+
+Causal probes in `scripts/grok1_block0_experiment.py` (`token_ids`) draw
+**sorted sampled vocabulary IDs** uniformly without replacement, then sort them.
+They are not natural text. Do not report their routing or output figures as
+language-model accuracy or perplexity.
+
+[#85](https://github.com/rmems/grok-ozempic/issues/85) stays the historical
+conclusion. The next experimental sequence does not rewrite it:
+
+1. [#125](https://github.com/rmems/grok-ozempic/issues/125) — matched scale / schedule control (2×2 ablation)
+2. [#127](https://github.com/rmems/grok-ozempic/issues/127) — order-preserving text and held-out 8192-token windows
+3. [#129](https://github.com/rmems/grok-ozempic/issues/129) — activation-fitted scales at matched bytes
+
 ## Developer verification
 
 Named verification tiers for humans and coding agents (`just` required):
@@ -181,16 +221,18 @@ just --list   # discover recipes
 
 Without `just`, use the full cargo **and** Python unittest fallback blocks in
 `CLAUDE.md` / `.claude/commands/pr-ready.md` (not cargo-only — those blocks list
-all five `scripts.test_*` modules and `bash -n` for shell scripts).
+the `_python-tests` modules from the justfile, kept in sync with
+`.github/workflows/python-scripts.yml`, plus `bash -n` for shell scripts).
 
-## CUDA kernel ownership
+## Related docs
 
-CUDA kernel ownership lives in the **`myelin-accelerator`** project, not in
-`grok-ozempic`. This repo is the Grok-1-specific quantization and orchestration
-layer, not a generic CUDA backend.
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full dependency
-boundary and backend integration plan.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — five-minute manifest → backend → myelin trace
+- [`docs/dissect-manifest.md`](docs/dissect-manifest.md) — schema and precision → kernel mapping
+- [`docs/grok1-saaq-artifact-flow.md`](docs/grok1-saaq-artifact-flow.md) — copyable runbook
+- [`docs/first-quantization-target.md`](docs/first-quantization-target.md) — first embedding contract
+- [`docs/artifact-compatibility-plan.md`](docs/artifact-compatibility-plan.md) — inventory IR and `DryRunPlanner` coverage
+- [`docs/goz1-format.md`](docs/goz1-format.md) — GOZ1 container layout
+- [`docs/adding-a-model.md`](docs/adding-a-model.md) — adding a model family through `ModelProfile`
 
 ## Repository
 

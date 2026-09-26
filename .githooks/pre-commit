@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Fast pre-commit gate — see REVIEW.md
-# Enable: git config core.hooksPath .githooks
+# NOT enabled by pointing core.hooksPath here. beads owns that setting
+# (it points at .beads/hooks), and `git config core.hooksPath .githooks`
+# would silently disable the beads sync. Since GH #97 the tracked
+# .beads/hooks/pre-commit chains to this script instead. See REVIEW.md.
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"

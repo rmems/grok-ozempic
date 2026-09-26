@@ -2,15 +2,23 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::saaq::SaaqTauMap;
+
 // ---------------------------------------------------------------------------
 // Quantization pipeline types
 // ---------------------------------------------------------------------------
 
 /// Controls which precision is applied to a given tensor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Serde and [`Self::as_str`] share the manifest/CLI vocabulary
+/// (`ternary_snn`, `fp16`, `preserve`). The variant is spelled
+/// [`Self::TernarySnn`] so `rename_all = "snake_case"` yields
+/// `ternary_snn` rather than `ternary_sn_n`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorPrecision {
     /// Two-bit ternary {-1, 0, +1} with saliency-gated GIF threshold.
-    TernarySnN,
+    TernarySnn,
     /// Keep original FP16 — used for MoE routing gates.
     Fp16,
     /// Routing-critical / no-touch tier. Populated when the
@@ -33,7 +41,25 @@ pub enum TensorPrecision {
     /// 3. **Forward compatibility** — a future GOZ1 format version may
     ///    promote `Preserve` to true source-dtype passthrough
     ///    (F32/BF16 kept as-is) without an API rename or migration.
+    #[default]
     Preserve,
+}
+
+impl TensorPrecision {
+    /// Manifest / CLI / serde wire spelling (`ternary_snn`, `fp16`, `preserve`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TernarySnn => "ternary_snn",
+            Self::Fp16 => "fp16",
+            Self::Preserve => "preserve",
+        }
+    }
+}
+
+impl std::fmt::Display for TensorPrecision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Weight container layout for [`QuantizationConfig::input_dir`].
@@ -59,6 +85,11 @@ pub struct QuantizationConfig {
     pub output_path: String,
     /// GIF saliency threshold ratio: weights with |w| < threshold × rms(layer)
     /// are silenced to 0; the rest become ±1.
+    ///
+    /// Per-family defaults belong on [`crate::core::model::ModelProfile`], not
+    /// as hardcoded Grok-1 constants. [`QuantizationConfig::default`] keeps `0.05`
+    /// for CLI/legacy callers; a profile may override via
+    /// [`crate::core::model::ModelProfile::quantization_config`].
     pub gif_threshold: f32,
     /// Tensor name substrings that identify routing / gate tensors which should
     /// remain in FP16 instead of being ternary-quantized.
@@ -88,11 +119,29 @@ pub struct QuantizationConfig {
     /// manifest as a fallback when neither
     /// [`Self::manifest_path`] nor `GROK_OZEMPIC_MANIFEST` is set.
     ///
+    /// This is a **Grok-1 CLI adapter**, not a generic engine knob. New
+    /// families should pass an explicit `manifest_path` (or use
+    /// [`crate::core::model::ModelProfile::manifest`]) rather than extending
+    /// this flag.
+    ///
     /// Default is `false` so upgrading from phase 1 preserves existing
     /// legacy-heuristic behavior. Set to `true` for a Grok-1 export to
     /// pick up the reference manifest without pointing at a file.
     #[serde(default)]
     pub use_embedded_baseline: bool,
+    /// Optional SAAQ-derived per-tensor `gif_threshold` source.
+    ///
+    /// When set, [`crate::core::precision::decide_for_tensor`] resolves the
+    /// effective threshold as: explicit `ternary_candidates[].gif_threshold`,
+    /// then this map, then `manifest.defaults.gif_threshold`, then
+    /// [`Self::gif_threshold`]. See [`crate::core::saaq`] for the file format
+    /// and the dry-run caveat.
+    ///
+    /// The map is produced externally (corinth-canal `saaq-tau-map` JSON) and
+    /// loaded via [`crate::core::saaq::load_saaq_tau_map`]; it is runtime-only
+    /// state, never (de)serialized as part of this config.
+    #[serde(skip)]
+    pub saaq_tau_map: Option<SaaqTauMap>,
 }
 
 impl Default for QuantizationConfig {
@@ -105,6 +154,7 @@ impl Default for QuantizationConfig {
             input_format: QuantizationInputFormat::Safetensors,
             manifest_path: None,
             use_embedded_baseline: false,
+            saaq_tau_map: None,
         }
     }
 }
@@ -209,6 +259,39 @@ mod quantize_goz1_config_tests {
         assert!(validate_gif_threshold(f32::INFINITY).is_err());
         assert!(validate_gif_threshold(-0.1).is_err());
     }
+
+    #[test]
+    fn tensor_precision_serde_wire_form_is_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::TernarySnn).unwrap(),
+            "\"ternary_snn\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::Fp16).unwrap(),
+            "\"fp16\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TensorPrecision::Preserve).unwrap(),
+            "\"preserve\""
+        );
+        for tier in [
+            TensorPrecision::TernarySnn,
+            TensorPrecision::Fp16,
+            TensorPrecision::Preserve,
+        ] {
+            let json = serde_json::to_string(&tier).unwrap();
+            assert_eq!(json, format!("\"{}\"", tier.as_str()));
+            assert_eq!(
+                serde_json::from_str::<TensorPrecision>(&json).unwrap(),
+                tier
+            );
+        }
+    }
+
+    #[test]
+    fn tensor_precision_type_default_is_preserve() {
+        assert_eq!(TensorPrecision::default(), TensorPrecision::Preserve);
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -292,3 +375,154 @@ pub const GROK1_TENSOR_INT8: usize = 448;
 pub const GROK1_TENSOR_QUANT: usize = 448;
 pub const GROK1_TENSOR_TOTAL_ELEMENTS: u64 = 315_684_820_992;
 pub const GROK1_TENSOR_TOTAL_BYTES: u64 = 318_114_914_304;
+
+/// One slot in a Grok-1 transformer block.
+///
+/// **This is the single source of truth for the 12-slot block layout.** It used
+/// to be hardcoded three times — `src/artifact.rs` (`push_block_entries`),
+/// `src/reports/detector.rs` (`exemplar_block_tensors` and the kind counts),
+/// and `src/core/grok1_data.rs` — and the copies had already drifted: slots 00
+/// and 02 were named `moe_expert.unresolved` in two of them while
+/// `dissect/grok-1/structural-manifest.json` and `grok1_data.rs` had long since
+/// resolved them to `.gate` and `.up`. `artifact.rs` even shipped a standing
+/// warning about a question the manifest had already answered (GH #106).
+///
+/// The `dtype` spelling deliberately stays per-consumer: `artifact.rs` emits
+/// `"int8"` into `artifact.index.json` while `grok1_data.rs` uses `"i8"`. Both
+/// are user-visible, so [`BlockSlot::dtype_artifact`] and
+/// [`BlockSlot::dtype_inventory`] serve them from the one `is_int8` flag rather
+/// than silently normalizing one into the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockSlot {
+    /// Slot index within the block, 0..=11.
+    pub slot: usize,
+    /// Structural kind, e.g. `"moe_expert.gate"` or `"attn_proj_i8.narrow"`.
+    pub kind: &'static str,
+    /// `true` for the int8 attention/expert tensors, `false` for f32 norms and routers.
+    pub is_int8: bool,
+    /// Bytes for **one** tensor in this slot (not the per-kind aggregate).
+    pub bytes: u64,
+    /// Tensor shape.
+    pub shape: &'static [usize],
+}
+
+impl BlockSlot {
+    /// dtype as spelled in `artifact.index.json`.
+    pub const fn dtype_artifact(&self) -> &'static str {
+        if self.is_int8 { "int8" } else { "f32" }
+    }
+
+    /// dtype as spelled by the core inventory.
+    pub const fn dtype_inventory(&self) -> &'static str {
+        if self.is_int8 { "i8" } else { "f32" }
+    }
+
+    /// `true` when this slot is preserve-tier (routers and norms).
+    pub const fn is_preserve(&self) -> bool {
+        !self.is_int8
+    }
+}
+
+const GROK1_EXPERT_BYTES: u64 = 1_610_612_736;
+const GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES: u64 = 37_748_736;
+const GROK1_ATTN_NARROW_TENSOR_BYTES: u64 = 6_291_456;
+const GROK1_BLOCK_NORM_TENSOR_BYTES: u64 = 24_576;
+const GROK1_ROUTER_TENSOR_BYTES: u64 = 196_608;
+
+const EXPERT_GATE_SHAPE: &[usize] = &[8, GROK1_HIDDEN_DIM, 32_768];
+const EXPERT_DOWN_SHAPE: &[usize] = &[8, 32_768, GROK1_HIDDEN_DIM];
+const ATTN_NARROW_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, 1024];
+const ATTN_MODEL_WIDTH_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, GROK1_HIDDEN_DIM];
+const BLOCK_NORM_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM];
+const ROUTER_SHAPE: &[usize] = &[GROK1_HIDDEN_DIM, 8];
+
+/// The 12 slots every Grok-1 block carries, in slot order.
+///
+/// Slots 00/01/02 are the MoE expert projections, 03..=06 the attention
+/// projections, 07..=10 the block norms, and 11 the router.
+pub const GROK1_BLOCK_SLOTS: [BlockSlot; 12] = [
+    BlockSlot {
+        slot: 0,
+        kind: "moe_expert.gate",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_GATE_SHAPE,
+    },
+    BlockSlot {
+        slot: 1,
+        kind: "moe_expert.down",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_DOWN_SHAPE,
+    },
+    BlockSlot {
+        slot: 2,
+        kind: "moe_expert.up",
+        is_int8: true,
+        bytes: GROK1_EXPERT_BYTES,
+        shape: EXPERT_GATE_SHAPE,
+    },
+    BlockSlot {
+        slot: 3,
+        kind: "attn_proj_i8.narrow",
+        is_int8: true,
+        bytes: GROK1_ATTN_NARROW_TENSOR_BYTES,
+        shape: ATTN_NARROW_SHAPE,
+    },
+    BlockSlot {
+        slot: 4,
+        kind: "attn_proj_i8.model_width",
+        is_int8: true,
+        bytes: GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES,
+        shape: ATTN_MODEL_WIDTH_SHAPE,
+    },
+    BlockSlot {
+        slot: 5,
+        kind: "attn_proj_i8.model_width",
+        is_int8: true,
+        bytes: GROK1_ATTN_MODEL_WIDTH_TENSOR_BYTES,
+        shape: ATTN_MODEL_WIDTH_SHAPE,
+    },
+    BlockSlot {
+        slot: 6,
+        kind: "attn_proj_i8.narrow",
+        is_int8: true,
+        bytes: GROK1_ATTN_NARROW_TENSOR_BYTES,
+        shape: ATTN_NARROW_SHAPE,
+    },
+    BlockSlot {
+        slot: 7,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 8,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 9,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 10,
+        kind: "block_norm",
+        is_int8: false,
+        bytes: GROK1_BLOCK_NORM_TENSOR_BYTES,
+        shape: BLOCK_NORM_SHAPE,
+    },
+    BlockSlot {
+        slot: 11,
+        kind: "router",
+        is_int8: false,
+        bytes: GROK1_ROUTER_TENSOR_BYTES,
+        shape: ROUTER_SHAPE,
+    },
+];

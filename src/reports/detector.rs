@@ -1,6 +1,7 @@
 use crate::core::manifest::DissectManifest;
 use crate::core::stream::{GROK1_BLOCK_COUNT, GROK1_EXPERT_COUNT, GROK1_FEED_FORWARD_LENGTH};
 use crate::error::GrokOzempicError;
+use crate::reports::scan::InventoryScan;
 use crate::reports::schema::{
     ArtifactIR, ArtifactManifest, ExpertBlock, Hyperparameters, InventoryBlock, InventoryBlockKind,
     InventoryKindCount, InventoryTensor, RouterEntry, SaaqCritical, SaaqTarget, TensorTotals,
@@ -21,9 +22,18 @@ const GROK1_BLOCK_NORM_BYTES: u64 = 6_291_456;
 const GROK1_ATTN_MODEL_WIDTH_BYTES: u64 = 4_831_838_208;
 const GROK1_ATTN_NARROW_BYTES: u64 = 805_306_368;
 const GROK1_MOE_DOWN_BYTES: u64 = 103_079_215_104;
-const GROK1_MOE_UNRESOLVED_BYTES: u64 = 206_158_430_208;
 const GROK1_ROUTER_BYTES: u64 = 12_582_912;
 
+/// Reject a manifest this builder cannot honour.
+///
+/// This is the **only** place a manifest can change the outcome. It checks four
+/// things: the model family, that every declared block index is in range, that
+/// no index repeats, and that a declared expert count matches Grok-1's. Anything
+/// else in the manifest — `preserve`, `ternary_candidates`, `defaults`,
+/// `schema_version`, and the *number* of blocks — is ignored by design, because
+/// [`build_grok1_spec_ir`] emits the full Grok-1 spec regardless. Partial and
+/// unordered block metadata is explicitly supported; see
+/// `test_manifest_block_metadata_can_be_partial_and_unordered`.
 fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOzempicError> {
     if manifest.model.family != GROK1_FAMILY {
         return Err(GrokOzempicError::InvalidConfig(format!(
@@ -59,22 +69,47 @@ fn validate_supported_manifest(manifest: &DissectManifest) -> Result<(), GrokOze
     Ok(())
 }
 
-pub fn build_ir_from_manifest(
-    manifest: &DissectManifest,
-    checkpoint: Option<&str>,
-    actual_shards: Option<usize>,
-) -> Result<ArtifactIR, GrokOzempicError> {
-    validate_supported_manifest(manifest)?;
+/// The inventory block list: the embedding, the 64 per-block entries, and the
+/// final norm, in shard order.
+fn grok1_spec_inventory_blocks(inventory_blocks: Vec<InventoryBlock>) -> Vec<InventoryBlock> {
+    let mut blocks = Vec::with_capacity(inventory_blocks.len() + 2);
+    blocks.push(InventoryBlock {
+        label: "embedding".to_string(),
+        block: None,
+        shard_start: 0,
+        shard_end: 0,
+        tensors: 1,
+        bytes: GROK1_EMBEDDING_BYTES,
+        kinds: vec![InventoryBlockKind {
+            count: 1,
+            kind: "token_embedding".to_string(),
+        }],
+    });
+    blocks.extend(inventory_blocks);
+    blocks.push(InventoryBlock {
+        label: "final_norm".to_string(),
+        block: None,
+        shard_start: 1,
+        shard_end: 1,
+        tensors: 1,
+        bytes: GROK1_FINAL_NORM_BYTES,
+        kinds: vec![InventoryBlockKind {
+            count: 1,
+            kind: "final_norm".to_string(),
+        }],
+    });
+    blocks
+}
 
-    // Basic structural information
-    let model_family = manifest.model.family.clone();
-    let checkpoint = checkpoint
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| manifest.model.source.clone());
-
+/// Spec totals and hyperparameters. Constants, not a scan.
+///
+/// Used only when no xai-dissect `inventory.json` is supplied. When a scan is
+/// present, [`build_artifact_ir`] takes totals from
+/// [`crate::reports::scan::InventoryScan`] instead.
+fn grok1_spec_totals_and_hyperparameters() -> (TensorTotals, Hyperparameters) {
     let totals = TensorTotals {
         total: GROK1_TENSOR_TOTAL,
-        f32_tensors: GROK1_TENSOR_F32, // TODO: derive from actual scan in phase 2
+        f32_tensors: GROK1_TENSOR_F32,
         int8_tensors: GROK1_TENSOR_INT8,
         quant_tensors: GROK1_TENSOR_QUANT,
         total_elements: GROK1_TENSOR_TOTAL_ELEMENTS,
@@ -88,7 +123,31 @@ pub fn build_ir_from_manifest(
         d_ff: GROK1_FEED_FORWARD_LENGTH as usize,
         n_blocks: GROK1_BLOCK_COUNT as usize,
     };
+    (totals, hyperparameters)
+}
 
+/// The single SAAQ target row (the token embedding).
+fn grok1_spec_saaq_targets() -> Vec<SaaqTarget> {
+    let saaq_targets = vec![SaaqTarget {
+        rank: 1,
+        tensor: "embedding.slot_00.token_embedding".to_string(),
+        kind: "token_embedding".to_string(),
+        region: "embedding_heavy".to_string(),
+        readiness: 0.176,
+        opportunity: 0.331,
+        risk: 0.391,
+        disposition: "candidate".to_string(),
+    }];
+    saaq_targets
+}
+
+/// Per-block spec rows: one router, one expert-block descriptor and one
+/// inventory block for each of the 64 blocks.
+///
+/// Split out of [`build_grok1_spec_ir`] purely so that function stays readable
+/// (GH #106). These are still spec constants, not a scan — see that function's
+/// doc comment.
+fn grok1_spec_block_rows() -> (Vec<RouterEntry>, Vec<ExpertBlock>, Vec<InventoryBlock>) {
     let mut routers = Vec::new();
     let mut expert_blocks = Vec::new();
     let mut inventory_blocks = Vec::new();
@@ -124,18 +183,12 @@ pub fn build_ir_from_manifest(
             kinds: block_kind_counts(),
         });
     }
+    (routers, expert_blocks, inventory_blocks)
+}
 
-    let saaq_targets = vec![SaaqTarget {
-        rank: 1,
-        tensor: "embedding.slot_00.token_embedding".to_string(),
-        kind: "token_embedding".to_string(),
-        region: "embedding_heavy".to_string(),
-        readiness: 0.176,
-        opportunity: 0.331,
-        risk: 0.391,
-        disposition: "candidate".to_string(),
-    }];
-
+/// The per-block [`SaaqCritical`] rows. Same spec-constant caveat as
+/// [`grok1_spec_block_rows`].
+fn grok1_spec_saaq_critical() -> Vec<SaaqCritical> {
     let mut saaq_critical = Vec::new();
     for block_idx in 0..GROK1_BLOCK_COUNT as usize {
         saaq_critical.push(SaaqCritical {
@@ -145,46 +198,71 @@ pub fn build_ir_from_manifest(
             reasons: "distribution=dense_balanced<br>sampled_values=49152/49152<br>zero_fraction=0.0000<br>near_zero_fraction=0.0980<br>outlier_fraction=0.0000<br>peak_to_rms=4.729<br>linked to routing structure".to_string(),
         });
     }
+    saaq_critical
+}
+
+/// Build the Grok-1 **specification** IR (no inventory scan).
+///
+/// Equivalent to [`build_artifact_ir`] with `scan = None`. The policy
+/// manifest still cannot supply totals — a [`ManifestBlock`](crate::core::manifest::ManifestBlock)
+/// carries only `index`, `experts` and `role`. Pass an xai-dissect
+/// `inventory.json` through [`build_artifact_ir`] to derive totals from a
+/// real scan.
+pub fn build_grok1_spec_ir(
+    manifest: &DissectManifest,
+    checkpoint: Option<&str>,
+    actual_shards: Option<usize>,
+) -> Result<ArtifactIR, GrokOzempicError> {
+    build_artifact_ir(manifest, None, checkpoint, actual_shards)
+}
+
+/// Build the artifact IR, optionally taking **totals from an xai-dissect scan**.
+///
+/// The policy manifest is still only a reject-list (family, in-range unique
+/// block indexes, expert count). Per-tensor dtype and byte counts come from
+/// [`InventoryScan`] when provided — that is `inventory.json`, the existing
+/// xai-dissect catalog, not a field invented on `xai-dissect.manifest`.
+///
+/// When `scan` is `Some`, `totals` are the sums of that document's `tensors`
+/// array (already checked against its declared `totals` at parse time).
+/// [`super::validator::validate_ir`] then re-asserts the `GROK1_*` spec
+/// constants, so a scan that does not describe Grok-1 fails rather than
+/// being a tautology.
+///
+/// When `scan` is `None`, totals fall back to the spec constants. Block
+/// *count* on the policy manifest remains advisory; partial and unordered
+/// `blocks` still yield a 64-block architecture IR.
+pub fn build_artifact_ir(
+    manifest: &DissectManifest,
+    scan: Option<&InventoryScan>,
+    checkpoint: Option<&str>,
+    actual_shards: Option<usize>,
+) -> Result<ArtifactIR, GrokOzempicError> {
+    validate_supported_manifest(manifest)?;
+
+    // Basic structural information
+    let model_family = manifest.model.family.clone();
+    let checkpoint = resolve_checkpoint(checkpoint, scan, &manifest.model.source);
+    let (spec_totals, hyperparameters) = grok1_spec_totals_and_hyperparameters();
+    let totals = scan.map(|s| s.totals.clone()).unwrap_or(spec_totals);
+    let shards = resolve_shard_count(actual_shards, scan)?;
+    let (routers, expert_blocks, inventory_blocks) = grok1_spec_block_rows();
+
+    let saaq_targets = grok1_spec_saaq_targets();
+
+    let saaq_critical = grok1_spec_saaq_critical();
 
     Ok(ArtifactIR {
         manifest: ArtifactManifest {
             model_family,
             checkpoint,
-            shards: actual_shards.unwrap_or(GROK1_TENSOR_TOTAL),
+            shards,
             schema_version: INVENTORY_SCHEMA_VERSION,
         },
         hyperparameters,
         totals,
         inventory_kinds: inventory_kind_counts(),
-        inventory_blocks: {
-            let mut blocks = Vec::with_capacity(inventory_blocks.len() + 2);
-            blocks.push(InventoryBlock {
-                label: "embedding".to_string(),
-                block: None,
-                shard_start: 0,
-                shard_end: 0,
-                tensors: 1,
-                bytes: GROK1_EMBEDDING_BYTES,
-                kinds: vec![InventoryBlockKind {
-                    count: 1,
-                    kind: "token_embedding".to_string(),
-                }],
-            });
-            blocks.extend(inventory_blocks);
-            blocks.push(InventoryBlock {
-                label: "final_norm".to_string(),
-                block: None,
-                shard_start: 1,
-                shard_end: 1,
-                tensors: 1,
-                bytes: GROK1_FINAL_NORM_BYTES,
-                kinds: vec![InventoryBlockKind {
-                    count: 1,
-                    kind: "final_norm".to_string(),
-                }],
-            });
-            blocks
-        },
+        inventory_blocks: grok1_spec_inventory_blocks(inventory_blocks),
         exemplar_tensors: exemplar_block_tensors(),
         routers,
         expert_blocks,
@@ -193,6 +271,43 @@ pub fn build_ir_from_manifest(
         stats: vec![],
         mean_rms: 19.762282,
     })
+}
+
+/// Checkpoint provenance. `--checkpoint` / weights-dir wins; otherwise a
+/// nonempty scan `checkpoint_path`; otherwise the policy-manifest source.
+///
+/// Scan `checkpoint_path` is an export-time filesystem path and is **not**
+/// string-compared to the CLI's short provenance name (`parent/leaf`). Those
+/// conventions disagree even for the same checkpoint. Shard counts *are*
+/// comparable and [`resolve_shard_count`] hard-errors on a mismatch.
+fn resolve_checkpoint(
+    explicit: Option<&str>,
+    scan: Option<&InventoryScan>,
+    manifest_source: &str,
+) -> String {
+    if let Some(name) = explicit {
+        return name.to_string();
+    }
+    scan.map(|s| s.checkpoint_path.as_str())
+        .filter(|path| !path.is_empty())
+        .unwrap_or(manifest_source)
+        .to_string()
+}
+
+fn resolve_shard_count(
+    actual_shards: Option<usize>,
+    scan: Option<&InventoryScan>,
+) -> Result<usize, GrokOzempicError> {
+    match (actual_shards, scan.map(|s| s.shard_count)) {
+        (Some(actual), Some(scanned)) if actual != scanned => {
+            Err(GrokOzempicError::ArtifactValidation(format!(
+                "weights-dir shard count {actual} does not match inventory scan shard_count {scanned}"
+            )))
+        }
+        (Some(actual), _) => Ok(actual),
+        (None, Some(scanned)) => Ok(scanned),
+        (None, None) => Ok(GROK1_TENSOR_TOTAL),
+    }
 }
 
 fn inventory_kind_counts() -> Vec<InventoryKindCount> {
@@ -223,9 +338,14 @@ fn inventory_kind_counts() -> Vec<InventoryKindCount> {
             bytes: GROK1_MOE_DOWN_BYTES,
         },
         InventoryKindCount {
-            kind: "moe_expert.unresolved".to_string(),
-            count: 128,
-            bytes: GROK1_MOE_UNRESOLVED_BYTES,
+            kind: "moe_expert.gate".to_string(),
+            count: 64,
+            bytes: GROK1_MOE_DOWN_BYTES,
+        },
+        InventoryKindCount {
+            kind: "moe_expert.up".to_string(),
+            count: 64,
+            bytes: GROK1_MOE_DOWN_BYTES,
         },
         InventoryKindCount {
             kind: "router".to_string(),
@@ -259,8 +379,12 @@ fn block_kind_counts() -> Vec<InventoryBlockKind> {
             kind: "moe_expert.down".to_string(),
         },
         InventoryBlockKind {
-            count: 2,
-            kind: "moe_expert.unresolved".to_string(),
+            count: 1,
+            kind: "moe_expert.gate".to_string(),
+        },
+        InventoryBlockKind {
+            count: 1,
+            kind: "moe_expert.up".to_string(),
         },
         InventoryBlockKind {
             count: 1,
@@ -276,7 +400,7 @@ fn exemplar_block_tensors() -> Vec<InventoryTensor> {
             "quant.weight",
             "int8",
             "(8, 6144, 32768)",
-            "moe_expert.unresolved",
+            "moe_expert.gate",
             0,
         ),
         inventory_tensor(
@@ -292,7 +416,7 @@ fn exemplar_block_tensors() -> Vec<InventoryTensor> {
             "quant.weight",
             "int8",
             "(8, 6144, 32768)",
-            "moe_expert.unresolved",
+            "moe_expert.up",
             2,
         ),
         inventory_tensor(

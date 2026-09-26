@@ -40,8 +40,10 @@ run's `quant-plan.json` is planning input, not itself the
 ```
 
 This checks manifest identity and schema, checkpoint-directory presence, and
-the entries in `checksums.json` when that optional file exists. If present,
-those entries cause real shard reads for hashing. It does not independently
+the entries in checkpoint `checksums.json` when that optional file exists. If
+present, those entries cause real shard reads for hashing. That ingest file is
+a payload digest of named shard files. It is not the convert-time
+`plan_fingerprint` sidecar (name/length/policy only). It does not independently
 count all checkpoint shards or quantize weights.
 
 ## 3. Run the metadata-only smoke and conversion gates
@@ -66,17 +68,21 @@ count all checkpoint shards or quantize weights.
 ./target/release/grok-ozempic validate-grok1-artifact \
   --manifest dissect/grok-1/baseline.json \
   --artifact-index /tmp/grok1-artifact/artifact.index.json \
-  --checksums /tmp/grok1-artifact/checksums.json \
+  --plan-fingerprints /tmp/grok1-artifact/plan_fingerprints.json \
   --output-root /tmp/grok1-validation \
   --strict-router-protection true
 ```
 
 The smoke output is a block-0 structural slice. The conversion output includes
-`artifact.index.json`, `conversion.summary.md`, `checksums.json`,
-`manifest.used.json`, and `warnings.json`. The final command validates that
-metadata contract, including protected routers and norms. It still does not
-write packed tensor payloads. GitHub #36 owns the complete 770-entry,
-64-router metadata execution gate.
+`artifact.index.json`, `conversion.summary.md`, `plan_fingerprints.json`,
+`manifest.used.json`, and `warnings.json`. Each index entry carries a
+`plan_fingerprint`: a lowercase hex hash of **name, planned byte length, and
+quant policy only**. It is **not** a payload sha256 and is not emitted with a
+`sha256:` prefix. `validate-grok1-artifact` checks that fingerprint against an
+independently rebuilt plan; matching it does not claim content-digest coverage
+of tensor bytes. The final command validates that metadata contract, including
+protected routers and norms. It still does not write packed tensor payloads.
+GitHub #36 owns the complete 770-entry, 64-router metadata execution gate.
 
 ## 4. Export the real embedding from pickle to NPY
 
@@ -134,6 +140,47 @@ recorded separately in the canonical
 is claimed by either report. A new v3 pack is a reproduction of the workflow,
 not a promise of byte identity with that v1 file.
 
+This command runs on **CPU** via `run_quantization` → `quantizer.rs`. It does
+not call `BackendKernel`, `LocalBackend`, or `MyelinBackend`. CUDA kernels
+belong in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator);
+see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+
+## Backend kernel call flow
+
+Three different “dry-run / plan” surfaces exist. They are not interchangeable.
+
+```
+manifest (structural V2 or V1 baseline)
+    │
+    ├─► stream::resolve_manifest + selection/precision
+    │         live classify for quantize-goz1
+    │
+    ├─► DryRunPlanner::plan  (src/core/dry_run.rs)
+    │         OperationKind per rule
+    │         CoverageSummary vs 770-tensor inventory
+    │         JSON: planned_backend_calls_json, key __coverage__
+    │         no weight payloads
+    │
+    ├─► smoke-grok1 / convert-grok1 --dry-run
+    │         saaq-g1-v0 metadata indexes + plan_fingerprint
+    │         not DryRunPlanner, not a GOZ1 pack
+    │
+    └─► quantize-goz1 --verify
+              CPU quantizer.rs (same math as LocalBackend)
+              future: BackendKernel → MyelinBackend FFI
+```
+
+| Surface | Reads weights? | Backend? |
+|---------|----------------|----------|
+| `DryRunPlanner` | No | Plans `OperationKind` that *would* map to `BackendKernel` methods |
+| SAAQ CLI `--dry-run` | No (may hash shards named by `checksums.json`) | None |
+| `quantize-goz1` | Yes | CPU `quantizer.rs` today; `MyelinBackend` is a stub |
+
+Precision → kernel mapping is tabulated in
+[`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
+Coverage JSON shape is in
+[`artifact-compatibility-plan.md`](./artifact-compatibility-plan.md#dryrunplanner-coverage).
+
 ## 6. Inspect the result and understand the boundary
 
 `--verify` reopens the container and validates its header, tensor table,
@@ -173,3 +220,16 @@ or [GitHub #36](https://github.com/rmems/grok-ozempic/issues/36), run full-model
 inference, quantize routers or norms, provision cloud resources, or rerun the
 multi-hour [GitHub #85](https://github.com/rmems/grok-ozempic/issues/85)
 experiment.
+
+It is not a cloud-credit or GPU-instance sprint runbook. There is no
+2026-05-28 cutoff, no serverless-inference burn plan, and no GPU
+provisioning section. Kernel CUDA work belongs in `myelin-accelerator`; a
+green metadata report is not a weight-fidelity experiment.
+
+## See also
+
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — ownership boundary and five-minute trace
+- [`dissect-manifest.md`](./dissect-manifest.md) — schema and precision mapping
+- [`first-quantization-target.md`](./first-quantization-target.md) — first embedding contract
+- [`goz1-format.md`](./goz1-format.md) — container layout
+- [README](../README.md#backend-and-kernel-boundary) — backend trait and measured status
