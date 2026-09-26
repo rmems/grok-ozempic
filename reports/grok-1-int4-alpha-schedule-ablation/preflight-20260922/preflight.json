@@ -1,0 +1,6 @@
+{
+  "error": "free swap below 2 GiB",
+  "model_forward_executed": false,
+  "protocol": "grok1-int4-alpha-schedule-v1",
+  "status": "inconclusive"
+}
