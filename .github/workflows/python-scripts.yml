@@ -70,6 +70,15 @@ jobs:
       - name: Unit tests (v4 out-of-process supervisor)
         run: python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 
+      - name: Unit tests (matched alpha and schedule protocol)
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_protocol -v
+
+      - name: Unit tests (matched alpha and schedule runner)
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_runner -v
+
+      - name: Matched alpha/schedule lifecycle regressions
+        run: python3 -m unittest scripts.test_grok1_alpha_schedule_lifecycle -v
+
       # These two were reachable only through `just review` (GH #98). They cover
       # the block-forward and block-weight kernels behind every published
       # forward-pass number, and no CI workflow ran them.
