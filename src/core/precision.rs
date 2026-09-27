@@ -125,31 +125,7 @@ pub fn parse_precision_str(s: &str) -> Result<TensorPrecision> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::manifest::{
-        DissectManifest, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION, ManifestDefaults,
-        ManifestModel,
-    };
-
-    fn manifest_with_defaults(precision: Option<&str>, gif: Option<f32>) -> DissectManifest {
-        DissectManifest {
-            schema: "xai-dissect.manifest".into(),
-            schema_version: MANIFEST_SCHEMA_VERSION,
-            model: ManifestModel {
-                family: "grok-1".into(),
-                source: "xai-org/grok-1".into(),
-                tensor_name_convention: MANIFEST_NAME_CONVENTION_V1.into(),
-            },
-            produced_by: None,
-            defaults: ManifestDefaults {
-                precision: precision.map(String::from),
-                gif_threshold: gif,
-            },
-            preserve: vec![],
-            fp16: vec![],
-            ternary_candidates: vec![],
-            blocks: vec![],
-        }
-    }
+    use crate::core::test_support::manifest_with_defaults;
 
     fn config_with_threshold(t: f32) -> QuantizationConfig {
         QuantizationConfig {
