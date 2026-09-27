@@ -357,7 +357,7 @@ class PackWeights(WeightSource):
         # over from a v1 run would shadow the stored scale, and the run would
         # silently report oracle figures while believing they were pack-only.
         self._pack_has_scales = any(e.get("scale") is not None for e in self._index.values())
-        self._scales: dict[str, TernaryScale] = {} if self._pack_has_scales else self._load_cache()
+        self._scales: dict[str, TernaryScale] = {} if self._pack_has_scales else self.load_cache()
         self._scale_sources: dict[str, str] = {}
 
     def shapes(self) -> dict[str, tuple[int, ...]]:
@@ -406,7 +406,7 @@ class PackWeights(WeightSource):
                 stats[npy.name] = [st.st_size, st.st_mtime_ns]
         return stats
 
-    def _discard_cache(self, reason: str) -> dict[str, TernaryScale]:
+    def discard_cache(self, reason: str) -> dict[str, TernaryScale]:
         """Report an unusable cache and fall back to recomputation.
 
         Every malformed-cache path lands here rather than raising. The cache is
@@ -422,27 +422,27 @@ class PackWeights(WeightSource):
         )
         return {}
 
-    def _load_cache(self) -> dict[str, TernaryScale]:
+    def load_cache(self) -> dict[str, TernaryScale]:
         """Load cached scales, discarding them if unusable or inputs changed."""
         if not self._cache_path.exists():
             return {}
         try:
             raw = json.loads(self._cache_path.read_text())
         except json.JSONDecodeError as exc:
-            return self._discard_cache(f"unreadable ({exc})")
+            return self.discard_cache(f"unreadable ({exc})")
         if not isinstance(raw, dict):
-            return self._discard_cache("payload is not a JSON object")
+            return self.discard_cache("payload is not a JSON object")
         # Legacy flat caches carry no fingerprint and cannot be validated. This is
         # the expected miss, not a fault, so it stays quiet.
         if raw.get("fingerprint") != self._fingerprint():
             return {}
         scales = raw.get("scales", {})
         if not isinstance(scales, dict):
-            return self._discard_cache("'scales' is not a JSON object")
+            return self.discard_cache("'scales' is not a JSON object")
         try:
             return {name: TernaryScale(**entry) for name, entry in scales.items()}
         except TypeError as exc:
-            return self._discard_cache(f"malformed scale entry ({exc})")
+            return self.discard_cache(f"malformed scale entry ({exc})")
 
     def _save_cache(self) -> None:
         payload = {
@@ -503,7 +503,7 @@ class PackWeights(WeightSource):
             self._scales[name] = alpha_for(npy, self.pack, self._index[name])
             self._scale_sources[name] = "legacy_oracle"
             self._save_cache()
-        # Pre-loaded from the on-disk v1 cache at construction time (_load_cache
+        # Pre-loaded from the on-disk v1 cache at construction time (load_cache
         # in __init__). Without this, scale_sources would have no entry for tensors
         # loaded from the cache, even though they are unambiguously legacy_oracle.
         self._scale_sources.setdefault(name, "legacy_oracle")

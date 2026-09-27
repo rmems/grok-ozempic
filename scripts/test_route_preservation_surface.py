@@ -54,7 +54,8 @@ class SummarySpecsTests(unittest.TestCase):
 
 
 class BuildSummaryTests(unittest.TestCase):
-    def _routing(self, **overrides: float) -> dict[str, dict]:
+    @staticmethod
+    def _routing(**overrides: float) -> dict[str, dict]:
         base = {
             "router_top1_agreement": 1.0,
             "router_top2_set_agreement": 1.0,
@@ -68,7 +69,8 @@ class BuildSummaryTests(unittest.TestCase):
         base.update(overrides)
         return {"proj_a": dict(base)}
 
-    def _weights(self) -> dict[str, dict]:
+    @staticmethod
+    def _weights() -> dict[str, dict]:
         return {
             "w0": {
                 "weight_reconstruction_mse": 0.1,
@@ -192,7 +194,8 @@ class CertificationTests(unittest.TestCase):
     under-packed block. Certification therefore requires the conversion manifest.
     """
 
-    def _perfect(self) -> tuple[dict, dict]:
+    @staticmethod
+    def _perfect() -> tuple[dict, dict]:
         """Weights/routing good enough that every gate would otherwise pass."""
         routing = {
             "p": {
@@ -255,7 +258,8 @@ class ManifestShapeValidationTests(unittest.TestCase):
     dimension raised ValueError outside the CLI's error boundary.
     """
 
-    def _load(self, entry):
+    @staticmethod
+    def _load(entry):
         import json
         import tempfile
 
@@ -264,7 +268,8 @@ class ManifestShapeValidationTests(unittest.TestCase):
             p.write_text(json.dumps({"tensors": [entry]}))
             return rpm._load_manifest_tensors(p)
 
-    def _entry(self, **overrides):
+    @staticmethod
+    def _entry(**overrides):
         base = {
             "structural_name": "block_000.slot_11.router",
             "kind": "router",

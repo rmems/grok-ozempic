@@ -119,10 +119,12 @@ class StemTests(unittest.TestCase):
 
 
 class ManifestValidationTests(unittest.TestCase):
-    def _manifest(self, tensors):
+    @staticmethod
+    def _manifest(tensors):
         return json.dumps({"tensors": tensors}).encode("utf-8")
 
-    def _entry(self, **overrides):
+    @staticmethod
+    def _entry(**overrides):
         """A well-formed entry, so each test isolates the one field it breaks."""
         base = {
             "structural_name": "block_000.slot_00.moe_expert.gate",
@@ -277,7 +279,8 @@ class BlockNameConsistencyTests(unittest.TestCase):
     — the tensor is simply never picked and the export comes out short.
     """
 
-    def _manifest(self, **overrides):
+    @staticmethod
+    def _manifest(**overrides):
         base = {
             "structural_name": "block_000.slot_00.moe_expert.gate",
             "source_shard_path": "s",

@@ -70,13 +70,20 @@ from grok1_multiblock_lib import _fp16_gate, _safe_int  # noqa: E402
 from route_preservation_io import MetricsError  # noqa: E402
 
 __all__ = [
+    "ChainPaths",
+    "_arm_meta",
+    "_resolve_hp_blocks",
+    "_validate_embedding_shard",
+    "_validate_v2_cli",
     "decide",
     "decide_remedy",
     "decide_remedy_v2",
     "parse_blocks",
+    "parse_hp_blocks",
     "periodic_hp_blocks",
     "require_pack_only_scales",
     "residual_stream_metrics",
+    "run_chain",
     "write_results_md",
     "write_remedy_results_md",
     "write_remedy_v2_results_md",
@@ -148,7 +155,7 @@ def _block_paths(paths: ChainPaths, b: int) -> tuple[Path, Path]:
     return npy_dir, pack_path
 
 
-def _atomic_write_json(path: Path, payload: dict) -> None:
+def atomic_write_json(path: Path, payload: dict) -> None:
     """Atomically replace ``path`` with one complete JSON document."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -181,7 +188,7 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
-def _atomic_write_text(path: Path, body: str) -> None:
+def atomic_write_text(path: Path, body: str) -> None:
     """Atomically replace ``path`` with one complete UTF-8 document."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -220,7 +227,7 @@ def _write_progress(
         "current_block": int(current_block),
         "completed_blocks": [int(block) for block in completed_blocks],
     }
-    _atomic_write_json(path, payload)
+    atomic_write_json(path, payload)
 
 
 def _forward_fp16(control, h_fp16, ref_trace, stream_fp16, top_k):
@@ -1207,7 +1214,7 @@ def run(args: argparse.Namespace) -> int:
         decision = decide_remedy(chain) if _is_remedy_arm(args.arm) else decide(chain)
         payload = {"provenance": prov, "chain": chain, "decision": decision}
     args.out.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(args.out / "metrics.json", payload)
+    atomic_write_json(args.out / "metrics.json", payload)
     print(f"wrote {args.out / 'metrics.json'}")
     if evidence_only:
         print("EVIDENCE ONLY: no decision emitted")
@@ -1268,7 +1275,7 @@ def _write_v3_report(report: Path, payload: dict) -> None:
             )
         print(f"kept existing {report} (pre-authored; metrics.json is SoT)")
         return
-    _atomic_write_text(report, _v3_results_md(payload))
+    atomic_write_text(report, _v3_results_md(payload))
     print(f"wrote {report}")
 
 

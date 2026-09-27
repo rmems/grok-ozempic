@@ -87,7 +87,8 @@ class WriteNpyTests(unittest.TestCase):
 
 
 class LayoutPolicyTests(unittest.TestCase):
-    def _ns(self, **kw):
+    @staticmethod
+    def _ns(**kw):
         defaults = {
             "offset": None,
             "shape": None,

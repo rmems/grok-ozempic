@@ -259,7 +259,7 @@ def _supervisor_output_lock(out: Path, *, nonblocking: bool = False) -> Iterator
         os.close(fd)
 
 
-def _atomic_write_text(path: Path, body: str) -> None:
+def atomic_write_text(path: Path, body: str) -> None:
     """Durably replace one small text artifact from a same-directory temp file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_name: str | None = None
@@ -287,8 +287,8 @@ def _atomic_write_text(path: Path, body: str) -> None:
                 pass
 
 
-def _atomic_write_json(path: Path, payload: object) -> None:
-    _atomic_write_text(path, canonical_json(payload))
+def atomic_write_json(path: Path, payload: object) -> None:
+    atomic_write_text(path, canonical_json(payload))
 
 
 def _fsync_directory_strict(path: Path) -> None:
@@ -313,7 +313,7 @@ def _durably_unlink(path: Path) -> None:
 def _best_effort_write_json(path: Path, payload: object) -> None:
     """Write a supplemental diagnostic without masking canonical publication."""
     try:
-        _atomic_write_json(path, payload)
+        atomic_write_json(path, payload)
     except OSError as exc:
         print(
             f"warning: could not write supplemental diagnostic {path}: {exc}",
@@ -352,8 +352,8 @@ def _clean_supervisor_implementation() -> dict[str, str | bool]:
                 timeout=30,
                 check=True,
             ).stdout
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise ValueError(f"could not pin supervisor implementation: {exc}") from exc
+        except (OSError, subprocess.SubprocessError) as git_exc:
+            raise ValueError(f"could not pin supervisor implementation: {git_exc}") from git_exc
 
     commit_before = git_output("rev-parse", "HEAD").decode("ascii").strip()
     status = git_output(
@@ -454,7 +454,7 @@ def _artifact_signature(path: Path) -> tuple[int, int, int, int] | None:
         stat = path.stat()
     except FileNotFoundError:
         return None
-    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
 
 
 def _arm_output(out: Path, arm: ArmSpec) -> Path:
@@ -1332,7 +1332,11 @@ def _as_text(value: object) -> str:
         return ""
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
-    return str(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool, Path)):
+        return str(value)
+    return repr(value)
 
 
 _CHILD_LOG_PATH_PLACEHOLDERS = {
@@ -1393,7 +1397,7 @@ def _portable_failure_detail(args: argparse.Namespace, detail: object) -> str:
     replacements.update(
         _absolute_pattern_replacements(args.pack_pattern, _ABSOLUTE_PACK_PATTERN)
     )
-    portable = str(detail)
+    portable = _as_text(detail)
     for raw, placeholder in sorted(
         replacements.items(), key=lambda item: len(item[0]), reverse=True
     ):
@@ -1496,7 +1500,7 @@ def _write_child_log(
             _portable_child_output(command, stderr),
         ]
     )
-    _atomic_write_text(path, body.rstrip() + "\n")
+    atomic_write_text(path, body.rstrip() + "\n")
 
 
 def _common_child_args(
@@ -1851,8 +1855,8 @@ def _publish_failure(out: Path, payload: dict[str, Any]) -> None:
     then the Option-4 metrics are replaced last.
     """
     _durably_unlink(out / "metrics.json")
-    _atomic_write_text(out / "results.md", _render_failure_report(payload))
-    _atomic_write_json(out / "metrics.json", payload)
+    atomic_write_text(out / "results.md", _render_failure_report(payload))
+    atomic_write_json(out / "metrics.json", payload)
 
 
 def _publish_validated_success(
@@ -1860,8 +1864,8 @@ def _publish_validated_success(
 ) -> None:
     """Promote a validated P0 pair with canonical machine evidence last."""
     _durably_unlink(out / "metrics.json")
-    _atomic_write_text(out / "results.md", report_body)
-    _atomic_write_json(out / "metrics.json", payload)
+    atomic_write_text(out / "results.md", report_body)
+    atomic_write_json(out / "metrics.json", payload)
 
 
 def _completed_supervisor_progress(
@@ -1942,7 +1946,7 @@ def _fail(
             "memory": payload["host_memory_snapshot"]["failure"],
         },
     )
-    _atomic_write_json(
+    atomic_write_json(
         args.out / "supervisor-progress.json",
         {
             **_completed_supervisor_progress(
@@ -2046,8 +2050,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         embedding_fingerprint=None,
     )
     state.published_progress = None
-    _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
-    _atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
+    atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
+    atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
     state.published_progress = _PublishedProgress(
         arm=ARMS[0],
         prelaunch=fingerprint_prelaunch,
@@ -2071,8 +2075,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
         embedding_fingerprint=None,
     )
     state.published_progress = None
-    _atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
-    _atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
+    atomic_write_json(_arm_progress(args.out, ARMS[0]), fingerprint_prelaunch)
+    atomic_write_json(args.out / "supervisor-progress.json", fingerprint_prelaunch)
     state.published_progress = _PublishedProgress(
         arm=ARMS[0],
         prelaunch=fingerprint_prelaunch,
@@ -2119,8 +2123,8 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
             embedding_fingerprint=embedding_fingerprint,
         )
         state.published_progress = None
-        _atomic_write_json(_arm_progress(args.out, arm), prelaunch)
-        _atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
+        atomic_write_json(_arm_progress(args.out, arm), prelaunch)
+        atomic_write_json(args.out / "supervisor-progress.json", prelaunch)
         state.published_progress = _PublishedProgress(
             arm=arm,
             prelaunch=prelaunch,
@@ -2340,7 +2344,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
                 state.canonical_validated = True
             _best_effort_clear_p0_staging(child_out)
         _record_validated_arm(payloads, completed, arm, payload)
-        _atomic_write_json(
+        atomic_write_json(
             args.out / "supervisor-progress.json",
             _completed_supervisor_progress(
                 status="stage_complete",
@@ -2353,7 +2357,7 @@ def _run_supervised(args: argparse.Namespace, state: _RunState) -> int:
 
     # Canonical scientific artifacts were promoted only after all three arms
     # passed validation. Remaining writes are supplemental supervisor records.
-    _atomic_write_json(
+    atomic_write_json(
         args.out / "supervisor-progress.json",
         {
             **_completed_supervisor_progress(

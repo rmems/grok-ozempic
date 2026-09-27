@@ -159,16 +159,19 @@ def _require_block_matches_name(
         raise ExportError(
             f"{path}: tensors[{i}].block is {type(block).__name__}, expected int or null"
         )
-    if block < 0:
-        raise ExportError(f"{path}: tensors[{i}].block is {block}, expected >= 0 or null")
+    block_index = int(block)
+    if block_index < 0:
+        raise ExportError(
+            f"{path}: tensors[{i}].block is {block_index}, expected >= 0 or null"
+        )
     if from_name is None:
         raise ExportError(
-            f"{path}: tensors[{i}] {name!r} is not block-scoped but block is {block}; "
+            f"{path}: tensors[{i}] {name!r} is not block-scoped but block is {block_index}; "
             "expected null for model-level tensors"
         )
-    if from_name != block:
+    if from_name != block_index:
         raise ExportError(
-            f"{path}: tensors[{i}] {name!r} names block {from_name} but block is {block}"
+            f"{path}: tensors[{i}] {name!r} names block {from_name} but block is {block_index}"
         )
 
 

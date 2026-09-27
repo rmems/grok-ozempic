@@ -405,9 +405,9 @@ def _write_success(
     if spec.stage == "p0" and write_report:
         report_option = payload["decision"]["decision"]
         report_body = f"# Fixture\n\n**Option {report_option} — fixture decision**\n"
-        supervisor._atomic_write_text(out / "results.md", report_body)
+        supervisor.atomic_write_text(out / "results.md", report_body)
     progress = Path(_value(command, "--progress-json"))
-    supervisor._atomic_write_json(
+    supervisor.atomic_write_json(
         progress,
         {
             "status": "running",
@@ -444,7 +444,8 @@ class SupervisorTests(unittest.TestCase):
         self._implementation_patch.start()
         self.addCleanup(self._implementation_patch.stop)
 
-    def _args(self, root: Path):
+    @staticmethod
+    def _args(root: Path):
         root.mkdir(parents=True, exist_ok=True)
         (root / "embedding.npy").write_bytes(_EMBEDDING_BYTES)
         return supervisor.build_parser().parse_args(
@@ -464,7 +465,8 @@ class SupervisorTests(unittest.TestCase):
             ]
         )
 
-    def _run(self, args, side_effect):
+    @staticmethod
+    def _run(args, side_effect):
         memory = {
             "captured_at": "2026-08-23T00:00:00Z",
             "values": {"MemAvailable_bytes": 1},
@@ -479,7 +481,8 @@ class SupervisorTests(unittest.TestCase):
             result = supervisor.run(args)
         return result, run
 
-    def _failure(self, args) -> dict:
+    @staticmethod
+    def _failure(args) -> dict:
         return json.loads((args.out / "metrics.json").read_text(encoding="utf-8"))
 
     def _assert_output_lock_held(self, out: Path) -> None:
@@ -494,7 +497,8 @@ class SupervisorTests(unittest.TestCase):
         finally:
             os.close(fd)
 
-    def _prelock_interrupt_patch(self, phase: str, exception: BaseException):
+    @staticmethod
+    def _prelock_interrupt_patch(phase: str, exception: BaseException):
         """Raise once at a selected point before the output transaction starts."""
         targets = {
             "lock_factory": (
@@ -1039,7 +1043,7 @@ class SupervisorTests(unittest.TestCase):
                     exception = make_exception()
                     real_expanduser = Path.expanduser
                     real_mkdir = Path.mkdir
-                    real_atomic_write_json = supervisor._atomic_write_json
+                    realatomic_write_json = supervisor.atomic_write_json
 
                     def interrupt_expanduser(
                         path,
@@ -1089,7 +1093,7 @@ class SupervisorTests(unittest.TestCase):
                         payload,
                         current_args=args,
                         current_exception=exception,
-                        real=real_atomic_write_json,
+                        real=realatomic_write_json,
                     ):
                         nonlocal tripped
                         if not tripped and path == supervisor._arm_progress(
@@ -1097,7 +1101,8 @@ class SupervisorTests(unittest.TestCase):
                         ):
                             tripped = True
                             raise current_exception
-                        return real(path, payload)
+                        real(path, payload)
+                        return None
 
                     phase_patch = {
                         "out_expanduser": mock.patch.object(
@@ -1125,7 +1130,7 @@ class SupervisorTests(unittest.TestCase):
                         ),
                         "prelaunch_write": mock.patch.object(
                             supervisor,
-                            "_atomic_write_json",
+                            "atomic_write_json",
                             side_effect=interrupt_prelaunch_write,
                         ),
                     }[phase]
@@ -1219,7 +1224,7 @@ class SupervisorTests(unittest.TestCase):
                     args = self._args(Path(td))
                     tripped = False
                     real_prelaunch = supervisor._prelaunch_progress
-                    real_atomic_write_json = supervisor._atomic_write_json
+                    realatomic_write_json = supervisor.atomic_write_json
 
                     def child(command, **_kwargs):
                         _write_success(list(command))
@@ -1250,7 +1255,7 @@ class SupervisorTests(unittest.TestCase):
                         current_phase=phase,
                         current_stage=target_stage,
                         current_target=target,
-                        real=real_atomic_write_json,
+                        real=realatomic_write_json,
                     ):
                         nonlocal tripped
                         is_target_prelaunch = (
@@ -1271,7 +1276,8 @@ class SupervisorTests(unittest.TestCase):
                         if not tripped and is_target_prelaunch and should_interrupt:
                             tripped = True
                             raise supervisor.SupervisorSignal(signal.SIGTERM)
-                        return real(path, payload)
+                        real(path, payload)
+                        return None
 
                     with (
                         mock.patch.object(
@@ -1281,7 +1287,7 @@ class SupervisorTests(unittest.TestCase):
                         ),
                         mock.patch.object(
                             supervisor,
-                            "_atomic_write_json",
+                            "atomic_write_json",
                             side_effect=interrupt_progress_write,
                         ),
                         mock.patch.object(
@@ -1556,7 +1562,7 @@ class SupervisorTests(unittest.TestCase):
 
             def child(command, **_kwargs):
                 progress_path = Path(_value(list(command), "--progress-json"))
-                supervisor._atomic_write_json(
+                supervisor.atomic_write_json(
                     progress_path,
                     {
                         "status": "running",
@@ -1793,12 +1799,12 @@ class SupervisorTests(unittest.TestCase):
         self,
     ) -> None:
         corruptions = {
-            "missing_numpy": lambda payload: payload["provenance"].pop("numpy"),
-            "blank_numpy": lambda payload: payload["provenance"].__setitem__(
+            "missing_numpy": lambda metrics: metrics["provenance"].pop("numpy"),
+            "blank_numpy": lambda metrics: metrics["provenance"].__setitem__(
                 "numpy", " "
             ),
-            "missing_python": lambda payload: payload["provenance"].pop("python"),
-            "blank_python": lambda payload: payload["provenance"].__setitem__(
+            "missing_python": lambda metrics: metrics["provenance"].pop("python"),
+            "blank_python": lambda metrics: metrics["provenance"].__setitem__(
                 "python", " "
             ),
         }
@@ -1821,18 +1827,18 @@ class SupervisorTests(unittest.TestCase):
     def test_scale_provenance_requires_exact_expert_tensor_keys(self) -> None:
         source = "research_int4_side"
 
-        def incomplete(payload: dict) -> None:
-            payload["chain"]["pack_provenance"][0]["scale_sources"] = {
+        def incomplete(metrics: dict) -> None:
+            metrics["chain"]["pack_provenance"][0]["scale_sources"] = {
                 "block_000.slot_00.moe_expert.gate": source
             }
 
-        def fabricated(payload: dict) -> None:
-            payload["chain"]["pack_provenance"][0]["scale_sources"] = {
+        def fabricated(metrics: dict) -> None:
+            metrics["chain"]["pack_provenance"][0]["scale_sources"] = {
                 f"block_000.fabricated_{index}": source for index in range(3)
             }
 
-        def foreign_block(payload: dict) -> None:
-            payload["chain"]["pack_provenance"][0]["scale_sources"] = (
+        def foreign_block(metrics: dict) -> None:
+            metrics["chain"]["pack_provenance"][0]["scale_sources"] = (
                 _expert_scale_sources(1, source)
             )
 
@@ -1866,11 +1872,11 @@ class SupervisorTests(unittest.TestCase):
 
     def test_missing_malformed_or_wrong_embedding_digest_fails_closed(self) -> None:
         corruptions = {
-            "missing": lambda payload: payload["provenance"].pop("embedding_sha256"),
-            "malformed": lambda payload: payload["provenance"].__setitem__(
+            "missing": lambda metrics: metrics["provenance"].pop("embedding_sha256"),
+            "malformed": lambda metrics: metrics["provenance"].__setitem__(
                 "embedding_sha256", "not-a-sha"
             ),
-            "wrong": lambda payload: payload["provenance"].__setitem__(
+            "wrong": lambda metrics: metrics["provenance"].__setitem__(
                 "embedding_sha256", "d" * 64
             ),
         }
@@ -2083,7 +2089,7 @@ class SupervisorTests(unittest.TestCase):
                     canonical["report"] = report or ""
                 return _FakeProcessResult(command, 0, "", "")
 
-            real_atomic_write_json = supervisor._atomic_write_json
+            realatomic_write_json = supervisor.atomic_write_json
 
             def fail_final_progress(path: Path, payload: object) -> None:
                 if (
@@ -2092,11 +2098,11 @@ class SupervisorTests(unittest.TestCase):
                     and payload.get("status") == "complete"
                 ):
                     raise RuntimeError("final bookkeeping failed")
-                real_atomic_write_json(path, payload)
+                realatomic_write_json(path, payload)
 
             with mock.patch.object(
                 supervisor,
-                "_atomic_write_json",
+                "atomic_write_json",
                 side_effect=fail_final_progress,
             ):
                 result, run = self._run(args, child)
@@ -2170,14 +2176,14 @@ class SupervisorTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     supervisor,
-                    "_atomic_write_text",
+                    "atomic_write_text",
                     side_effect=lambda path, body: events.append(
                         ("report", path, body)
                     ),
                 ),
                 mock.patch.object(
                     supervisor,
-                    "_atomic_write_json",
+                    "atomic_write_json",
                     side_effect=lambda path, body: events.append(
                         ("metrics", path, body)
                     ),
@@ -2246,12 +2252,12 @@ class SupervisorTests(unittest.TestCase):
                         ).read_text(encoding="utf-8")
                     return _FakeProcessResult(command, 0, "", "")
 
-                real_atomic_write_json = supervisor._atomic_write_json
+                realatomic_write_json = supervisor.atomic_write_json
                 interrupt_sent = False
 
                 def interrupt_after_success(path: Path, payload: object) -> None:
                     nonlocal interrupt_sent
-                    real_atomic_write_json(path, payload)
+                    realatomic_write_json(path, payload)
                     if (
                         not interrupt_sent
                         and path == args.out / "metrics.json"
@@ -2267,7 +2273,7 @@ class SupervisorTests(unittest.TestCase):
                 try:
                     with mock.patch.object(
                         supervisor,
-                        "_atomic_write_json",
+                        "atomic_write_json",
                         side_effect=interrupt_after_success,
                     ):
                         result, run = self._run(args, child)
@@ -2671,7 +2677,7 @@ class SupervisorTests(unittest.TestCase):
             args = self._args(Path(td))
             calls = 0
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 nonlocal calls
                 calls += 1
                 if calls < 3:
@@ -2714,7 +2720,7 @@ class SupervisorTests(unittest.TestCase):
                         json.dumps(_payload(supervisor.ARMS[0])), encoding="utf-8"
                     )
 
-                def child(command, current_case=case, **kwargs):
+                def child(command, current_case=case, **_kwargs):
                     if current_case == "malformed":
                         out = Path(_value(list(command), "--out"))
                         out.mkdir(parents=True, exist_ok=True)
@@ -2737,7 +2743,7 @@ class SupervisorTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 spec = _spec_for_command(command)
                 _write_success(command, write_report=spec.stage != "p0")
@@ -2763,7 +2769,7 @@ class SupervisorTests(unittest.TestCase):
             original = "# Fixture\n\n**Option 2 — fixture decision**\n"
             (args.out / "results.md").write_text(original, encoding="utf-8")
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 _write_success(list(command))
                 return _FakeProcessResult(command, 0, "", "")
 
@@ -2780,7 +2786,7 @@ class SupervisorTests(unittest.TestCase):
             args = self._args(Path(td))
             commands: list[list[str]] = []
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 commands.append(command)
                 _write_success(command, tokens=2048)
@@ -2798,7 +2804,7 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 spec = _spec_for_command(command)
                 payload = _payload(spec)
@@ -2820,22 +2826,22 @@ class SupervisorTests(unittest.TestCase):
 
     def test_malformed_baseline_metrics_never_count_as_completed(self) -> None:
         cases = {
-            "missing": lambda payload: payload["chain"]["per_block"][0][
+            "missing": lambda metrics: metrics["chain"]["per_block"][0][
                 "expert_only"
             ].pop("router_top1_agreement"),
-            "non_finite": lambda payload: payload["chain"]["per_block"][0][
+            "non_finite": lambda metrics: metrics["chain"]["per_block"][0][
                 "expert_only"
             ].__setitem__("router_top1_agreement", float("nan")),
-            "out_of_domain": lambda payload: payload["chain"]["per_block"][0][
+            "out_of_domain": lambda metrics: metrics["chain"]["per_block"][0][
                 "expert_only"
             ].__setitem__("router_top2_set_agreement", 2.0),
-            "missing_chain_exit": lambda payload: payload["chain"].pop("end_of_chain"),
+            "missing_chain_exit": lambda metrics: metrics["chain"].pop("end_of_chain"),
         }
         for case, corrupt in cases.items():
             with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
                 args = self._args(Path(td))
 
-                def child(command, corrupt_case=corrupt, **kwargs):
+                def child(command, corrupt_case=corrupt, **_kwargs):
                     command = list(command)
                     spec = _spec_for_command(command)
                     payload = _payload(spec)
@@ -2859,7 +2865,7 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 spec = _spec_for_command(command)
                 payload = _payload(spec)
@@ -2885,7 +2891,7 @@ class SupervisorTests(unittest.TestCase):
             args = self._args(Path(td))
             calls = 0
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 nonlocal calls
                 calls += 1
                 command = list(command)
@@ -3066,7 +3072,7 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 spec = _spec_for_command(command)
                 _write_success(command, decision=(4 if spec.stage == "p0" else 2))
@@ -3084,10 +3090,10 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
 
-            def child(command, **kwargs):
+            def child(command, **_kwargs):
                 command = list(command)
                 progress = Path(_value(command, "--progress-json"))
-                supervisor._atomic_write_json(
+                supervisor.atomic_write_json(
                     progress,
                     {
                         "status": "running",
@@ -3136,7 +3142,7 @@ class SupervisorTests(unittest.TestCase):
                 supervisor.os, "replace", side_effect=OSError("stop")
             ):
                 with self.assertRaisesRegex(OSError, "stop"):
-                    supervisor._atomic_write_json(progress, {"status": "new"})
+                    supervisor.atomic_write_json(progress, {"status": "new"})
             self.assertEqual(progress.read_text(encoding="utf-8"), original)
             self.assertEqual(list(root.glob(".progress.json.*.tmp")), [])
 
