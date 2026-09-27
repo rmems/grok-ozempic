@@ -48,7 +48,7 @@ def _pickle_label(value: object) -> str:
         return value
     if isinstance(value, bytes):
         return value.decode("ascii", errors="replace")
-    return repr(value)
+    return type(value).__qualname__
 
 # Preserve tier per run3 quant-plan `keep_fp32`; never ternary, never dequantized.
 
@@ -359,36 +359,16 @@ class _HeaderState:
         self._push(s)
         self._set_descr(s)
 
-    _op_SHORT_BINUNICODE = _push_str
-    _op_BINUNICODE = _push_str
-    _op_UNICODE = _push_str
-
     def _push_bytes(self, arg) -> None:
         self._push(arg)
-
-    _op_SHORT_BINSTRING = _push_bytes
-    _op_BINSTRING = _push_bytes
-    _op_SHORT_BINBYTES = _push_bytes
-    _op_BINBYTES = _push_bytes
-    _op_BINBYTES8 = _push_bytes
 
     def _push_int(self, arg) -> None:
         i = int(arg)
         self._push(i)
         self.ints.append(i)
 
-    _op_BININT = _push_int
-    _op_BININT1 = _push_int
-    _op_BININT2 = _push_int
-    _op_LONG_BININT = _push_int
-    _op_INT = _push_int
-    _op_LONG = _push_int
-
     def _push_float(self, arg) -> None:
         self._push(float(arg))
-
-    _op_FLOAT = _push_float
-    _op_BINFLOAT = _push_float
 
     def _op_none(self, _arg) -> None:
         self._push(None)
@@ -530,18 +510,10 @@ class _HeaderState:
         self._push(v)
         self._set_descr(v)
 
-    _op_GET = _binget
-    _op_BINGET = _binget
-    _op_LONG_BINGET = _binget
-
     def _memoize_arg(self, arg) -> None:
         idx = int(arg)
         self._memoize_top(idx)
         self.memo_next = max(self.memo_next, idx + 1)
-
-    _op_PUT = _memoize_arg
-    _op_BINPUT = _memoize_arg
-    _op_LONG_BINPUT = _memoize_arg
 
     def _op_memoize(self, _arg) -> None:
         self._memoize_top(self.memo_next)
@@ -558,47 +530,70 @@ class _HeaderState:
         if self.stack:
             self._push(self.stack[-1])
 
-    def _push_unknown_persid(self, arg) -> None:
+    def _push_unknown_persid(self, _arg) -> None:
         self._push(_Unknown("persid"))
 
-    _op_PERSID = _push_unknown_persid
-    _op_BINPERSID = _push_unknown_persid
-
-    _op_FRAME = _op_frame
-    _op_PROTO = _op_proto
-    _op_NONE = _op_none
-    _op_NEWTRUE = _op_newtrue
-    _op_NEWFALSE = _op_newfalse
-    _op_EMPTY_TUPLE = _op_empty_tuple
-    _op_EMPTY_LIST = _op_empty_list
-    _op_EMPTY_DICT = _op_empty_dict
-    _op_EMPTY_SET = _op_empty_set
-    _op_MARK = _op_mark
-    _op_TUPLE1 = _op_tuple1
-    _op_TUPLE2 = _op_tuple2
-    _op_TUPLE3 = _op_tuple3
-    _op_TUPLE = _op_tuple
-    _op_LIST = _op_list
-    _op_DICT = _op_dict
-    _op_SETITEM = _op_setitem
-    _op_APPEND = _op_append
-    _op_SETITEMS = _op_setitems
-    _op_APPENDS = _op_appends
-    _op_ADDITEMS = _op_additems
-    _op_STACK_GLOBAL = _op_stack_global
-    _op_REDUCE = _op_reduce
-    _op_BUILD = _op_build
-    _op_NEWOBJ = _op_newobj
-    _op_NEWOBJ_EX = _op_newobj_ex
-    _op_MEMOIZE = _op_memoize
-    _op_POP = _op_pop
-    _op_POP_MARK = _op_pop_mark
-    _op_DUP = _op_dup
+    _opcode_handlers = {
+        "SHORT_BINUNICODE": _push_str,
+        "BINUNICODE": _push_str,
+        "UNICODE": _push_str,
+        "SHORT_BINSTRING": _push_bytes,
+        "BINSTRING": _push_bytes,
+        "SHORT_BINBYTES": _push_bytes,
+        "BINBYTES": _push_bytes,
+        "BINBYTES8": _push_bytes,
+        "BININT": _push_int,
+        "BININT1": _push_int,
+        "BININT2": _push_int,
+        "LONG_BININT": _push_int,
+        "INT": _push_int,
+        "LONG": _push_int,
+        "FLOAT": _push_float,
+        "BINFLOAT": _push_float,
+        "GET": _binget,
+        "BINGET": _binget,
+        "LONG_BINGET": _binget,
+        "PUT": _memoize_arg,
+        "BINPUT": _memoize_arg,
+        "LONG_BINPUT": _memoize_arg,
+        "PERSID": _push_unknown_persid,
+        "BINPERSID": _push_unknown_persid,
+        "FRAME": _op_frame,
+        "PROTO": _op_proto,
+        "NONE": _op_none,
+        "NEWTRUE": _op_newtrue,
+        "NEWFALSE": _op_newfalse,
+        "EMPTY_TUPLE": _op_empty_tuple,
+        "EMPTY_LIST": _op_empty_list,
+        "EMPTY_DICT": _op_empty_dict,
+        "EMPTY_SET": _op_empty_set,
+        "MARK": _op_mark,
+        "TUPLE1": _op_tuple1,
+        "TUPLE2": _op_tuple2,
+        "TUPLE3": _op_tuple3,
+        "TUPLE": _op_tuple,
+        "LIST": _op_list,
+        "DICT": _op_dict,
+        "SETITEM": _op_setitem,
+        "APPEND": _op_append,
+        "SETITEMS": _op_setitems,
+        "APPENDS": _op_appends,
+        "ADDITEMS": _op_additems,
+        "STACK_GLOBAL": _op_stack_global,
+        "REDUCE": _op_reduce,
+        "BUILD": _op_build,
+        "NEWOBJ": _op_newobj,
+        "NEWOBJ_EX": _op_newobj_ex,
+        "MEMOIZE": _op_memoize,
+        "POP": _op_pop,
+        "POP_MARK": _op_pop_mark,
+        "DUP": _op_dup,
+    }
 
     def feed(self, opname: str, arg) -> None:
-        handler = getattr(self, f"_op_{opname}", None)
+        handler = self._opcode_handlers.get(opname)
         if handler is not None:
-            handler(arg)
+            handler(self, arg)
 
     def spec(self, name: str, offset: int, nbytes: int) -> ArraySpec:
         if self.shape is None or self.descr is None:

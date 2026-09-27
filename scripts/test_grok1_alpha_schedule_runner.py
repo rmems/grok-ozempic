@@ -361,10 +361,10 @@ class RunnerTests(unittest.TestCase):
 
         _, a, d = resource_records(self.r, self.root)
 
-        def command(cell, dest, run_id, _context):
-            data = fixture(cell)
+        def command(letter, dest, run_id, _context):
+            data = fixture(letter)
             data["run_id"] = run_id
-            data["resources"] = a if cell in "AB" else d
+            data["resources"] = a if letter in "AB" else d
             return self.metrics_command(dest, json.dumps(data))
 
         out = self.root / "portable-evidence"

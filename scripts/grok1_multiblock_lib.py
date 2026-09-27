@@ -1830,7 +1830,7 @@ def _fmt_commit(impl: object) -> str:
         return f"{c}{' (dirty)' if impl.get('dirty') else ''}"
     if isinstance(impl, str):
         return impl
-    return repr(impl)
+    return type(impl).__qualname__
 
 
 def _why_not_others(decision: int) -> str:
@@ -2646,7 +2646,8 @@ def _v3_schedule_field_errors(
     if value is None:
         return [f"{label}:{field}_not_block_list"]
     if value != expected:
-        return [f"{label}:{field}={value!r} expected={expected!r}"]
+        expected_text = expected if isinstance(expected, (list, tuple)) else type(expected).__qualname__
+        return [f"{label}:{field}={value!r} expected={expected_text!r}"]
     return []
 
 

@@ -1336,7 +1336,7 @@ def _as_text(value: object) -> str:
         return value
     if isinstance(value, (int, float, bool, Path)):
         return str(value)
-    return repr(value)
+    return type(value).__qualname__
 
 
 _CHILD_LOG_PATH_PLACEHOLDERS = {

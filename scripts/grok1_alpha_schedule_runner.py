@@ -277,8 +277,8 @@ def run_child(command, log, timeout=CHILD_TIMEOUT_SECONDS):
 
 @contextmanager
 def interrupt_handlers():
-    def interrupted(signum, _frame):
-        raise KeyboardInterrupt(f"supervisor signal {signum}")
+    def interrupted(received, _frame):
+        raise KeyboardInterrupt(f"supervisor signal {received}")
 
     old = {}
     try:

@@ -1952,8 +1952,8 @@ class SupervisorTests(unittest.TestCase):
             commands: list[list[str]] = []
             primary_bodies: dict[str, str] = {}
 
-            def child(command, **kwargs):
-                command = list(command)
+            def child(argv, **kwargs):
+                command = list(argv)
                 commands.append(command)
                 spec = _spec_for_command(command)
                 progress = json.loads(
@@ -2804,16 +2804,16 @@ class SupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             args = self._args(Path(td))
 
-            def child(command, **_kwargs):
-                command = list(command)
+            def child(argv, **_kwargs):
+                command = list(argv)
                 spec = _spec_for_command(command)
-                payload = _payload(spec)
-                payload["chain"]["per_block"][0]["fp16_control"][
+                metrics = _payload(spec)
+                metrics["chain"]["per_block"][0]["fp16_control"][
                     "block_output_cosine"
                 ] = 10**1000
                 out = Path(_value(command, "--out"))
                 out.mkdir(parents=True, exist_ok=True)
-                (out / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
+                (out / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
                 return _FakeProcessResult(command, 0, "", "")
 
             result, run = self._run(args, child)
