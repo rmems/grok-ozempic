@@ -676,7 +676,7 @@ def _chunked_absmax_scale(weights: np.ndarray) -> np.ndarray:
     return scale
 
 
-def _quantized_chunk(chunk: np.ndarray, scale: np.ndarray | np.float32) -> np.ndarray:
+def _quantized_chunk(chunk: np.ndarray, scale: np.ndarray | float) -> np.ndarray:
     """Return one bounded chunk of bit-compatible absmax INT4 codes."""
     rounded = np.rint(np.asarray(chunk, dtype=np.float32) / scale)
     return np.clip(rounded, -INT4_QMAX, INT4_QMAX).astype(np.int8)
