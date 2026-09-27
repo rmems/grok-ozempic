@@ -226,6 +226,9 @@ qodana:
     fi
     mkdir -p .qodana/results .qodana/report
     echo "+ qodana scan --linter qodana-python-community --print-problems (results → .qodana/)"
+    # Docker default from Qodana docs. Override for native mode:
+    # QODANA_PYTHON_PATH=/path/to/python just qodana
+    : "${QODANA_PYTHON_PATH:=/data/cache/conda/envs/qodana-env/bin/python}"
     qodana scan \
       --linter qodana-python-community \
       --project-dir . \
@@ -233,7 +236,7 @@ qodana:
       --report-dir .qodana/report \
       --print-problems \
       --save-report \
-      -e QODANA_PYTHON_PATH=/data/cache/conda/envs/qodana-env/bin/python
+      -e "QODANA_PYTHON_PATH=${QODANA_PYTHON_PATH}"
 
 # Full pre-push including local Qodana scan (slow; optional before large PRs)
 review-full:

@@ -10,7 +10,7 @@ linter: qodana-python-community
 # Official interpreter override: https://www.jetbrains.com/help/qodana/python.html
 bootstrap: |
   . ~/.bashrc
-  conda create -y -n qodana-env python=3.11
+  conda env list | awk '{print $1}' | grep -qx qodana-env || conda create -y -n qodana-env python=3.11
   conda activate qodana-env
 
 # Skip build artifacts and local tool caches.
