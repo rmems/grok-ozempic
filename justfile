@@ -232,7 +232,8 @@ qodana:
       --results-dir .qodana/results \
       --report-dir .qodana/report \
       --print-problems \
-      --save-report
+      --save-report \
+      -e QODANA_PYTHON_PATH=/data/cache/conda/envs/qodana-env/bin/python
 
 # Full pre-push including local Qodana scan (slow; optional before large PRs)
 review-full:

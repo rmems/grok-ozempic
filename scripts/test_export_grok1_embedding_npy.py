@@ -79,10 +79,11 @@ class WriteNpyTests(unittest.TestCase):
                 import numpy as np
             except ImportError:
                 self.skipTest("numpy not installed")
-            a = np.load(path)
-            self.assertEqual(a.shape, (2, 2))
-            self.assertEqual(a.dtype, np.float32)
-            self.assertEqual(list(a.reshape(-1)), data)
+            else:
+                a = np.load(path)
+                self.assertEqual(a.shape, (2, 2))
+                self.assertEqual(a.dtype, np.float32)
+                self.assertEqual(list(a.reshape(-1)), data)
 
 
 class LayoutPolicyTests(unittest.TestCase):
