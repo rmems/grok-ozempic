@@ -1953,11 +1953,11 @@ class SupervisorTests(unittest.TestCase):
             primary_bodies: dict[str, str] = {}
 
             def child(argv, **kwargs):
-                command = list(argv)
-                commands.append(command)
-                spec = _spec_for_command(command)
+                child_argv = list(argv)
+                commands.append(child_argv)
+                spec = _spec_for_command(child_argv)
                 progress = json.loads(
-                    Path(_value(command, "--progress-json")).read_text(encoding="utf-8")
+                    Path(_value(child_argv, "--progress-json")).read_text(encoding="utf-8")
                 )
                 self.assertEqual(progress["status"], "prelaunch")
                 self.assertEqual(progress["stage"], spec.stage)
@@ -1976,9 +1976,9 @@ class SupervisorTests(unittest.TestCase):
                         (args.out / "results.md").read_text(encoding="utf-8"),
                         prior_report,
                     )
-                report = _write_success(command)
+                report = _write_success(child_argv)
                 if spec.stage == "p0":
-                    staged_out = Path(_value(command, "--out"))
+                    staged_out = Path(_value(child_argv, "--out"))
                     primary_bodies["metrics"] = (staged_out / "metrics.json").read_text(
                         encoding="utf-8"
                     )
@@ -1990,7 +1990,7 @@ class SupervisorTests(unittest.TestCase):
                 self.assertEqual(kwargs["check"], False)
                 self.assertEqual(kwargs["timeout"], 123.0)
                 self.assertEqual(kwargs["cwd"], str(supervisor.REPO_ROOT))
-                return _FakeProcessResult(command, 0, "ok", "")
+                return _FakeProcessResult(child_argv, 0, "ok", "")
 
             real_validate = supervisor._validate_artifact
 
@@ -2805,16 +2805,16 @@ class SupervisorTests(unittest.TestCase):
             args = self._args(Path(td))
 
             def child(argv, **_kwargs):
-                command = list(argv)
-                spec = _spec_for_command(command)
+                child_argv = list(argv)
+                spec = _spec_for_command(child_argv)
                 metrics = _payload(spec)
                 metrics["chain"]["per_block"][0]["fp16_control"][
                     "block_output_cosine"
                 ] = 10**1000
-                out = Path(_value(command, "--out"))
+                out = Path(_value(child_argv, "--out"))
                 out.mkdir(parents=True, exist_ok=True)
                 (out / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
-                return _FakeProcessResult(command, 0, "", "")
+                return _FakeProcessResult(child_argv, 0, "", "")
 
             result, run = self._run(args, child)
             self.assertEqual(result, supervisor.EXIT_SUPERVISOR_FAILCLOSED)
