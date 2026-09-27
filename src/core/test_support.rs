@@ -7,9 +7,34 @@
 use crate::core::alignment::{AlignmentReport, check_alignment};
 use crate::core::dry_run::{DryRunPlanner, DryRunReport};
 use crate::core::inventory::ModelInventory;
-use crate::core::manifest::DissectManifest;
+use crate::core::manifest::{
+    DissectManifest, MANIFEST_NAME_CONVENTION_V1, MANIFEST_SCHEMA_VERSION, ManifestDefaults,
+    ManifestModel,
+};
 use crate::core::model::ModelProfile;
 use crate::types::QuantizationConfig;
+
+/// Minimal manifest with only `defaults` populated (precision tests, stage planner).
+pub(crate) fn manifest_with_defaults(precision: Option<&str>, gif: Option<f32>) -> DissectManifest {
+    DissectManifest {
+        schema: "xai-dissect.manifest".into(),
+        schema_version: MANIFEST_SCHEMA_VERSION,
+        model: ManifestModel {
+            family: "grok-1".into(),
+            source: "xai-org/grok-1".into(),
+            tensor_name_convention: MANIFEST_NAME_CONVENTION_V1.into(),
+        },
+        produced_by: None,
+        defaults: ManifestDefaults {
+            precision: precision.map(String::from),
+            gif_threshold: gif,
+        },
+        preserve: vec![],
+        fp16: vec![],
+        ternary_candidates: vec![],
+        blocks: vec![],
+    }
+}
 
 /// Dry-run a profile through the same planner Grok-1 uses.
 pub(crate) fn plan_profile<P: ModelProfile>(profile: &P) -> DryRunReport {

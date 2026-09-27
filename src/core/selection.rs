@@ -13,6 +13,7 @@
 //! `preserve` > `fp16` > `ternary_candidates` > `Default`.
 
 use crate::core::manifest::{DissectManifest, Fp16Entry, PreserveEntry, TernaryCandidate};
+use serde::{Deserialize, Serialize};
 
 /// Default legacy router-name substrings used when no manifest is present
 /// and [`crate::types::QuantizationConfig::router_patterns`] is empty.
@@ -27,7 +28,8 @@ pub const LEGACY_DEFAULT_ROUTER_PATTERNS: &[&str] =
 /// The classification is precision-agnostic: [`crate::core::precision::decide`]
 /// turns it into a concrete [`crate::types::TensorPrecision`] plus effective
 /// GIF threshold.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TensorClass {
     /// Tensor appeared in the manifest's `preserve` list — must keep its
     /// source precision (routing-critical layers, etc.).
