@@ -94,12 +94,22 @@ class RunnerTests(unittest.TestCase):
             marker = self.root / "launched"
             code = f"from pathlib import Path; Path({str(marker)!r}).touch()"
             stdout, stderr = io.StringIO(), io.StringIO()
+
+            def _command(*_a, command=code):
+                return [sys.executable, "-c", command]
+
+            def _bind_gate(payload):
+                def _gate():
+                    return self.r.check_resources(payload, {"out": 123})
+
+                return _gate
+
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 result = self.r.supervise(
                     out,
                     lambda: {},
-                    lambda *a, code=code: [sys.executable, "-c", code],
-                    lambda bad=bad: self.r.check_resources(bad, {"out": 123}),
+                    _command,
+                    _bind_gate(bad),
                 )
             self.assertNotEqual(result, 0)
             diagnostic = {

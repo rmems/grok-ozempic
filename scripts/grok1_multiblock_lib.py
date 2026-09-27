@@ -4020,7 +4020,10 @@ def _v2_comparison_table(comparison: dict) -> list[str]:
             if isinstance(value, list):
                 value = value[-1]
             values.append(float(value))
-        best = (max if higher_is_better else min)(values)
+        if higher_is_better:
+            best = max(values)
+        else:
+            best = min(values)
         lines.append(
             f"| {label} | "
             + " | ".join(_v2_table_value(value, best) for value in values)

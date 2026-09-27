@@ -471,10 +471,23 @@ class PackWeights(WeightSource):
                         "write time."
                     )
                 total = int(entry["numel"])
-                def compute_fired(pack_path=self.pack, e=entry, n=total):
+                pack_path = self.pack
+                bound_entry = entry
+                bound_n = total
+
+                def compute_fired():
                     return sum(
-                        int(np.count_nonzero(read_trits(pack_path, e, start, min(_ALPHA_CHUNK, n - start))))
-                        for start in range(0, n, _ALPHA_CHUNK)
+                        int(
+                            np.count_nonzero(
+                                read_trits(
+                                    pack_path,
+                                    bound_entry,
+                                    start,
+                                    min(_ALPHA_CHUNK, bound_n - start),
+                                )
+                            )
+                        )
+                        for start in range(0, bound_n, _ALPHA_CHUNK)
                     )
                 self._scales[name] = TernaryScale(alpha=float(stored), fired=compute_fired, total=total)
                 self._scale_sources[name] = "pack_v2"
