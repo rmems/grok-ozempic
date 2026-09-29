@@ -159,16 +159,19 @@ def _require_block_matches_name(
         raise ExportError(
             f"{path}: tensors[{i}].block is {type(block).__name__}, expected int or null"
         )
-    if block < 0:
-        raise ExportError(f"{path}: tensors[{i}].block is {block}, expected >= 0 or null")
+    block_index = int(block)
+    if block_index < 0:
+        raise ExportError(
+            f"{path}: tensors[{i}].block is {block_index}, expected >= 0 or null"
+        )
     if from_name is None:
         raise ExportError(
-            f"{path}: tensors[{i}] {name!r} is not block-scoped but block is {block}; "
+            f"{path}: tensors[{i}] {name!r} is not block-scoped but block is {block_index}; "
             "expected null for model-level tensors"
         )
-    if from_name != block:
+    if from_name != block_index:
         raise ExportError(
-            f"{path}: tensors[{i}] {name!r} names block {from_name} but block is {block}"
+            f"{path}: tensors[{i}] {name!r} names block {from_name} but block is {block_index}"
         )
 
 
@@ -227,14 +230,26 @@ def _validate_shape(path: Path, i: int, shape: object) -> None:
     manifest whose shape disagrees with the shard while claiming to have
     validated it. ``bool`` is an ``int`` subclass and is excluded explicitly.
     """
+    if not isinstance(shape, list):
+        raise ExportError(
+            f"{path}: tensors[{i}].shape is {type(shape).__qualname__}, "
+            "expected a list of ints"
+        )
     bad = [
-        d for d in shape  # type: ignore[union-attr]
+        d for d in shape
         if not isinstance(d, int) or isinstance(d, bool)
     ]
     if bad:
+        first = bad[0]
+        if isinstance(first, bool):
+            shown = repr(first)
+        elif isinstance(first, (int, float, str)):
+            shown = repr(first)
+        else:
+            shown = type(first).__qualname__
         raise ExportError(
             f"{path}: tensors[{i}].shape {shape!r} is not a list of ints "
-            f"(offending value {bad[0]!r})"
+            f"(offending value {shown})"
         )
 
 

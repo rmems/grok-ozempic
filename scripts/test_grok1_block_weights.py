@@ -55,13 +55,13 @@ class _StubSource:
         self.label = label
         self.tag = tag
 
-    def vector(self, role: str) -> np.ndarray:
+    def vector(self, _role: str) -> np.ndarray:
         return np.full(4, self.tag, dtype=np.float32)
 
-    def matrix(self, role: str) -> np.ndarray:
+    def matrix(self, _role: str) -> np.ndarray:
         return np.full((2, 2), self.tag, dtype=np.float32)
 
-    def expert(self, role: str, index: int) -> np.ndarray:
+    def expert(self, _role: str, index: int) -> np.ndarray:
         return np.full((2, 2), self.tag + index, dtype=np.float32)
 
 
@@ -181,7 +181,7 @@ class HelperTests(unittest.TestCase):
 
 
 class _FakeCacheHost:
-    """Minimal host for :meth:`PackWeights._load_cache`.
+    """Minimal host for :meth:`PackWeights.load_cache`.
 
     The cache loader only needs a cache path and a fingerprint, so binding the
     two real methods onto a small object exercises them directly -- no GOZ1 pack
@@ -189,8 +189,8 @@ class _FakeCacheHost:
     patched in ``setUp`` so they are ordinary methods to a reader and to pylint.
     """
 
-    _load_cache = PackWeights._load_cache
-    _discard_cache = PackWeights._discard_cache
+    load_cache = PackWeights.load_cache
+    discard_cache = PackWeights.discard_cache
 
     def __init__(self, path: Path, fingerprint: dict) -> None:
         self._cache_path = path
@@ -207,14 +207,15 @@ class AlphaCacheDiscardTests(unittest.TestCase):
     let one corrupt file block the experiment until deleted by hand.
     """
 
-    def _load(self, payload: str, fingerprint: dict | None = None):
+    @staticmethod
+    def _load(payload: str, fingerprint: dict | None = None):
         fp = {"pack_size": 1} if fingerprint is None else fingerprint
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "c.json"
             path.write_text(payload)
             stderr_capture = io.StringIO()
             with contextlib.redirect_stderr(stderr_capture):
-                result = _FakeCacheHost(path, fp)._load_cache()
+                result = _FakeCacheHost(path, fp).load_cache()
             return result, stderr_capture.getvalue()
 
     def test_unreadable_json_is_discarded(self) -> None:
@@ -248,7 +249,7 @@ class AlphaCacheDiscardTests(unittest.TestCase):
     def test_missing_cache_file_is_an_empty_cache(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             host = _FakeCacheHost(Path(td) / "absent.json", {"pack_size": 1})
-            self.assertEqual(host._load_cache(), {})
+            self.assertEqual(host.load_cache(), {})
 
     def test_matching_fingerprint_loads_the_scales(self) -> None:
         fp = {"pack_size": 1}
@@ -318,7 +319,7 @@ class StoredScaleTests(unittest.TestCase):
             pack = self._pack(tmp, version=2, scales=[0.25])
             npy_dir = tmp / "absent-npy"
 
-            # The fingerprint must MATCH, or _load_cache discards the file before
+            # The fingerprint must MATCH, or load_cache discards the file before
             # it can shadow anything and the test proves nothing. (It did exactly
             # that with a dummy fingerprint: a mutant that consulted the cache for
             # v2 packs still passed.)
@@ -334,7 +335,7 @@ class StoredScaleTests(unittest.TestCase):
             )
             # Sanity: this cache really would load if it were consulted.
             self.assertEqual(
-                PackWeights(pack, npy_dir, partial=True)._load_cache()[self.NAME].alpha,
+                PackWeights(pack, npy_dir, partial=True).load_cache()[self.NAME].alpha,
                 999.0,
             )
 
@@ -385,7 +386,7 @@ class StoredScaleTests(unittest.TestCase):
             npy_dir = tmp / "absent-npy"
 
             # Build a matching-fingerprint cache file. The fingerprint must match
-            # or _load_cache discards the file before __init__ can pre-populate
+            # or load_cache discards the file before __init__ can pre-populate
             # self._scales from it, and the test proves nothing.
             probe = PackWeights(pack, npy_dir, partial=True)
             cache = pack.with_suffix(pack.suffix + ALPHA_CACHE_SUFFIX)
@@ -399,7 +400,7 @@ class StoredScaleTests(unittest.TestCase):
             )
 
             # Construct a fresh PackWeights. Because this is a v1 pack,
-            # __init__ will call _load_cache() and pre-populate self._scales.
+            # __init__ will call load_cache() and pre-populate self._scales.
             w = PackWeights(pack, npy_dir, partial=True)
 
             # Calling scale() should return the cached alpha...

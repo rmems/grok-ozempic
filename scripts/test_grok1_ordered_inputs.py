@@ -136,7 +136,8 @@ class OrderedInputTests(unittest.TestCase):
         unique.add(clone)
         self.assertEqual(len(unique), 1)
 
-    def test_historical_sampled_id_path_remains_sorted_without_replacement(self):
+    @staticmethod
+    def test_historical_sampled_id_path_remains_sorted_without_replacement():
         # Regression fence: the new loader must not silently "fix" old evidence.
         np.testing.assert_array_equal(token_ids(WINDOW_TOKENS, 20260806, 16), [2, 5, 6, 7])
 

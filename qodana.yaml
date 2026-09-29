@@ -3,6 +3,16 @@
 version: "1.0"
 linter: qodana-python-community
 
+# The Community image defaults to Python 3.9. That language level accepts
+# PEP 585 generics (`list[int]`) but rejects PEP 604 unions (`X | Y`), which
+# produced 202 "Invalid type hints" warnings on PR #141. This repo targets
+# 3.11 (`ruff.toml` target-version = py311, `.codacy/codacy.yaml` python@3.11.11).
+# Official interpreter override: https://www.jetbrains.com/help/qodana/python.html
+bootstrap: |
+  . ~/.bashrc
+  conda env list | awk '{print $1}' | grep -qx qodana-env || conda create -y -n qodana-env python=3.11
+  conda activate qodana-env
+
 # Skip build artifacts and local tool caches.
 exclude:
   - name: All

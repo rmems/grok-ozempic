@@ -78,6 +78,7 @@ class WriteNpyTests(unittest.TestCase):
             try:
                 import numpy as np
             except ImportError:
+                np = None
                 self.skipTest("numpy not installed")
             a = np.load(path)
             self.assertEqual(a.shape, (2, 2))
@@ -86,7 +87,8 @@ class WriteNpyTests(unittest.TestCase):
 
 
 class LayoutPolicyTests(unittest.TestCase):
-    def _ns(self, **kw):
+    @staticmethod
+    def _ns(**kw):
         defaults = {
             "offset": None,
             "shape": None,

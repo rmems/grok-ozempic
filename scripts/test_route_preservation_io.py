@@ -217,13 +217,15 @@ class LoadPackIndexTests(unittest.TestCase):
 
 
 class ReadTritsTests(unittest.TestCase):
-    def _one(self, codes: list[int]):
+    @staticmethod
+    def _one(codes: list[int]):
         td = tempfile.TemporaryDirectory()
         p = build_pack(Path(td.name) / "p.goz1", [("t", [len(codes)], TENSOR_TERNARY, _trits(codes))])
         _meta, index = rio.load_pack_index(p)
         return td, p, index["t"]
 
-    def _three(self, codes: list[int]):
+    @staticmethod
+    def _three(codes: list[int]):
         """Build a pack with tensors before and after the target."""
         td = tempfile.TemporaryDirectory()
         p = build_pack(
@@ -316,14 +318,16 @@ class ReadF16Tests(unittest.TestCase):
 class ReadF16SliceTests(unittest.TestCase):
     """Same bounds contract as read_trits; both readers must agree."""
 
-    def _one(self, values: list[float]):
+    @staticmethod
+    def _one(values: list[float]):
         td = tempfile.TemporaryDirectory()
         raw = np.asarray(values, dtype="<f2").tobytes()
         p = build_pack(Path(td.name) / "p.goz1", [("t", [len(values)], TENSOR_F16, raw)])
         _meta, index = rio.load_pack_index(p)
         return td, p, index["t"]
 
-    def _three(self, values: list[float]):
+    @staticmethod
+    def _three(values: list[float]):
         """Build a pack with tensors before and after the target."""
         td = tempfile.TemporaryDirectory()
         raw = np.asarray(values, dtype="<f2").tobytes()
@@ -386,7 +390,8 @@ class PreserveShapeAgreementTests(unittest.TestCase):
 
         self.rpm = rpm
 
-    def _entry(self, shape):
+    @staticmethod
+    def _entry(shape):
         return {"name": "block_000.slot_11.router", "shape": list(shape)}
 
     def test_all_sources_agreeing_is_accepted(self) -> None:
@@ -444,7 +449,8 @@ class ContainerVersionTests(unittest.TestCase):
     which number a report is built from.
     """
 
-    def _one_ternary(self, tmp: Path, **kw) -> dict:
+    @staticmethod
+    def _one_ternary(tmp: Path, **kw) -> dict:
         pack = build_pack(
             tmp / "p.goz1",
             [("block_000.slot_05.query", [8], rio.TENSOR_TERNARY, _trits([1] * 8))],

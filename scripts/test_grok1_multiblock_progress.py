@@ -184,13 +184,13 @@ class ProgressRunChainTests(unittest.TestCase):
             row = {"block": block, "pilot_label": f"fake-{block}"}
             return row, streams, {"block": block, "pack_sha256": str(block) * 64}
 
-        real_writer = multiblock._atomic_write_json
+        real_writer = multiblock.atomic_write_json
         with (
             mock.patch.object(multiblock, "token_ids", return_value=np.array([4, 5])),
             mock.patch.object(multiblock, "_validate_embedding_shard"),
             mock.patch.object(multiblock, "embedding_rows", return_value=activations),
             mock.patch.object(multiblock, "_run_block", side_effect=fake_run_block),
-            mock.patch.object(multiblock, "_atomic_write_json", wraps=real_writer) as writer,
+            mock.patch.object(multiblock, "atomic_write_json", wraps=real_writer) as writer,
         ):
             chain = multiblock.run_chain(
                 blocks,
@@ -261,7 +261,7 @@ class AtomicProgressTests(unittest.TestCase):
     def test_interrupted_replace_keeps_previous_json_readable(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "progress.json"
-            multiblock._atomic_write_json(path, {"generation": 1})
+            multiblock.atomic_write_json(path, {"generation": 1})
 
             with mock.patch.object(
                 multiblock.os,
@@ -269,7 +269,7 @@ class AtomicProgressTests(unittest.TestCase):
                 side_effect=OSError("simulated interruption"),
             ):
                 with self.assertRaisesRegex(OSError, "simulated interruption"):
-                    multiblock._atomic_write_json(path, {"generation": 2})
+                    multiblock.atomic_write_json(path, {"generation": 2})
 
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),

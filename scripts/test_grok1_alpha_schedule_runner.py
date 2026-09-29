@@ -94,12 +94,22 @@ class RunnerTests(unittest.TestCase):
             marker = self.root / "launched"
             code = f"from pathlib import Path; Path({str(marker)!r}).touch()"
             stdout, stderr = io.StringIO(), io.StringIO()
+
+            def _command(*_a, command=code):
+                return [sys.executable, "-c", command]
+
+            def _bind_gate(payload):
+                def _gate():
+                    return self.r.check_resources(payload, {"out": 123})
+
+                return _gate
+
             with redirect_stdout(stdout), redirect_stderr(stderr):
                 result = self.r.supervise(
                     out,
                     lambda: {},
-                    lambda *a, code=code: [sys.executable, "-c", code],
-                    lambda bad=bad: self.r.check_resources(bad, {"out": 123}),
+                    _command,
+                    _bind_gate(bad),
                 )
             self.assertNotEqual(result, 0)
             diagnostic = {
@@ -115,7 +125,7 @@ class RunnerTests(unittest.TestCase):
                 json.loads((out / "outcome.json").read_text())["status"], "inconclusive"
             )
 
-    def command(self, cell, out, run_id, context):
+    def command(self, cell, out, run_id, _context):
         data = fixture(cell)
         data["run_id"] = run_id
         return self.metrics_command(out, json.dumps(data))
@@ -198,7 +208,7 @@ class RunnerTests(unittest.TestCase):
                 )
 
     def nonfinite_command(self, bad, raw_outputs):
-        def command(cell, dest, run_id, context):
+        def command(cell, dest, run_id, _context):
             data = fixture(cell)
             data["run_id"] = run_id
             data["chain"]["per_block"][0]["expert_only"]["router_margin_mean_observed"] = bad
@@ -258,8 +268,8 @@ class RunnerTests(unittest.TestCase):
             (out / "outcome.json").write_text('{"status":"complete"}')
             (out / "results.md").write_text("old success")
 
-            def command(cell, dest, run_id, context, failure=failure):
-                return self.failure_command(failure, cell, dest, run_id)
+            def command(cell, dest, run_id, _context, kind=failure):
+                return self.failure_command(kind, cell, dest, run_id)
 
             with self.subTest(failure=failure):
                 stdout, stderr = io.StringIO(), io.StringIO()
@@ -327,8 +337,8 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(self.r.clean_implementation()["commit"], commit)
         for bad_command in ("status", "show", "rev-parse"):
 
-            def broken(*args, bad_command=bad_command):
-                return b"dirty" if args[0] == bad_command else git(*args)
+            def broken(*args, failed_git=bad_command):
+                return b"dirty" if args[0] == failed_git else git(*args)
 
             with (
                 self.subTest(bad_command=bad_command),
@@ -351,10 +361,10 @@ class RunnerTests(unittest.TestCase):
 
         _, a, d = resource_records(self.r, self.root)
 
-        def command(cell, dest, run_id, context):
-            data = fixture(cell)
+        def command(letter, dest, run_id, _context):
+            data = fixture(letter)
             data["run_id"] = run_id
-            data["resources"] = a if cell in "AB" else d
+            data["resources"] = a if letter in "AB" else d
             return self.metrics_command(dest, json.dumps(data))
 
         out = self.root / "portable-evidence"
@@ -480,7 +490,7 @@ class RunnerTests(unittest.TestCase):
         return args, paths, out, side, inventory
 
     def chain_forward(self, inventory, side, context):
-        def forward(blocks, chain_paths, **kwargs):
+        def forward(blocks, _chain_paths, **kwargs):
             self.assertEqual(blocks, [0, 1, 2, 3])
             self.assertEqual(
                 (kwargs["tokens"], kwargs["seed"], kwargs["top_k"]), (8192, 20260806, 2)

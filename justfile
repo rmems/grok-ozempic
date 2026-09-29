@@ -226,13 +226,21 @@ qodana:
     fi
     mkdir -p .qodana/results .qodana/report
     echo "+ qodana scan --linter qodana-python-community --print-problems (results → .qodana/)"
+    # Native: QODANA_PYTHON_PATH=/path/to/python just qodana
+    # Unset: documented Docker interpreter from the Qodana Python docs.
+    if [[ -n "${QODANA_PYTHON_PATH:-}" ]]; then
+      python_path="$QODANA_PYTHON_PATH"
+    else
+      python_path="/data/cache/conda/envs/qodana-env/bin/python"
+    fi
     qodana scan \
       --linter qodana-python-community \
       --project-dir . \
       --results-dir .qodana/results \
       --report-dir .qodana/report \
       --print-problems \
-      --save-report
+      --save-report \
+      -e "QODANA_PYTHON_PATH=${python_path}"
 
 # Full pre-push including local Qodana scan (slow; optional before large PRs)
 review-full:

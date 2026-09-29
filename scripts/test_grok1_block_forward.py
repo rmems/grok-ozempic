@@ -215,14 +215,16 @@ class UnresolvedArchitectureTests(unittest.TestCase):
 
 
 class RmsNormTests(unittest.TestCase):
-    def test_matches_hand_computed_value(self):
+    @staticmethod
+    def test_matches_hand_computed_value():
         x = np.array([[3.0, 4.0]], dtype=np.float32)
         gain = np.array([2.0, 0.5], dtype=np.float32)
         ms = (9.0 + 16.0) / 2.0
         expect = np.array([[3.0, 4.0]]) / math.sqrt(ms + 1e-5) * np.array([2.0, 0.5])
         np.testing.assert_allclose(rmsnorm(x, gain), expect, rtol=1e-6)
 
-    def test_is_invariant_to_a_global_input_scale(self):
+    @staticmethod
+    def test_is_invariant_to_a_global_input_scale():
         """rmsnorm(c*x) == rmsnorm(x); why the embedding multiplier is irrelevant."""
         rng = np.random.default_rng(0)
         x = rng.standard_normal((4, 64)).astype(np.float32)
@@ -236,16 +238,19 @@ class RmsNormTests(unittest.TestCase):
 
 
 class RopeTests(unittest.TestCase):
-    def test_rotate_half_negates_the_second_half(self):
+    @staticmethod
+    def test_rotate_half_negates_the_second_half():
         x = np.array([[1.0, 2.0, 3.0, 4.0]])
         np.testing.assert_allclose(rotate_half(x), [[-3.0, -4.0, 1.0, 2.0]])
 
-    def test_position_zero_is_the_identity(self):
+    @staticmethod
+    def test_position_zero_is_the_identity():
         rng = np.random.default_rng(1)
         x = rng.standard_normal((1, 2, 8)).astype(np.float32)
         np.testing.assert_allclose(rope(x), x, rtol=1e-6, atol=1e-6)
 
-    def test_preserves_per_head_norm(self):
+    @staticmethod
+    def test_preserves_per_head_norm():
         rng = np.random.default_rng(2)
         x = rng.standard_normal((6, 3, 16)).astype(np.float32)
         before = np.linalg.norm(x, axis=-1)
@@ -267,7 +272,8 @@ class RopeTests(unittest.TestCase):
                 self.assertAlmostEqual(float(got[t, 0, j]), a * cos - b * sin, places=4)
                 self.assertAlmostEqual(float(got[t, 0, j + half]), b * cos + a * sin, places=4)
 
-    def test_offset_shifts_positions(self):
+    @staticmethod
+    def test_offset_shifts_positions():
         """``offset=n`` on row 0 must equal position ``n`` applied to the same row.
 
         The rows are held identical on purpose: comparing ``rope(x, offset=2)[0]``
@@ -431,7 +437,8 @@ class AttentionTests(unittest.TestCase):
 
 
 class GeluTests(unittest.TestCase):
-    def test_matches_the_jax_tanh_formulation(self):
+    @staticmethod
+    def test_matches_the_jax_tanh_formulation():
         x = np.array([-2.0, -0.5, 0.0, 0.5, 2.0], dtype=np.float32)
         inner = math.sqrt(2.0 / math.pi) * (x + 0.044715 * x**3)
         np.testing.assert_allclose(gelu(x), 0.5 * x * (1.0 + np.tanh(inner)), rtol=1e-6)
@@ -447,7 +454,8 @@ class GeluTests(unittest.TestCase):
 
 
 class RoutingTests(unittest.TestCase):
-    def test_router_logits_are_a_plain_matmul(self):
+    @staticmethod
+    def test_router_logits_are_a_plain_matmul():
         rng = np.random.default_rng(20)
         h = rng.standard_normal((3, 5)).astype(np.float32)
         w = rng.standard_normal((5, 4)).astype(np.float32)
@@ -488,7 +496,8 @@ class RoutingTests(unittest.TestCase):
         idx, _ = top_k_experts(logits, k=NUM_EXPERTS)
         self.assertEqual(idx.shape, (4, NUM_EXPERTS))
 
-    def test_selection_by_probability_equals_selection_by_logit(self):
+    @staticmethod
+    def test_selection_by_probability_equals_selection_by_logit():
         rng = np.random.default_rng(22)
         logits = rng.standard_normal((64, NUM_EXPERTS)).astype(np.float32)
         idx, _ = top_k_experts(logits, k=2)
@@ -509,7 +518,8 @@ class ExpertTests(unittest.TestCase):
         np.testing.assert_allclose(correct, (gelu(h @ w_gelu) * (h @ w_val)) @ w_down, rtol=1e-5)
         self.assertGreater(float(np.abs(correct - swapped).max()), 1e-5)
 
-    def test_moe_combine_weights_by_gate_and_sums_over_selected_experts(self):
+    @staticmethod
+    def test_moe_combine_weights_by_gate_and_sums_over_selected_experts():
         idx = np.array([[0, 1], [1, 0]], dtype=np.int64)
         gates = np.array([[0.6, 0.3], [0.7, 0.2]], dtype=np.float32)
         # Expert 0 serves token 0 (slot 0) then token 1 (slot 1); expert 1 the reverse.
@@ -574,7 +584,8 @@ class EmbeddingMultiplierTests(unittest.TestCase):
 
 
 class CausalMaskTests(unittest.TestCase):
-    def test_is_lower_triangular(self):
+    @staticmethod
+    def test_is_lower_triangular():
         np.testing.assert_array_equal(
             causal_mask(3), [[1, 0, 0], [1, 1, 0], [1, 1, 1]]
         )
