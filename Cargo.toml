@@ -26,6 +26,7 @@ anyhow = { version = "1.0.102", optional = true }
 default = []
 cli = ["dep:clap", "dep:anyhow"]
 myelin = ["dep:myelin-accelerator"]
+cuda = ["myelin", "myelin-accelerator/cuda"]
 
 [[bin]]
 name = "grok-ozempic"

@@ -9,7 +9,7 @@ COPY dissect/ dissect/
 # containing only the CLI dependencies (clap + anyhow). This keeps future optional
 # dependencies (including the host-side myelin-accelerator integration) out of the production
 # image. The `async`/tokio feature this comment used to cite was removed in #99 -- it
-# gated no code and pulled 14 packages into every --all-features build.
+# gated no code and pulled 14 packages into every feature-enabled build.
 # We also use BuildKit cache mounts (Issue #31) for cargo registry and build target dir
 # to speed up repeated compilation runs.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -24,15 +24,15 @@ RUN rustup component add clippy rustfmt
 COPY . .
 
 # Documenting feature split (Issue #30):
-# The tester stage builds with `--all-features` to run clippy/tests against every feature
-# (`cli` and the CUDA-free `myelin` host integration) for a comprehensive check.
+# The tester stage covers the complete CPU feature matrix (`cli,myelin`). The opt-in
+# `cuda` feature requires a CUDA toolkit and is tested on CUDA-capable hosts only.
 # We also use BuildKit cache mounts (Issue #31) here to preserve build artifacts.
 # Note: /app/target is NOT cached in tester stage to ensure deterministic test results
 # (avoids stale artifacts masking failures when files are removed/renamed).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
         --mount=type=cache,target=/usr/local/cargo/git \
-        cargo test --all-targets --all-features --locked && \
-        cargo clippy --all-targets --all-features --locked -- -D warnings && \
+        cargo test --all-targets --features cli,myelin --locked && \
+        cargo clippy --all-targets --features cli,myelin --locked -- -D warnings && \
         cargo fmt --all -- --check
 
 FROM debian:bookworm-slim AS runtime

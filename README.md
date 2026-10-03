@@ -211,9 +211,9 @@ just --list   # discover recipes
 |--------|---------|
 | `just check` | Fast fmt + clippy (`--features cli`) while iterating |
 | `just test` | Rust CLI tests + Python script unittests (no multi-GiB weights) |
-| `just build` | `cargo build --all-targets --all-features --locked` |
+| `just build` | `cargo build --all-targets --features cli,myelin --locked` |
 | `just bench` | Stable bench entry — currently exits non-zero (no harness yet; kernel benches → `myelin-accelerator`) |
-| `just ci` | Local pre-PR parity with GitHub Actions (fmt, all-features clippy/test/build/doc, Python, `bash -n`) |
+| `just ci` | Local CPU pre-PR parity with GitHub Actions (fmt, `cli,myelin` clippy/test/build/doc, Python, `bash -n`) |
 | `just experiment-smoke` | Release CLI `--help` smoke, then require local `CKPT` / `GROK_OZEMPIC_DISSECT_RUN` (fails loud if missing) |
 | `just doctor` | Env/tool/path diagnosis (`ok`/`warn`/`missing`); designed for advisory exit 0 |
 
@@ -223,6 +223,19 @@ Without `just`, use the full cargo **and** Python unittest fallback blocks in
 `CLAUDE.md` / `.claude/commands/pr-ready.md` (not cargo-only — those blocks list
 the `_python-tests` modules from the justfile, kept in sync with
 `.github/workflows/python-scripts.yml`, plus `bash -n` for shell scripts).
+
+### RTX 5080 CUDA-build smoke
+
+On ShipOfTheseus, with the CUDA toolkit providing `nvcc`, run:
+
+```bash
+MYELIN_CUDA_ARCH=sm_120 cargo test --features cuda --locked
+```
+
+The `cuda` feature includes `myelin` and forwards `myelin-accelerator/cuda`;
+it remains off by default. This command compiles myelin's `sm_120` kernels and
+runs this crate's host-side tests, including GOZ1 byte-layout interop. It does
+not launch GEMV/GEMM or complete the device acceptance still tracked by #50.
 
 ## Related docs
 

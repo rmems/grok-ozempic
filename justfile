@@ -177,10 +177,10 @@ test:
     @cargo test --features cli --locked
     @just _python-tests
 
-# cargo build --all-targets --all-features --locked
+# Build every target with the complete CPU feature matrix (CUDA is opt-in hardware validation).
 build:
-    @echo '+ cargo build --all-targets --all-features --locked'
-    @cargo build --all-targets --all-features --locked
+    @echo '+ cargo build --all-targets --features cli,myelin --locked'
+    @cargo build --all-targets --features cli,myelin --locked
 
 # No harness yet (exit 1). Kernel benches → myelin-accelerator.
 bench:
@@ -195,14 +195,14 @@ bench:
 ci:
     @echo '+ cargo fmt --all -- --check'
     @cargo fmt --all -- --check
-    @echo '+ cargo clippy --all-targets --all-features --locked -- -D warnings'
-    @cargo clippy --all-targets --all-features --locked -- -D warnings
-    @echo '+ cargo test --all-targets --all-features --locked'
-    @cargo test --all-targets --all-features --locked
-    @echo '+ cargo build --all-targets --all-features --locked'
-    @cargo build --all-targets --all-features --locked
-    @echo '+ cargo doc --no-deps --all-features --locked'
-    @cargo doc --no-deps --all-features --locked
+    @echo '+ cargo clippy --all-targets --features cli,myelin --locked -- -D warnings'
+    @cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+    @echo '+ cargo test --all-targets --features cli,myelin --locked'
+    @cargo test --all-targets --features cli,myelin --locked
+    @echo '+ cargo build --all-targets --features cli,myelin --locked'
+    @cargo build --all-targets --features cli,myelin --locked
+    @echo '+ cargo doc --no-deps --features cli,myelin --locked'
+    @cargo doc --no-deps --features cli,myelin --locked
     @just _python-tests
     @just _bash-n-scripts
     @just _codex-hook-tests

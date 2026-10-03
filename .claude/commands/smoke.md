@@ -28,8 +28,8 @@ sed -n '/^    mods=(/,/^    )/p' justfile | grep -oE 'scripts\.[a-z0-9_]+' \
 Optional broader check (slower) — or use `just ci`:
 
 ```bash
-cargo test --all-targets --all-features --locked
-cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
 ```
 
 CLI help smoke (no weights required):

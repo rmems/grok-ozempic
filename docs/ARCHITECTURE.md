@@ -115,7 +115,9 @@ crate with its default features disabled. `pack_ternary` then calls the
 CUDA-free `bitpacking::pack_ternary_bytes` host API. Quantization, passthrough,
 and the CUDA GEMV/GEMM adapter still return
 `GrokOzempicError::BackendNotAvailable`; enabling `myelin` does not enable
-myelin's `cuda` or `bench` features. The dependency is
+myelin's `cuda` or `bench` features. The separate opt-in `cuda` feature includes
+`myelin` and forwards `myelin-accelerator/cuda`; it remains outside CPU CI. The
+dependency is
 [`Limen-Neural/myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator)
 (not a second kernel tree in this repo). Host packing is already public there
 as `bitpacking`. Device ternary matmul landed under myelin
@@ -187,7 +189,8 @@ local glue rather than backend kernel implementations:
 `myelin-accelerator` 0.2.0 is an optional crates.io dependency in
 [`Cargo.toml`](../Cargo.toml). The `myelin` feature enables it with default
 features disabled, so default and `myelin` builds do not select upstream
-`cuda` or `bench`. Default features remain empty for CPU CI.
+`cuda` or `bench`. The opt-in `cuda` feature forwards only upstream `cuda`;
+upstream `bench` is never enabled. Default features remain empty for CPU CI.
 
 There is no 2026-05-28 sprint cutoff and no in-tree GPU provisioning runbook.
 Kernel work and cloud GPU experiments belong in `myelin-accelerator` and
