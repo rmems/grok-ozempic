@@ -263,7 +263,8 @@ A green `__coverage__` is **not** a live-pack preflight: `DryRunPlanner`
 still assigns uncovered inventory to `manifest.defaults` (and can report
 `CoverageStatus::Full`), while `stream::classify_and_decide` rejects an
 unmatched V2 name with `ManifestV2UnmatchedTensor`. The live pack path still
-calls `quantizer.rs` directly; `MyelinBackend` remains a stub. See
+calls `quantizer.rs` directly; `MyelinBackend` only provides optional host
+packing, not live quantization or CUDA dispatch. See
 [`ARCHITECTURE.md`](./ARCHITECTURE.md) and the precision table in
 [`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
 

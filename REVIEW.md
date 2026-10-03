@@ -40,7 +40,7 @@ or `just qodana` for that).
 ```bash
 just check    # cargo fmt --check + clippy --features cli --locked -D warnings
 just test     # cargo test --features cli --locked + CI Python unittests
-just build    # cargo build --all-targets --all-features --locked
+just build    # cargo build --all-targets --features cli,myelin --locked
 just ci       # full pre-PR matrix (no cargo-audit, no extra block unittests)
 ```
 
@@ -174,9 +174,9 @@ wrapped by `just review` / `just qodana`).
 | Command | When | Notes |
 |---------|------|--------|
 | `cargo audit` | Any change to `Cargo.toml` / `Cargo.lock`; always in `just review` when installed | Install: `cargo install cargo-audit --locked` |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | Full matrix | Already in `just ci` (not in `just check`, which uses `--features cli` only) |
-| `cargo test --all-targets --all-features --locked` | Full matrix | Already in `just ci` |
-| `cargo doc --no-deps --all-features --locked` | Docs / public API | Already in `just ci` |
+| `cargo clippy --all-targets --features cli,myelin --locked -- -D warnings` | Full CPU matrix | Already in `just ci` (not in `just check`, which uses `--features cli` only) |
+| `cargo test --all-targets --features cli,myelin --locked` | Full CPU matrix | Already in `just ci` |
+| `cargo doc --no-deps --features cli,myelin --locked` | CPU-feature docs / public API | Already in `just ci` |
 | `cargo build --release --features cli --locked` | Release binary / experiment path | In `just experiment-smoke`, not `just ci` |
 | `cargo bench --locked` | N/A | `just bench` exits 1 until a harness exists; kernels → `myelin-accelerator` |
 | `cargo fmt --all` | Fix formatting | Check-only is in `just check` / `just ci`; omit `-- --check` to rewrite |
@@ -260,10 +260,10 @@ Mirror **`just review`** without the just binary:
 ```bash
 # --- just ci ---
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo build --all-targets --all-features --locked
-cargo doc --no-deps --all-features --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo build --all-targets --features cli,myelin --locked
+cargo doc --no-deps --features cli,myelin --locked
 python3 -c 'import numpy; print(numpy.__version__)'
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_npy -v

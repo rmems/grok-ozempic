@@ -35,10 +35,10 @@ DryRunPlanner  (src/core/dry_run.rs)
         ▼
 BackendKernel trait  (src/core/backend.rs)
         ├── LocalBackend     → quantizer.rs (CPU, current math)
-        └── MyelinBackend    → myelin-accelerator FFI (stub until linked)
+        └── MyelinBackend    → myelin-accelerator host packing (`myelin` feature)
                 ▼
         Limen-Neural/myelin-accelerator
-            host bitpacking public; packed ternary GEMV/GEMM on the kernel side
+            host packing linked; packed ternary GEMV/GEMM adapter still open
 ```
 
 | Step | What to open | What it does |
@@ -92,8 +92,8 @@ grok-ozempic (orchestration)
     ├── BackendKernel trait (src/core/backend.rs)
     │       │
     │       ├── LocalBackend       — delegates to quantizer.rs (CPU, current)
-    │       └── MyelinBackend      — FFI to myelin-accelerator (stub; every
-    │                                 method returns BackendNotAvailable)
+    │       └── MyelinBackend      — host packer with `myelin`; quantization,
+    │                                 passthrough, and CUDA adapter unavailable
     │
     ├── DryRunPlanner (src/core/dry_run.rs)
     │       — maps each manifest rule to an OperationKind / planned call
@@ -108,17 +108,23 @@ Wraps the existing Rust implementations in
 calling those functions directly. Use this type when writing new callers that
 should be backend-swappable.
 
-### `MyelinBackend` (stub)
+### `MyelinBackend` (partial integration)
 
-Every method returns `GrokOzempicError::BackendNotAvailable`. The type exists
-so callers can be written against the CUDA seam before the library is linked.
-The intended dependency is
+The optional `myelin` feature enables the published `myelin-accelerator` 0.2.0
+crate with its default features disabled. `pack_ternary` then calls the
+CUDA-free `bitpacking::pack_ternary_bytes` host API. Quantization, passthrough,
+and the CUDA GEMV/GEMM adapter still return
+`GrokOzempicError::BackendNotAvailable`; enabling `myelin` does not enable
+myelin's `cuda` or `bench` features. The separate opt-in `cuda` feature includes
+`myelin` and forwards `myelin-accelerator/cuda`; it remains outside CPU CI. The
+dependency is
 [`Limen-Neural/myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator)
 (not a second kernel tree in this repo). Host packing is already public there
 as `bitpacking`. Device ternary matmul landed under myelin
-[#9](https://github.com/Limen-Neural/myelin-accelerator/issues/9). Wiring a
-feature-gated Cargo dep and replacing the stub is later work; until then
-`quantize-goz1` stays on CPU.
+[#9](https://github.com/Limen-Neural/myelin-accelerator/issues/9). The full
+GOZ1 adapter and RTX 5080 validation remain tracked in
+[grok-ozempic #50](https://github.com/rmems/grok-ozempic/issues/50). Until that
+work lands, `quantize-goz1` stays on its existing CPU path.
 
 ---
 
@@ -180,12 +186,11 @@ local glue rather than backend kernel implementations:
 
 ## Dependency status
 
-`myelin-accelerator` is recorded as a **planned dependency** in
-[`Cargo.toml`](../Cargo.toml) (commented out). Its current placeholder URL still
-points at `rmems/myelin-accelerator`; update that declaration to
-[Limen-Neural/myelin-accelerator](https://github.com/Limen-Neural/myelin-accelerator)
-when the `MyelinBackend` FFI bridge is implemented and the dependency becomes
-feature-gated.
+`myelin-accelerator` 0.2.0 is an optional crates.io dependency in
+[`Cargo.toml`](../Cargo.toml). The `myelin` feature enables it with default
+features disabled, so default and `myelin` builds do not select upstream
+`cuda` or `bench`. The opt-in `cuda` feature forwards only upstream `cuda`;
+upstream `bench` is never enabled. Default features remain empty for CPU CI.
 
 There is no 2026-05-28 sprint cutoff and no in-tree GPU provisioning runbook.
 Kernel work and cloud GPU experiments belong in `myelin-accelerator` and
