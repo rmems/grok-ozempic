@@ -1,5 +1,15 @@
 # Agent Instructions
 
+See @CLAUDE.md for additional repository context. The @-mention makes Amp load it; Amp reads `CLAUDE.md` on its own only when no `AGENTS.md` exists.
+
+## Git workflow
+
+- If an open PR branch is behind `main`, fetch and merge `origin/main` into it.
+  Do not rebase or force-push a published PR branch unless the repository owner
+  explicitly requests a history rewrite.
+- Push completed work with `git push`.
+- Squash-merge a PR only after CI is green and all review threads are resolved.
+
 This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
 
 > **Architecture in one line:** Issues live in a local Dolt database
@@ -125,7 +135,6 @@ bd close <id>         # Complete work
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
    git push
    git status  # MUST show "up to date with origin"
    ```
