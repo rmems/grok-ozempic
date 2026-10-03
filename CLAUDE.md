@@ -4,13 +4,6 @@ This file provides instructions and context for AI coding agents working on this
 
 **Claude Code project pack:** `.claude/` (rules, commands, skills, agents, cloud-safe hooks).
 
-## Git workflow
-
-- If an open PR branch is behind `main`, fetch and merge `origin/main` into it.
-  Never rebase or force-push a published PR branch.
-- Push completed work with `git push`.
-- Squash-merge a PR only after CI is green and all review threads are resolved.
-
 ## Issue tracking (source of truth)
 
 **Canonical SoT = GitHub issues + Linear twins (`RM-*`).** Status, milestones,

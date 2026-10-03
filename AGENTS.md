@@ -5,7 +5,8 @@ See @CLAUDE.md for additional repository context. The @-mention makes Amp load i
 ## Git workflow
 
 - If an open PR branch is behind `main`, fetch and merge `origin/main` into it.
-  Never rebase or force-push a published PR branch.
+  Do not rebase or force-push a published PR branch unless the repository owner
+  explicitly requests a history rewrite.
 - Push completed work with `git push`.
 - Squash-merge a PR only after CI is green and all review threads are resolved.
 
