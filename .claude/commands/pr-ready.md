@@ -15,10 +15,10 @@ thirteen, and named no linters at all, while claiming parity.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo build --all-targets --all-features --locked
-cargo doc --no-deps --all-features --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo build --all-targets --features cli,myelin --locked
+cargo doc --no-deps --features cli,myelin --locked
 
 # Python modules: read the list from the justfile rather than retyping it.
 python3 -c 'import numpy; print(numpy.__version__)'

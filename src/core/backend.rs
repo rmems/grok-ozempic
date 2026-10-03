@@ -3,13 +3,17 @@ use half::f16;
 use crate::core::quantizer::{self, QuantizedTensor};
 use crate::error::{GrokOzempicError, Result};
 
+#[cfg(feature = "myelin")]
+const MYELIN_PACK_CHUNK_TRITS: usize = 16 * 1024;
+
 /// A deployable kernel backend that performs tensor quantization operations.
 ///
 /// `grok-ozempic` calls through this trait rather than invoking quantizer
 /// functions directly. The two implementations are:
 ///
 /// - [`LocalBackend`] — delegates to the existing CPU quantizer in `quantizer.rs`.
-/// - [`MyelinBackend`] — stub for the `myelin-accelerator` CUDA FFI bridge.
+/// - [`MyelinBackend`] — feature-gated host packing via `myelin-accelerator`;
+///   the remaining CUDA bridge is not yet integrated.
 pub trait BackendKernel {
     /// Pack a slice of ternary floats into 2-bit representation (4 values/byte).
     fn pack_ternary(&self, ternary: &[f32]) -> Result<Vec<u8>>;
@@ -75,15 +79,14 @@ impl BackendKernel for LocalBackend {
 }
 
 // ---------------------------------------------------------------------------
-// MyelinBackend — stub for myelin-accelerator FFI
+// MyelinBackend — partial myelin-accelerator integration
 // ---------------------------------------------------------------------------
 
-/// Stub backend that will delegate kernel operations to `myelin-accelerator`
-/// via Rust/CUDA FFI once the dependency is linked.
+/// Backend integration point for `myelin-accelerator`.
 ///
-/// Every method currently returns an error. This establishes the integration
-/// point so callers can be written against the `MyelinBackend` type before the
-/// actual CUDA library is available.
+/// With the `myelin` feature, [`BackendKernel::pack_ternary`] uses myelin's
+/// host-only GOZ1-compatible byte packer. The remaining methods return
+/// [`GrokOzempicError::BackendNotAvailable`] until the CUDA adapter is complete.
 pub struct MyelinBackend;
 
 impl MyelinBackend {
@@ -99,33 +102,60 @@ impl Default for MyelinBackend {
 }
 
 impl BackendKernel for MyelinBackend {
-    fn pack_ternary(&self, _ternary: &[f32]) -> Result<Vec<u8>> {
-        Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
-        ))
+    fn pack_ternary(&self, ternary: &[f32]) -> Result<Vec<u8>> {
+        #[cfg(feature = "myelin")]
+        {
+            let mut packed = Vec::with_capacity(ternary.len().div_ceil(4));
+            for chunk in ternary.chunks(MYELIN_PACK_CHUNK_TRITS) {
+                let trits: Vec<i8> = chunk
+                    .iter()
+                    .map(|&value| {
+                        if value > 0.0 {
+                            1
+                        } else if value < 0.0 {
+                            -1
+                        } else {
+                            0
+                        }
+                    })
+                    .collect();
+                packed.extend(myelin_accelerator::bitpacking::pack_ternary_bytes(&trits));
+            }
+            Ok(packed)
+        }
+
+        #[cfg(not(feature = "myelin"))]
+        {
+            let _ = ternary;
+            Err(GrokOzempicError::BackendNotAvailable(
+                "myelin feature is not enabled; use LocalBackend for CPU fallback".into(),
+            ))
+        }
     }
 
     fn quantize_f32(&self, _weights: &[f32], _gif_threshold: f32) -> Result<QuantizedTensor> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin quantization is not yet integrated; use LocalBackend for CPU fallback".into(),
         ))
     }
 
     fn quantize_f16(&self, _weights: &[f16], _gif_threshold: f32) -> Result<QuantizedTensor> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin quantization is not yet integrated; use LocalBackend for CPU fallback".into(),
         ))
     }
 
     fn passthrough_f16(&self, _weights: &[f16]) -> Result<Vec<u8>> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin FP16 passthrough is not yet integrated; use LocalBackend for CPU fallback"
+                .into(),
         ))
     }
 
     fn convert_f32_to_f16_bytes(&self, _weights: &[f32]) -> Result<Vec<u8>> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin FP16 conversion is not yet integrated; use LocalBackend for CPU fallback"
+                .into(),
         ))
     }
 }
@@ -211,6 +241,7 @@ mod tests {
         assert_eq!(result, expected);
     }
 
+    #[cfg(not(feature = "myelin"))]
     #[test]
     fn myelin_pack_ternary_returns_error() {
         let backend = MyelinBackend::new();
@@ -219,6 +250,43 @@ mod tests {
             result,
             Err(GrokOzempicError::BackendNotAvailable(_))
         ));
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_uses_goz1_byte_layout() {
+        let backend = MyelinBackend::new();
+        let packed = backend.pack_ternary(&[1.0, -1.0, 0.0, 1.0, -1.0]).unwrap();
+
+        assert_eq!(packed, vec![0b0100_1001, 0b0000_0010]);
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_preserves_sign_semantics() {
+        let backend = MyelinBackend::new();
+        let packed = backend
+            .pack_ternary(&[f32::MIN_POSITIVE, -f32::MIN_POSITIVE, -0.0, f32::NAN])
+            .unwrap();
+
+        assert_eq!(packed, vec![0b0000_1001]);
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_preserves_layout_across_chunks() {
+        let backend = MyelinBackend::new();
+        let ternary: Vec<f32> = (0..MYELIN_PACK_CHUNK_TRITS + 5)
+            .map(|index| match index % 3 {
+                0 => -1.0,
+                1 => 0.0,
+                _ => 1.0,
+            })
+            .collect();
+
+        let packed = backend.pack_ternary(&ternary).unwrap();
+
+        assert_eq!(packed, quantizer::pack_trits(&ternary));
     }
 
     #[test]

@@ -46,8 +46,8 @@ An `artifact.index.json` from the first pipeline is not a GOZ1 checkpoint.
 ## Backend delegation (what this experiment used)
 
 PR #25 added the `BackendKernel` trait (`LocalBackend` CPU, `MyelinBackend`
-FFI stub) and `DryRunPlanner`. That seam is the future dispatch point; it is
-**not** how the first embedding pack ran.
+integration seam) and `DryRunPlanner`. That seam is the future dispatch point;
+it is **not** how the first embedding pack ran.
 
 | Layer | Role in this experiment |
 |-------|-------------------------|
@@ -55,7 +55,7 @@ FFI stub) and `DryRunPlanner`. That seam is the future dispatch point; it is
 | Selection | `ternary_snn` on an f32 source → planned `OperationKind::QuantizeTernary` |
 | Live pack | `run_quantization` → `quantizer::quantize_f32` on CPU |
 | `LocalBackend` | Same math, not on the `quantize-goz1` call path |
-| `MyelinBackend` | Unused stub; do not cite myelin or CUDA as the compute backend |
+| `MyelinBackend` | Optional host packer only; do not cite myelin or CUDA as the live compute backend |
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the five-minute
 manifest → trait → myelin trace, and

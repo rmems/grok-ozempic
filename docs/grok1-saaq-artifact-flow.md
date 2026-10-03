@@ -167,14 +167,14 @@ manifest (structural V2 or V1 baseline)
     │
     └─► quantize-goz1 --verify
               CPU quantizer.rs (same math as LocalBackend)
-              future: BackendKernel → MyelinBackend FFI
+              future: BackendKernel → MyelinBackend CUDA adapter
 ```
 
 | Surface | Reads weights? | Backend? |
 |---------|----------------|----------|
 | `DryRunPlanner` | No | Plans `OperationKind` that *would* map to `BackendKernel` methods |
 | SAAQ CLI `--dry-run` | No (may hash shards named by `checksums.json`) | None |
-| `quantize-goz1` | Yes | CPU `quantizer.rs` today; `MyelinBackend` is a stub |
+| `quantize-goz1` | Yes | CPU `quantizer.rs` today; `MyelinBackend` only has optional host packing |
 
 Precision → kernel mapping is tabulated in
 [`dissect-manifest.md`](./dissect-manifest.md#precision--backend-mapping).
