@@ -3,6 +3,9 @@ use half::f16;
 use crate::core::quantizer::{self, QuantizedTensor};
 use crate::error::{GrokOzempicError, Result};
 
+#[cfg(feature = "myelin")]
+const MYELIN_PACK_CHUNK_TRITS: usize = 16 * 1024;
+
 /// A deployable kernel backend that performs tensor quantization operations.
 ///
 /// `grok-ozempic` calls through this trait rather than invoking quantizer
@@ -102,19 +105,23 @@ impl BackendKernel for MyelinBackend {
     fn pack_ternary(&self, ternary: &[f32]) -> Result<Vec<u8>> {
         #[cfg(feature = "myelin")]
         {
-            let trits: Vec<i8> = ternary
-                .iter()
-                .map(|&value| {
-                    if value > 0.0 {
-                        1
-                    } else if value < 0.0 {
-                        -1
-                    } else {
-                        0
-                    }
-                })
-                .collect();
-            Ok(myelin_accelerator::bitpacking::pack_ternary_bytes(&trits))
+            let mut packed = Vec::with_capacity(ternary.len().div_ceil(4));
+            for chunk in ternary.chunks(MYELIN_PACK_CHUNK_TRITS) {
+                let trits: Vec<i8> = chunk
+                    .iter()
+                    .map(|&value| {
+                        if value > 0.0 {
+                            1
+                        } else if value < 0.0 {
+                            -1
+                        } else {
+                            0
+                        }
+                    })
+                    .collect();
+                packed.extend(myelin_accelerator::bitpacking::pack_ternary_bytes(&trits));
+            }
+            Ok(packed)
         }
 
         #[cfg(not(feature = "myelin"))]
@@ -252,6 +259,34 @@ mod tests {
         let packed = backend.pack_ternary(&[1.0, -1.0, 0.0, 1.0, -1.0]).unwrap();
 
         assert_eq!(packed, vec![0b0100_1001, 0b0000_0010]);
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_preserves_sign_semantics() {
+        let backend = MyelinBackend::new();
+        let packed = backend
+            .pack_ternary(&[f32::MIN_POSITIVE, -f32::MIN_POSITIVE, -0.0, f32::NAN])
+            .unwrap();
+
+        assert_eq!(packed, vec![0b0000_1001]);
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_preserves_layout_across_chunks() {
+        let backend = MyelinBackend::new();
+        let ternary: Vec<f32> = (0..MYELIN_PACK_CHUNK_TRITS + 5)
+            .map(|index| match index % 3 {
+                0 => -1.0,
+                1 => 0.0,
+                _ => 1.0,
+            })
+            .collect();
+
+        let packed = backend.pack_ternary(&ternary).unwrap();
+
+        assert_eq!(packed, quantizer::pack_trits(&ternary));
     }
 
     #[test]
