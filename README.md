@@ -2,7 +2,7 @@
 
 **Experimental out-of-core Grok-1 quantization with measured routing and residual-fidelity tradeoffs.**
 
-This crate turns heavyweight MoE checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. **Grok-1 is the reference family**; the planner and alignment engine are reusable—see [`docs/adding-a-model.md`](docs/adding-a-model.md). Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` is a stub, and `quantize-goz1` still calls `quantizer.rs` directly).
+This crate turns heavyweight MoE checkpoints into a spiking-friendly representation using a ternary SNN encoding and FP16 conversion or passthrough where routing-critical tensors must stay protected from ternary quantization. **Grok-1 is the reference family**; the planner and alignment engine are reusable—see [`docs/adding-a-model.md`](docs/adding-a-model.md). Reusable CUDA kernels live in [`myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator). `BackendKernel` is the intended future FFI seam, not a live route to those kernels today (`MyelinBackend` only exposes feature-gated host packing, and `quantize-goz1` still calls `quantizer.rs` directly).
 
 **Think of it as Ozempic for Grok — less bulk, with a measured routing tradeoff rather than a guaranteed free lunch.**
 
@@ -16,7 +16,7 @@ Trace in under five minutes: **manifest → selection → `DryRunPlanner` → `B
 |-------|-------|--------|
 | Manifest classification | [`docs/dissect-manifest.md`](docs/dissect-manifest.md), `stream::resolve_manifest` | Live. V2 unmatched names hard-error. |
 | Planned kernel verbs | `DryRunPlanner` in `src/core/dry_run.rs` | Live planning / coverage JSON. No weight payloads. |
-| Deployable kernel API | `BackendKernel` in `src/core/backend.rs` | `LocalBackend` wraps CPU `quantizer.rs`. `MyelinBackend` is an FFI stub (`BackendNotAvailable`). |
+| Deployable kernel API | `BackendKernel` in `src/core/backend.rs` | `LocalBackend` wraps CPU `quantizer.rs`. With `myelin`, `MyelinBackend::pack_ternary` uses the published host packer; its other methods remain unavailable. |
 | Live `quantize-goz1` | `src/core/stream.rs` | Calls `quantizer.rs` **directly**. Same math as `LocalBackend`; not dispatched through the trait. |
 | CUDA / packed GEMV | [`Limen-Neural/myelin-accelerator`](https://github.com/Limen-Neural/myelin-accelerator) | Host `bitpacking` is public; device ternary matmul is myelin [#9](https://github.com/Limen-Neural/myelin-accelerator/issues/9). Do not grow a parallel CUDA tree here. |
 

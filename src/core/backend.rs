@@ -9,7 +9,8 @@ use crate::error::{GrokOzempicError, Result};
 /// functions directly. The two implementations are:
 ///
 /// - [`LocalBackend`] — delegates to the existing CPU quantizer in `quantizer.rs`.
-/// - [`MyelinBackend`] — stub for the `myelin-accelerator` CUDA FFI bridge.
+/// - [`MyelinBackend`] — feature-gated host packing via `myelin-accelerator`;
+///   the remaining CUDA bridge is not yet integrated.
 pub trait BackendKernel {
     /// Pack a slice of ternary floats into 2-bit representation (4 values/byte).
     fn pack_ternary(&self, ternary: &[f32]) -> Result<Vec<u8>>;
@@ -75,15 +76,14 @@ impl BackendKernel for LocalBackend {
 }
 
 // ---------------------------------------------------------------------------
-// MyelinBackend — stub for myelin-accelerator FFI
+// MyelinBackend — partial myelin-accelerator integration
 // ---------------------------------------------------------------------------
 
-/// Stub backend that will delegate kernel operations to `myelin-accelerator`
-/// via Rust/CUDA FFI once the dependency is linked.
+/// Backend integration point for `myelin-accelerator`.
 ///
-/// Every method currently returns an error. This establishes the integration
-/// point so callers can be written against the `MyelinBackend` type before the
-/// actual CUDA library is available.
+/// With the `myelin` feature, [`BackendKernel::pack_ternary`] uses myelin's
+/// host-only GOZ1-compatible byte packer. The remaining methods return
+/// [`GrokOzempicError::BackendNotAvailable`] until the CUDA adapter is complete.
 pub struct MyelinBackend;
 
 impl MyelinBackend {
@@ -99,33 +99,56 @@ impl Default for MyelinBackend {
 }
 
 impl BackendKernel for MyelinBackend {
-    fn pack_ternary(&self, _ternary: &[f32]) -> Result<Vec<u8>> {
-        Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
-        ))
+    fn pack_ternary(&self, ternary: &[f32]) -> Result<Vec<u8>> {
+        #[cfg(feature = "myelin")]
+        {
+            let trits: Vec<i8> = ternary
+                .iter()
+                .map(|&value| {
+                    if value > 0.0 {
+                        1
+                    } else if value < 0.0 {
+                        -1
+                    } else {
+                        0
+                    }
+                })
+                .collect();
+            Ok(myelin_accelerator::bitpacking::pack_ternary_bytes(&trits))
+        }
+
+        #[cfg(not(feature = "myelin"))]
+        {
+            let _ = ternary;
+            Err(GrokOzempicError::BackendNotAvailable(
+                "myelin feature is not enabled; use LocalBackend for CPU fallback".into(),
+            ))
+        }
     }
 
     fn quantize_f32(&self, _weights: &[f32], _gif_threshold: f32) -> Result<QuantizedTensor> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin quantization is not yet integrated; use LocalBackend for CPU fallback".into(),
         ))
     }
 
     fn quantize_f16(&self, _weights: &[f16], _gif_threshold: f32) -> Result<QuantizedTensor> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin quantization is not yet integrated; use LocalBackend for CPU fallback".into(),
         ))
     }
 
     fn passthrough_f16(&self, _weights: &[f16]) -> Result<Vec<u8>> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin FP16 passthrough is not yet integrated; use LocalBackend for CPU fallback"
+                .into(),
         ))
     }
 
     fn convert_f32_to_f16_bytes(&self, _weights: &[f32]) -> Result<Vec<u8>> {
         Err(GrokOzempicError::BackendNotAvailable(
-            "myelin-accelerator FFI not yet linked; use LocalBackend for CPU fallback".into(),
+            "myelin FP16 conversion is not yet integrated; use LocalBackend for CPU fallback"
+                .into(),
         ))
     }
 }
@@ -211,6 +234,7 @@ mod tests {
         assert_eq!(result, expected);
     }
 
+    #[cfg(not(feature = "myelin"))]
     #[test]
     fn myelin_pack_ternary_returns_error() {
         let backend = MyelinBackend::new();
@@ -219,6 +243,15 @@ mod tests {
             result,
             Err(GrokOzempicError::BackendNotAvailable(_))
         ));
+    }
+
+    #[cfg(feature = "myelin")]
+    #[test]
+    fn myelin_pack_ternary_uses_goz1_byte_layout() {
+        let backend = MyelinBackend::new();
+        let packed = backend.pack_ternary(&[1.0, -1.0, 0.0, 1.0, -1.0]).unwrap();
+
+        assert_eq!(packed, vec![0b0100_1001, 0b0000_0010]);
     }
 
     #[test]

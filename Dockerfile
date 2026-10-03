@@ -7,7 +7,7 @@ COPY dissect/ dissect/
 # Documenting feature split (Issue #30):
 # The builder stage builds with `--features cli` to produce a minimal production binary
 # containing only the CLI dependencies (clap + anyhow). This keeps future optional
-# dependencies (e.g. the planned myelin-accelerator FFI backend) out of the production
+# dependencies (including the host-side myelin-accelerator integration) out of the production
 # image. The `async`/tokio feature this comment used to cite was removed in #99 -- it
 # gated no code and pulled 14 packages into every --all-features build.
 # We also use BuildKit cache mounts (Issue #31) for cargo registry and build target dir
@@ -25,7 +25,7 @@ COPY . .
 
 # Documenting feature split (Issue #30):
 # The tester stage builds with `--all-features` to run clippy/tests against every feature
-# (today just `cli`; the planned myelin backend will join it) for a comprehensive check.
+# (`cli` and the CUDA-free `myelin` host integration) for a comprehensive check.
 # We also use BuildKit cache mounts (Issue #31) here to preserve build artifacts.
 # Note: /app/target is NOT cached in tester stage to ensure deterministic test results
 # (avoids stale artifacts masking failures when files are removed/renamed).

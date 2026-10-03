@@ -164,9 +164,9 @@ uncompressed `&[f32]` ternary slice, not a `QuantizedTensor`.
 
 `quantize-goz1` today calls `quantizer.rs` directly rather than
 `LocalBackend` / `MyelinBackend`. The mapping above is what a backend-switched
-pack would invoke; `MyelinBackend` is still a stub. A name mismatch that
-ternary-quantizes a router or norm is a **matcher bug** — fix the glob, do not
-paper over it with `defaults`.
+pack would invoke; `MyelinBackend` only provides host packing behind the
+optional `myelin` feature. A name mismatch that ternary-quantizes a router or
+norm is a **matcher bug** — fix the glob, do not paper over it with `defaults`.
 
 ### Per-tensor fields
 
