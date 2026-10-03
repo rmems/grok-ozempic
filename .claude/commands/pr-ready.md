@@ -108,13 +108,17 @@ On the cloud/no-`bd` path, update only the linked GitHub/Linear handoff state.
 ## 5. Push until the remote is current
 
 ```bash
-git pull --rebase
+# If this open PR branch is behind main, update it without rewriting history:
+git fetch origin
+git merge origin/main
 git push
 git status   # branch up to date with origin AND clean working tree
 # expect: nothing to commit, working tree clean; tracking branch up to date
 ```
 
-If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the same error. Do not hand off with only a local commit or with dirty uncommitted work.
+Never rebase or force-push a published PR branch. If push fails, **fix the cause**
+(auth, non-fast-forward, protected branch, hooks), then retry. Do not spin on the
+same error. Do not hand off with only a local commit or with dirty uncommitted work.
 
 ## 6. PR
 
@@ -123,6 +127,7 @@ If push fails, **fix the cause** (auth, non-fast-forward, protected branch, hook
 - Create: `gh pr create` when needed
 - Update existing PR metadata: `gh pr edit` (not `gh pr view` — view is read-only)
 - Verify: `gh pr view`
+- Squash-merge only after CI is green and all review threads are resolved
 
 ## 7. Handoff
 

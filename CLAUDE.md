@@ -4,6 +4,13 @@ This file provides instructions and context for AI coding agents working on this
 
 **Claude Code project pack:** `.claude/` (rules, commands, skills, agents, cloud-safe hooks).
 
+## Git workflow
+
+- If an open PR branch is behind `main`, fetch and merge `origin/main` into it.
+  Never rebase or force-push a published PR branch.
+- Push completed work with `git push`.
+- Squash-merge a PR only after CI is green and all review threads are resolved.
+
 ## Issue tracking (source of truth)
 
 **Canonical SoT = GitHub issues + Linear twins (`RM-*`).** Status, milestones,
@@ -97,7 +104,6 @@ bd close <id>         # Complete work
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -118,10 +124,10 @@ PRs here land as **squash merges**, which create one new commit on `main` with
 **no ancestry link** to the branch's individual commits. The local branch still
 holds all of them.
 
-So the "PUSH TO REMOTE" step above (`git pull --rebase`) is **wrong on a branch
-whose PR has already been merged**: git replays every original commit onto a
-`main` that already contains the same content under a different SHA, cannot tell
-they are equivalent, and stops on `both added (AA)` conflicts in essentially
+The workflow above deliberately excludes `git pull --rebase`. After a PR has
+been squash-merged, rebasing its branch replays every original commit onto a
+`main` that already contains the same content under a different SHA. Git cannot
+tell they are equivalent and stops on `both added (AA)` conflicts in essentially
 every file the branch touched.
 
 ```bash
@@ -129,7 +135,7 @@ every file the branch touched.
 git checkout experiment/my-branch && git pull --rebase
 
 # RIGHT: the work is already on main; start clean
-git checkout main && git pull --rebase
+git checkout main && git pull --ff-only
 # Branch deletion is manual — verify first, then delete only if you intend to:
 # git diff --stat origin/main experiment/my-branch  # should be empty if fully merged
 # git branch -D experiment/my-branch  # manual only
