@@ -110,7 +110,7 @@ On the cloud/no-`bd` path, update only the linked GitHub/Linear handoff state.
 ```bash
 # If this open PR branch is behind main, update it without rewriting history:
 git fetch origin
-git merge origin/main
+git merge --no-edit origin/main
 git push
 git status   # branch up to date with origin AND clean working tree
 # expect: nothing to commit, working tree clean; tracking branch up to date

@@ -301,7 +301,7 @@ qodana scan --linter qodana-python-community --project-dir . \
 2. **`just review`** (or `just review-full` when static analysis matters)
 3. Diff hygiene: no secrets, no multi-GiB weights, no accidental `.beads` noise
 4. Commit with imperative subject + GH / Linear IDs when known
-5. If the open PR branch is behind `main`, merge `origin/main`; never rebase or force-push it
+5. If the open PR branch is behind `main`, run `git fetch origin` then `git merge --no-edit origin/main`; never rebase or force-push it
 6. `git push`
 7. If the pre-push hook fails, fix failures — do not habitually `--no-verify`
 8. Squash-merge only after CI is green and all review threads are resolved
