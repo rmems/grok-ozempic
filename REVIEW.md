@@ -235,6 +235,15 @@ actionlint                          # .github/workflows/*
 shellcheck scripts/*.sh             # when shellcheck is installed
 ```
 
+### GitHub Actions
+
+Pin all third-party actions in `.github/workflows/*.yml` to immutable references
+to reduce supply-chain attack risk, avoiding mutable tags (e.g., `@v4`) or
+branch references (e.g., `@master`):
+
+- Repository actions (`owner/repo@ref`): use the full commit SHA.
+- Container actions (`docker://image`): use an image digest (`@sha256:...`).
+
 ### Docker (path-scoped; not in `just review`)
 
 When you touch `Dockerfile`, `Cargo.toml`, `Cargo.lock`, `src/**`, or `dissect/**`:
