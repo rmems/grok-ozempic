@@ -656,7 +656,7 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "progress.json"
             with mock.patch.object(multiblock, "_fsync_directory") as sync_directory:
-                multiblock._atomic_write_json(path, {"status": "running"})
+                multiblock.atomic_write_json(path, {"status": "running"})
             sync_directory.assert_called_once_with(path.parent)
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
@@ -673,7 +673,7 @@ class ReportTests(unittest.TestCase):
                 "replace",
                 side_effect=OSError("replace failed"),
             ), self.assertRaisesRegex(OSError, "replace failed"):
-                multiblock._atomic_write_json(path, {"status": "partial"})
+                multiblock.atomic_write_json(path, {"status": "partial"})
             self.assertEqual(
                 json.loads(path.read_text(encoding="utf-8")),
                 original,
@@ -724,8 +724,8 @@ class ReportTests(unittest.TestCase):
                 mock.patch.object(multiblock, "_write_v3_report"),
                 mock.patch.object(
                     multiblock,
-                    "_atomic_write_json",
-                    wraps=multiblock._atomic_write_json,
+                    "atomic_write_json",
+                    wraps=multiblock.atomic_write_json,
                 ) as atomic_write,
             ):
                 self.assertEqual(multiblock.run(args), 0)
@@ -750,7 +750,7 @@ class ReportTests(unittest.TestCase):
             with mock.patch.object(
                 multiblock.os, "replace", side_effect=OSError("replace failed")
             ), self.assertRaisesRegex(OSError, "replace failed"):
-                multiblock._atomic_write_text(path, "new report\n")
+                multiblock.atomic_write_text(path, "new report\n")
             self.assertEqual(path.read_text(encoding="utf-8"), original)
             self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
 
@@ -789,7 +789,8 @@ class PeriodicHpScheduleTests(unittest.TestCase):
 
 
 class ChannelAlphaDequantTests(unittest.TestCase):
-    def test_recovers_per_channel_scale(self) -> None:
+    @staticmethod
+    def test_recovers_per_channel_scale() -> None:
         rng = np.random.default_rng(0)
         t = rng.choice([-1.0, 0.0, 1.0], size=(32, 4)).astype(np.float32)
         alpha = np.array([0.5, 1.0, 1.5, 2.0], dtype=np.float32)
@@ -799,7 +800,8 @@ class ChannelAlphaDequantTests(unittest.TestCase):
         fired = t != 0
         np.testing.assert_allclose(out[fired], w[fired], rtol=1e-5, atol=1e-5)
 
-    def test_dead_channel_yields_zero_alpha(self) -> None:
+    @staticmethod
+    def test_dead_channel_yields_zero_alpha() -> None:
         t = np.zeros((8, 3), dtype=np.float32)
         t[:, 0] = 1.0
         w = np.ones((8, 3), dtype=np.float32) * 2.0
@@ -811,7 +813,8 @@ class ChannelAlphaDequantTests(unittest.TestCase):
         with self.assertRaises(ForwardError):
             channel_alpha_dequant(np.ones((2, 2)), np.ones((2, 3)))
 
-    def test_1d_vector_path(self) -> None:
+    @staticmethod
+    def test_1d_vector_path() -> None:
         t = np.array([1.0, -1.0, 0.0, 1.0], dtype=np.float32)
         w = t * 3.0
         out = channel_alpha_dequant(w, t)
@@ -819,8 +822,8 @@ class ChannelAlphaDequantTests(unittest.TestCase):
 
 
 class RemedyDecideTests(unittest.TestCase):
+    @staticmethod
     def _chain(
-        self,
         rows,
         *,
         exit_drift: float,
@@ -1875,7 +1878,8 @@ class RemedyV4DecisionTests(unittest.TestCase):
                 self.assertFalse(multiblock._is_v4_run(args))
                 self.assertIn("#80", multiblock._agent_for_args(args)[0])
 
-    def test_accepts_max_context_tokens_for_v4_primary(self) -> None:
+    @staticmethod
+    def test_accepts_max_context_tokens_for_v4_primary() -> None:
         seed = 2026 * 10_000 + 806
         args = argparse.Namespace(
             arm="int4_channel_alpha",

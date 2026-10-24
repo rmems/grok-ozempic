@@ -46,10 +46,10 @@ Equivalent cargo matrix if `just` is unavailable (see `.github/workflows/rust.ym
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo build --all-targets --all-features --locked
-cargo doc --no-deps --all-features --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo build --all-targets --features cli,myelin --locked
+cargo doc --no-deps --features cli,myelin --locked
 ```
 
 CLI-focused fast path while iterating (fallback without `just`):

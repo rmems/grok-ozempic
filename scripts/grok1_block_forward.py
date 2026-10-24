@@ -35,6 +35,7 @@ from dataclasses import dataclass
 import numpy as np
 
 __all__ = [
+    "ATTENTION_CHUNK_TOKENS",
     "ATTN_OUTPUT_MULTIPLIER",
     "EMBEDDING_MULTIPLIER",
     "FFN_SIZE",
@@ -48,6 +49,7 @@ __all__ = [
     "NUM_Q_HEADS",
     "NUM_SELECTED_EXPERTS",
     "RMS_EPS",
+    "_ROLE_SHAPES",
     "ROPE_BASE",
     "SLOT_ROLES",
     "ForwardError",

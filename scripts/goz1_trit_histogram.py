@@ -55,20 +55,25 @@ CHUNK = 64 * 1024 * 1024
 
 # Per byte value: counts of (zero, +1, -1) among its four 2-bit trits.
 # 0b11 never appears in packs written by encode_trit; count it as "invalid".
-_LUT: list[tuple[int, int, int, int]] = []
-for b in range(256):
-    z = p = m = bad = 0
-    for shift in (0, 2, 4, 6):
-        t = (b >> shift) & 0b11
-        if t == 0b00:
-            z += 1
-        elif t == 0b01:
-            p += 1
-        elif t == 0b10:
-            m += 1
-        else:
-            bad += 1
-    _LUT.append((z, p, m, bad))
+def _build_lut() -> list[tuple[int, int, int, int]]:
+    lut: list[tuple[int, int, int, int]] = []
+    for byte_value in range(256):
+        zeros = pos = neg = invalid = 0
+        for shift in (0, 2, 4, 6):
+            trit = (byte_value >> shift) & 0b11
+            if trit == 0b00:
+                zeros += 1
+            elif trit == 0b01:
+                pos += 1
+            elif trit == 0b10:
+                neg += 1
+            else:
+                invalid += 1
+        lut.append((zeros, pos, neg, invalid))
+    return lut
+
+
+_LUT = _build_lut()
 
 
 class Goz1Error(ValueError):
@@ -164,13 +169,13 @@ def read_header(f) -> tuple[int, dict[str, object], list[dict], int]:
                 if not math.isfinite(scale) or scale != 1.0:
                     raise Goz1Error(f"fp16 tensor {name!r} has invalid scale {scale}; expected 1.0")
         if gif_threshold is not None and threshold_abs is not None:
-            bad = (
+            invalid_thresholds = (
                 not math.isfinite(gif_threshold)
                 or gif_threshold < 0.0
                 or not math.isfinite(threshold_abs)
                 or threshold_abs < 0.0
             )
-            if bad:
+            if invalid_thresholds:
                 raise Goz1Error(
                     f"tensor {name!r} has non-finite or negative threshold "
                     f"(gif_threshold={gif_threshold}, threshold_abs={threshold_abs})"
@@ -217,11 +222,11 @@ def _apply_lut_counts(
 ) -> tuple[int, int, int, int]:
     """Accumulate trit totals for full payload bytes via the 4-trit LUT."""
     for value, count in Counter(chunk).items():
-        z, p, m, bad = _LUT[value]
-        zeros += z * count
-        pos += p * count
-        neg += m * count
-        invalid += bad * count
+        zeros_n, pos_n, neg_n, invalid_n = _LUT[value]
+        zeros += zeros_n * count
+        pos += pos_n * count
+        neg += neg_n * count
+        invalid += invalid_n * count
     return zeros, pos, neg, invalid
 
 
@@ -229,12 +234,12 @@ def _count_trailing_trits(last_byte: int, n_trits: int) -> tuple[int, int, int, 
     """Decode the final partial byte (1–3 LSB-first trits); ignore pad bits."""
     zeros = pos = neg = invalid = 0
     for i in range(n_trits):
-        t = (last_byte >> (2 * i)) & 0b11
-        if t == 0b00:
+        trit = (last_byte >> (2 * i)) & 0b11
+        if trit == 0b00:
             zeros += 1
-        elif t == 0b01:
+        elif trit == 0b01:
             pos += 1
-        elif t == 0b10:
+        elif trit == 0b10:
             neg += 1
         else:
             invalid += 1
@@ -257,11 +262,11 @@ def histogram_ternary(f, abs_offset: int, n_elements: int) -> dict[str, int]:
             chunk = chunk[:-1]
         zeros, pos, neg, invalid = _apply_lut_counts(chunk, zeros, pos, neg, invalid)
     if last_byte is not None:
-        z, p, m, bad = _count_trailing_trits(last_byte, pad)
-        zeros += z
-        pos += p
-        neg += m
-        invalid += bad
+        zeros_n, pos_n, neg_n, invalid_n = _count_trailing_trits(last_byte, pad)
+        zeros += zeros_n
+        pos += pos_n
+        neg += neg_n
+        invalid += invalid_n
     return {"zeros": zeros, "pos": pos, "neg": neg, "invalid": invalid}
 
 
@@ -292,15 +297,15 @@ def _validate_tensor_layout(
 ) -> None:
     """Match weight_pack_read::verify_pack_file cumulative offsets + bounds."""
     expected_rel = 0
-    for i, t in enumerate(tensors):
-        name = t["name"]
-        off = t["data_offset"]
+    for i, tensor in enumerate(tensors):
+        name = tensor["name"]
+        off = tensor["data_offset"]
         if off != expected_rel:
             raise Goz1Error(
                 f"tensor {i} ({name}) data_offset {off} != expected cumulative {expected_rel}"
             )
-        n = _num_elements(t["shape"])
-        nbytes = _payload_nbytes(t["tensor_type"], n, name)
+        n = _num_elements(tensor["shape"])
+        nbytes = _payload_nbytes(tensor["tensor_type"], n, name)
         abs_off = data_start + off
         end = abs_off + nbytes
         if end > file_size:
@@ -332,22 +337,22 @@ def analyze(path: Path) -> dict:
         version, metadata, tensors, data_start = read_header(f)
         _validate_tensor_layout(tensors, data_start, file_size)
         out_tensors = []
-        for t in tensors:
-            n = _num_elements(t["shape"])
+        for tensor in tensors:
+            n = _num_elements(tensor["shape"])
             entry: dict[str, object] = {
-                "name": t["name"],
-                "shape": t["shape"],
+                "name": tensor["name"],
+                "shape": tensor["shape"],
                 "num_elements": n,
-                "type": _type_name(t["tensor_type"], t["name"]),
+                "type": _type_name(tensor["tensor_type"], tensor["name"]),
                 # Present as None on packs whose version predates the field;
                 # see read_header.
-                "scale": t["scale"],
-                "gif_threshold": t["gif_threshold"],
-                "threshold_abs": t["threshold_abs"],
+                "scale": tensor["scale"],
+                "gif_threshold": tensor["gif_threshold"],
+                "threshold_abs": tensor["threshold_abs"],
             }
-            if t["tensor_type"] == TENSOR_TERNARY:
+            if tensor["tensor_type"] == TENSOR_TERNARY:
                 entry.update(
-                    _analyze_ternary(f, data_start + t["data_offset"], t["name"], n)
+                    _analyze_ternary(f, data_start + tensor["data_offset"], tensor["name"], n)
                 )
             out_tensors.append(entry)
     return {
@@ -359,11 +364,11 @@ def analyze(path: Path) -> dict:
     }
 
 
-def _print_ternary_human(t: dict) -> None:
-    shape = "x".join(str(d) for d in t["shape"])
-    h = t["histogram"]
-    n = t["num_elements"]
-    print(f"  {t['name']}  [{shape}]  n={n}")
+def _print_ternary_human(tensor: dict) -> None:
+    shape = "x".join(str(d) for d in tensor["shape"])
+    h = tensor["histogram"]
+    n = tensor["num_elements"]
+    print(f"  {tensor['name']}  [{shape}]  n={n}")
     if n == 0:
         inv = f"  INVALID={h['invalid']}" if h["invalid"] else ""
         print(f"    empty tensor (zeros=0, +1=0, -1=0); sparsity=1.0 by convention{inv}")
@@ -381,12 +386,12 @@ def _print_human(result: dict) -> None:
     gif = result["metadata"].get("oz.gif_threshold")
     if gif is not None:
         print(f"  oz.gif_threshold = {gif}")
-    for t in result["tensors"]:
-        if t["type"] != "ternary":
-            shape = "x".join(str(d) for d in t["shape"])
-            print(f"  {t['name']}  [{shape}]  f16/preserve (not histogrammed)")
+    for tensor in result["tensors"]:
+        if tensor["type"] != "ternary":
+            shape = "x".join(str(d) for d in tensor["shape"])
+            print(f"  {tensor['name']}  [{shape}]  f16/preserve (not histogrammed)")
             continue
-        _print_ternary_human(t)
+        _print_ternary_human(tensor)
 
 
 def _json_out_conflicts_with_pack(json_out: Path, pack_path: Path) -> bool:

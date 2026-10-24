@@ -104,7 +104,7 @@ class SideTableBindingTests(unittest.TestCase):
             legacy.pop("schema_version")
             for entry in legacy["tensors"].values():
                 entry.pop("binding")
-            lib._atomic_write_json(sidecar_path, legacy)
+            lib.atomic_write_json(sidecar_path, legacy)
 
             # Reproduce the old writer's unsafe interruption: new q and matching
             # reference fingerprint were published while the prior scale and
@@ -114,7 +114,7 @@ class SideTableBindingTests(unittest.TestCase):
                 q_path, _ = first._paths(name)
                 q, _ = int4_absmax_quantize(weights)
                 np.save(q_path, q, allow_pickle=False)
-                lib._atomic_write_json(
+                lib.atomic_write_json(
                     first._fingerprint_path(name),
                     _reference_fingerprint(weights),
                 )

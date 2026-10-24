@@ -67,7 +67,14 @@ other agents.
   trailer explicitly with `git commit --trailer`.
 - Run `.codex/hooks/test-coauthor-hooks.sh` after changing attribution logic.
 
-Claude's `.claude/` attribution remains separate and unchanged.
+## Claude commit attribution
+
+Claude Code native commit and PR co-author footers are **explicitly disabled** in
+`.claude/settings.json` (`includeCoAuthoredBy: false`, empty `attribution.commit`
+and `attribution.pr`). The former `.claude/hooks/coauthor-*.sh` amend path was
+removed; do not re-enable without maintainer approval. Claude Code cloud may still
+add a `Claude-Session:` trailer — that is session metadata, not a `Co-Authored-By`
+line.
 
 ## Issue tracking
 

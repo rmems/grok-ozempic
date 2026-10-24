@@ -554,7 +554,7 @@ def int4_dequant_from_codes(q: np.ndarray, scale: np.ndarray) -> np.ndarray:
     """
     q_arr = np.asarray(q, dtype=np.float32)
     scale_arr = np.asarray(scale, dtype=np.float32)
-    if q_arr.ndim >= 2 and scale_arr.ndim >= 1 and scale_arr.ndim < q_arr.ndim:
+    if 1 <= scale_arr.ndim < q_arr.ndim:
         if scale_arr.ndim >= 2 and scale_arr.shape[0] == q_arr.shape[0]:
             # Scale has a matching leading (expert) axis and a trailing output
             # axis. Insert singleton contracting axes between them.
@@ -650,7 +650,7 @@ def int4_quantize_with_scale_mode(
 def _int4_side_scale_shape(ref_shape: tuple[int, ...]) -> tuple[int, ...]:
     """Persisted scale layout after reducing every contracting dimension."""
     if len(ref_shape) >= 3:
-        return (ref_shape[0], ref_shape[-1])
+        return ref_shape[0], ref_shape[-1]
     if len(ref_shape) == 2:
         return (ref_shape[-1],)
     return (1,) if ref_shape else ()
@@ -676,7 +676,7 @@ def _chunked_absmax_scale(weights: np.ndarray) -> np.ndarray:
     return scale
 
 
-def _quantized_chunk(chunk: np.ndarray, scale: np.ndarray | np.float32) -> np.ndarray:
+def _quantized_chunk(chunk: np.ndarray, scale: np.ndarray | float) -> np.ndarray:
     """Return one bounded chunk of bit-compatible absmax INT4 codes."""
     rounded = np.rint(np.asarray(chunk, dtype=np.float32) / scale)
     return np.clip(rounded, -INT4_QMAX, INT4_QMAX).astype(np.int8)
@@ -780,7 +780,7 @@ def _publish_temp(temp_path: Path, final_path: Path) -> None:
     _durable_replace(temp_path, final_path)
 
 
-def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     temp_path = _temp_sibling(path)
     try:
         with temp_path.open("w", encoding="utf-8") as handle:
@@ -935,12 +935,12 @@ class Int4SideExperts:
 
     def _write_sidecar(self, sidecar: dict[str, object]) -> None:
         path = self._side_dir / "sidecar.json"
-        _atomic_write_json(path, sidecar)
+        atomic_write_json(path, sidecar)
         self._publish_hook("sidecar_published", path)
 
-    def _publish_hook(self, step: str, path: Path) -> None:
+    def _publish_hook(self, _step: str, _path: Path) -> None:
         """Test seam for simulating interruption at publication boundaries."""
-        del step, path
+        del self
 
     def _paths(self, name: str) -> tuple[Path, Path]:
         stem = name.replace(".", "__")
@@ -1010,7 +1010,8 @@ class Int4SideExperts:
         self._remove_path(self._side_dir / "sidecar.json")
         _fsync_directory_strict(self._side_dir)
 
-    def _expected_side_scale_shape(self, ref_shape: tuple[int, ...]) -> tuple[int, ...]:
+    @staticmethod
+    def _expected_side_scale_shape(ref_shape: tuple[int, ...]) -> tuple[int, ...]:
         """Scale layout for preserved-expert INT4 scales.
 
         Shared by absmax and LS channel-α, which reduce the same axes
@@ -1020,8 +1021,9 @@ class Int4SideExperts:
         """
         return _int4_side_scale_shape(ref_shape)
 
+    @staticmethod
     def _validate_side_codes(
-        self, name: str, q: np.ndarray, ref_shape: tuple[int, ...]
+        name: str, q: np.ndarray, ref_shape: tuple[int, ...]
     ) -> np.ndarray:
         if q.dtype != np.int8:
             raise ForwardError(f"int4 side-table {name}: codes dtype {q.dtype} != int8")
@@ -1171,7 +1173,7 @@ class Int4SideExperts:
             self._publish_hook("q_temp_durable", temp_q)
             _publish_temp(temp_q, q_path)
             self._publish_hook("q_published", q_path)
-            _atomic_write_json(fp_path, fingerprint)
+            atomic_write_json(fp_path, fingerprint)
             self._publish_hook("fingerprint_published", fp_path)
         finally:
             temp_q.unlink(missing_ok=True)
@@ -1826,7 +1828,9 @@ def _fmt_commit(impl: object) -> str:
     if isinstance(impl, dict):
         c = impl.get("commit") or "unknown"
         return f"{c}{' (dirty)' if impl.get('dirty') else ''}"
-    return str(impl)
+    if isinstance(impl, str):
+        return impl
+    return type(impl).__qualname__
 
 
 def _why_not_others(decision: int) -> str:
@@ -2519,7 +2523,7 @@ def _v2_improved_vs_74(summary: dict) -> bool:
 
 def _v2_candidate_rank(summary: dict) -> tuple:
     if summary.get("empty"):
-        return (False, float("-inf"), float("-inf"), float("-inf"))
+        return False, float("-inf"), float("-inf"), float("-inf")
     drift = summary.get("chain_exit_residual_drift")
     return (
         bool(summary["viable"]),
@@ -2593,13 +2597,13 @@ _V3_SECONDARY_EVIDENCE_ROLE = "secondary; no independent decision"
 def _v3_expected_schedule(label: str) -> tuple[list[int], list[int], list[int], str]:
     """Return (hp_blocks, int4_blocks, channel_alpha_blocks, expert_mode) for a locked arm label."""
     if label in (V3_PRIMARY_ARM, V4_INT4_BASELINE_ARM):
-        return ([], list(BASELINE_72["blocks"]), [], "int4")
+        return [], list(BASELINE_72["blocks"]), [], "int4"
     if label == V3_SECONDARY_ARM:
-        return ([1, 2, 3], [0], [], "int4")
+        return [1, 2, 3], [0], [], "int4"
     if label == V4_PRIMARY_ARM:
-        return ([], list(BASELINE_85["blocks"]), list(BASELINE_85["blocks"]), "int4_channel_alpha")
+        return [], list(BASELINE_85["blocks"]), list(BASELINE_85["blocks"]), "int4_channel_alpha"
     if label == V4_SECONDARY_ARM:
-        return ([1, 2, 3], [0], [0], "int4_channel_alpha")
+        return [1, 2, 3], [0], [0], "int4_channel_alpha"
     raise ValueError(f"unknown locked schedule label={label!r}")
 
 
@@ -2642,7 +2646,8 @@ def _v3_schedule_field_errors(
     if value is None:
         return [f"{label}:{field}_not_block_list"]
     if value != expected:
-        return [f"{label}:{field}={value!r} expected={expected!r}"]
+        expected_text = expected if isinstance(expected, (list, tuple)) else type(expected).__qualname__
+        return [f"{label}:{field}={value!r} expected={expected_text!r}"]
     return []
 
 
@@ -4020,7 +4025,10 @@ def _v2_comparison_table(comparison: dict) -> list[str]:
             if isinstance(value, list):
                 value = value[-1]
             values.append(float(value))
-        best = (max if higher_is_better else min)(values)
+        if higher_is_better:
+            best = max(values)
+        else:
+            best = min(values)
         lines.append(
             f"| {label} | "
             + " | ".join(_v2_table_value(value, best) for value in values)

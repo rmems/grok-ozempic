@@ -78,7 +78,8 @@ def _full_fixture() -> tuple[list[dict], dict[str, dict]]:
 
 
 class TernaryInventoryTests(unittest.TestCase):
-    def test_matching_inventory_passes(self) -> None:
+    @staticmethod
+    def test_matching_inventory_passes() -> None:
         manifest, index = _full_fixture()
         ternary, _ = rpm._split_tiers(index)
         rpm._validate_ternary_inventory(_args(), ternary, manifest)
@@ -124,7 +125,8 @@ class TernaryInventoryTests(unittest.TestCase):
 
 
 class PreserveInventoryTests(unittest.TestCase):
-    def test_matching_inventory_passes(self) -> None:
+    @staticmethod
+    def test_matching_inventory_passes() -> None:
         manifest, index = _full_fixture()
         rpm._validate_preserve_inventory(_args(), index, manifest)
 

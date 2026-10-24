@@ -35,8 +35,11 @@ jobs:
         # Pin third-party action to full commit SHA (Codacy / Opengrep GHA rule).
         uses: JetBrains/qodana-action@4861e015da555e86a72b862892aba6c2b93e6891 # v2026.1.3
         with:
-          args: --linter qodana-python-community
+          args: --linter qodana-python-community -e QODANA_PYTHON_PATH=/data/cache/conda/envs/qodana-env/bin/python
           # Full-project baseline (not PR-diff-only): intentional for this repo until
           # Qodana coverage is stable; re-enable pr-mode once that is useful.
           pr-mode: false
+        env:
+          # Must match qodana.yaml bootstrap (`conda create -n qodana-env python=3.11`).
+          QODANA_PYTHON_PATH: /data/cache/conda/envs/qodana-env/bin/python
         # No QODANA_TOKEN / QODANA_ENDPOINT: Community does not talk to Cloud.

@@ -39,8 +39,8 @@ from grok1_alpha_schedule_report import render_report  # noqa: E402
 # Reuse durable publication and locking, without importing GH85 decision logic
 # into the protocol or replacing any historical supervisor functions.
 from grok1_multiblock_v4_supervisor import (  # noqa: E402
-    _atomic_write_json as atomic_json,
-    _atomic_write_text as atomic_text,
+    atomic_write_json as atomic_json,
+    atomic_write_text as atomic_text,
     _portable_failure_value,
     _supervisor_output_lock as output_lock,
 )
@@ -277,8 +277,8 @@ def run_child(command, log, timeout=CHILD_TIMEOUT_SECONDS):
 
 @contextmanager
 def interrupt_handlers():
-    def interrupted(signum, frame):
-        raise KeyboardInterrupt(f"supervisor signal {signum}")
+    def interrupted(received, _frame):
+        raise KeyboardInterrupt(f"supervisor signal {received}")
 
     old = {}
     try:

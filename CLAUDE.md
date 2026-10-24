@@ -211,10 +211,10 @@ python3 -m unittest scripts.test_grok1_ordered_inputs -v
 
 # just ci (pre-PR parity; --locked is intentional and stricter than GHA)
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo build --all-targets --all-features --locked
-cargo doc --no-deps --all-features --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo build --all-targets --features cli,myelin --locked
+cargo doc --no-deps --features cli,myelin --locked
 # + the twenty python3 -m unittest lines above
 for f in scripts/*.sh; do bash -n "$f"; done
 # GH #98 also made these blocking in CI (.github/workflows/lint.yml):

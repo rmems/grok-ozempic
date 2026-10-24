@@ -51,7 +51,8 @@ def _reference(arrays: dict[str, np.ndarray]):
 
 
 class ChunkedQuantizationTests(unittest.TestCase):
-    def test_chunked_q_is_bit_equivalent_to_full_quantizer(self) -> None:
+    @staticmethod
+    def test_chunked_q_is_bit_equivalent_to_full_quantizer() -> None:
         weights = _arrays()["gate"]
         expected_q, expected_scale = int4_absmax_quantize(weights)
         with tempfile.TemporaryDirectory() as td, mock.patch.object(
@@ -77,7 +78,8 @@ class ChunkedQuantizationTests(unittest.TestCase):
         with mock.patch.object(lib, "INT4_CHUNK_BYTES", 80):
             self.assertEqual(_reference_fingerprint(source), expected)
 
-    def test_ls_statistics_are_float64_chunk_equivalent(self) -> None:
+    @staticmethod
+    def test_ls_statistics_are_float64_chunk_equivalent() -> None:
         weights = _arrays(8)["gate"]
         q, _ = int4_absmax_quantize(weights)
         num = np.multiply(weights, q, dtype=np.float64).sum(axis=1, dtype=np.float64)
@@ -201,7 +203,7 @@ class AtomicSideTableTests(unittest.TestCase):
                 "_fsync_directory_strict",
                 side_effect=lib.ForwardError("directory fsync failed"),
             ), self.assertRaisesRegex(lib.ForwardError, "directory fsync failed"):
-                lib._atomic_write_json(sidecar, {"complete": True})
+                lib.atomic_write_json(sidecar, {"complete": True})
             self.assertFalse(sidecar.exists())
 
             scale = root / "scale.npy"

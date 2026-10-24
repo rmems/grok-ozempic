@@ -286,10 +286,10 @@ def _read_json(path: Path) -> object:
     try:
         with path.open("rb") as f:
             return json.load(f)
-    except OSError as exc:
-        raise MetricsError(f"{path}: cannot read conversion manifest: {exc}") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise MetricsError(f"{path}: conversion manifest is not valid JSON: {exc}") from exc
+    except OSError as os_exc:
+        raise MetricsError(f"{path}: cannot read conversion manifest: {os_exc}") from os_exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as decode_exc:
+        raise MetricsError(f"{path}: conversion manifest is not valid JSON: {decode_exc}") from decode_exc
 
 
 def _measure_routing(

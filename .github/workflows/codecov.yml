@@ -35,7 +35,7 @@ jobs:
         uses: taiki-e/install-action@c6d51ded7cde3c421f6cd6046cd601f2248f3710 # cargo-llvm-cov v0.6.0
 
       - name: Generate Code Coverage
-        run: cargo llvm-cov --all-targets --all-features --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-targets --features cli,myelin --workspace --lcov --output-path lcov.info
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4

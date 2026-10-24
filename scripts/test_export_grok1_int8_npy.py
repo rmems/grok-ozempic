@@ -83,7 +83,8 @@ class StackGlobalDtypeTests(unittest.TestCase):
     export fails.
     """
 
-    def _shard(self, td: str):
+    @staticmethod
+    def _shard(td: str):
         rng = np.random.default_rng(3)
         w = rng.integers(-128, 128, size=(64, 32), dtype=np.int8)
         s = rng.random((1, 32), dtype=np.float32) + 0.25
@@ -205,9 +206,9 @@ class ScanShardTests(unittest.TestCase):
             materialized: list[int] = []
             real_read = exp._StopAtPayload.read
 
-            def spy(self, size=-1):
+            def spy(reader, size=-1):
                 # Large reads raise _PayloadBoundary, so nothing is appended for them.
-                data = real_read(self, size)
+                data = real_read(reader, size)
                 materialized.append(len(data))
                 return data
 
@@ -273,7 +274,8 @@ class GroupingTests(unittest.TestCase):
 class DequantTests(unittest.TestCase):
     """The reshape-and-broadcast rule must match numpy's own result exactly."""
 
-    def _roundtrip(self, w: np.ndarray, s_f32: np.ndarray) -> tuple:
+    @staticmethod
+    def _roundtrip(w: np.ndarray, s_f32: np.ndarray) -> tuple:
         lead, k, n = w.shape[:-2], w.shape[-2], w.shape[-1]
         g = s_f32.shape[-2]
         # bfloat16 truncation is what the checkpoint stores, so the reference
@@ -313,7 +315,8 @@ class DequantTests(unittest.TestCase):
         ref, got, _ = self._roundtrip(w, s)
         np.testing.assert_array_equal(ref, got)
 
-    def test_chunking_does_not_change_result(self) -> None:
+    @staticmethod
+    def test_chunking_does_not_change_result() -> None:
         rng = np.random.default_rng(17)
         w = rng.integers(-128, 128, size=(128, 64), dtype=np.int8)
         s = rng.random((8, 64), dtype=np.float32) + 0.25
@@ -349,7 +352,8 @@ class DequantTests(unittest.TestCase):
             self.assertFalse(out.exists())
             self.assertFalse(out.with_suffix(out.suffix + ".partial").exists())
 
-    def test_matching_expect_shape_writes(self) -> None:
+    @staticmethod
+    def test_matching_expect_shape_writes() -> None:
         a = np.arange(16, dtype="<f4").reshape(4, 4)
         with tempfile.TemporaryDirectory() as td:
             shard, out = Path(td) / "s", Path(td) / "o.npy"
@@ -393,7 +397,8 @@ class NpyHeaderTests(unittest.TestCase):
             self.assertEqual(len(h) % 64, 0, f"header for {shape} is {len(h)} bytes")
             self.assertTrue(h.startswith(b"\x93NUMPY"))
 
-    def test_numpy_can_read_generated_header(self) -> None:
+    @staticmethod
+    def test_numpy_can_read_generated_header() -> None:
         a = np.arange(12, dtype="<f4").reshape(3, 4)
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "o.npy"
@@ -446,7 +451,8 @@ class HeaderStateCloneTests(unittest.TestCase):
     the sharing or blow the stack with an uncaught RecursionError.
     """
 
-    def _state(self):
+    @staticmethod
+    def _state():
         import export_grok1_int8_scan as scan
 
         return scan._HeaderState()
@@ -499,7 +505,8 @@ class CloneAliasingAcrossRootsTests(unittest.TestCase):
     pickle state the shard never had.
     """
 
-    def _state(self):
+    @staticmethod
+    def _state():
         import export_grok1_int8_scan as scan
 
         return scan._HeaderState()

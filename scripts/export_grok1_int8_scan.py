@@ -42,6 +42,14 @@ _GLOBAL_DESCRS = {("ml_dtypes", "bfloat16"): "bfloat16"}
 # Spellings that may *only* arrive via _GLOBAL_DESCRS, never as a loose string.
 _GLOBAL_ONLY_DESCR = frozenset(_GLOBAL_DESCRS.values())
 
+
+def _pickle_label(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("ascii", errors="replace")
+    return type(value).__qualname__
+
 # Preserve tier per run3 quant-plan `keep_fp32`; never ternary, never dequantized.
 
 class ExportError(RuntimeError):
@@ -340,10 +348,10 @@ class _HeaderState:
 
     # --- per-opcode handlers (dispatch keeps `feed` shallow for maintainers) ---
 
-    def _op_FRAME(self, arg) -> None:
+    def _op_frame(self, _arg) -> None:
         return
 
-    def _op_PROTO(self, arg) -> None:
+    def _op_proto(self, _arg) -> None:
         return
 
     def _push_str(self, arg) -> None:
@@ -351,61 +359,41 @@ class _HeaderState:
         self._push(s)
         self._set_descr(s)
 
-    _op_SHORT_BINUNICODE = _push_str
-    _op_BINUNICODE = _push_str
-    _op_UNICODE = _push_str
-
     def _push_bytes(self, arg) -> None:
         self._push(arg)
-
-    _op_SHORT_BINSTRING = _push_bytes
-    _op_BINSTRING = _push_bytes
-    _op_SHORT_BINBYTES = _push_bytes
-    _op_BINBYTES = _push_bytes
-    _op_BINBYTES8 = _push_bytes
 
     def _push_int(self, arg) -> None:
         i = int(arg)
         self._push(i)
         self.ints.append(i)
 
-    _op_BININT = _push_int
-    _op_BININT1 = _push_int
-    _op_BININT2 = _push_int
-    _op_LONG_BININT = _push_int
-    _op_INT = _push_int
-    _op_LONG = _push_int
-
     def _push_float(self, arg) -> None:
         self._push(float(arg))
 
-    _op_FLOAT = _push_float
-    _op_BINFLOAT = _push_float
-
-    def _op_NONE(self, arg) -> None:
+    def _op_none(self, _arg) -> None:
         self._push(None)
 
-    def _op_NEWTRUE(self, arg) -> None:
+    def _op_newtrue(self, _arg) -> None:
         self._push(True)
         self.fortran = True
 
-    def _op_NEWFALSE(self, arg) -> None:
+    def _op_newfalse(self, _arg) -> None:
         self._push(False)
         self.fortran = False
 
-    def _op_EMPTY_TUPLE(self, arg) -> None:
+    def _op_empty_tuple(self, _arg) -> None:
         self._push(())
 
-    def _op_EMPTY_LIST(self, arg) -> None:
+    def _op_empty_list(self, _arg) -> None:
         self._push([])
 
-    def _op_EMPTY_DICT(self, arg) -> None:
+    def _op_empty_dict(self, _arg) -> None:
         self._push({})
 
-    def _op_EMPTY_SET(self, arg) -> None:
+    def _op_empty_set(self, _arg) -> None:
         self._push(set())
 
-    def _op_MARK(self, arg) -> None:
+    def _op_mark(self, _arg) -> None:
         self._push(self._MARK)
 
     def _make_tuple(self, k: int) -> None:
@@ -416,31 +404,31 @@ class _HeaderState:
         if items and all(isinstance(x, int) for x in items):
             self.ints = []
 
-    def _op_TUPLE1(self, arg) -> None:
+    def _op_tuple1(self, _arg) -> None:
         self._make_tuple(1)
 
-    def _op_TUPLE2(self, arg) -> None:
+    def _op_tuple2(self, _arg) -> None:
         self._make_tuple(2)
 
-    def _op_TUPLE3(self, arg) -> None:
+    def _op_tuple3(self, _arg) -> None:
         self._make_tuple(3)
 
-    def _op_TUPLE(self, arg) -> None:
+    def _op_tuple(self, _arg) -> None:
         items = self._pop_to_mark()
         self._push(tuple(items))
         self._maybe_set_shape(items)
 
-    def _op_LIST(self, arg) -> None:
+    def _op_list(self, _arg) -> None:
         self._push(self._pop_to_mark())
 
-    def _op_DICT(self, arg) -> None:
+    def _op_dict(self, _arg) -> None:
         items = self._pop_to_mark()
         d: dict[object, object] = {}
         for i in range(0, len(items), 2):
             d[items[i]] = items[i + 1]
         self._push(d)
 
-    def _op_SETITEM(self, arg) -> None:
+    def _op_setitem(self, _arg) -> None:
         v = self._pop()
         k = self._pop()
         d = self._pop()
@@ -448,14 +436,14 @@ class _HeaderState:
             d[k] = v
         self._push(d)
 
-    def _op_APPEND(self, arg) -> None:
+    def _op_append(self, _arg) -> None:
         v = self._pop()
         lst = self._pop()
         if isinstance(lst, list):
             lst.append(v)
         self._push(lst)
 
-    def _op_SETITEMS(self, arg) -> None:
+    def _op_setitems(self, _arg) -> None:
         pairs = self._pop_to_mark()
         d = self._pop()
         if isinstance(d, dict):
@@ -463,21 +451,21 @@ class _HeaderState:
                 d[pairs[i]] = pairs[i + 1]
         self._push(d)
 
-    def _op_APPENDS(self, arg) -> None:
+    def _op_appends(self, _arg) -> None:
         vals = self._pop_to_mark()
         lst = self._pop()
         if isinstance(lst, list):
             lst.extend(vals)
         self._push(lst)
 
-    def _op_ADDITEMS(self, arg) -> None:
+    def _op_additems(self, _arg) -> None:
         vals = self._pop_to_mark()
         s = self._pop()
         if isinstance(s, set):
             s.update(vals)
         self._push(s)
 
-    def _op_STACK_GLOBAL(self, arg) -> None:
+    def _op_stack_global(self, _arg) -> None:
         name = self._pop()
         module = self._pop()
         if (
@@ -486,9 +474,9 @@ class _HeaderState:
         ):
             self._push(_DtypeBuilder())
         else:
-            self._push(_Global(str(module), str(name)))
+            self._push(_Global(_pickle_label(module), _pickle_label(name)))
 
-    def _op_REDUCE(self, _) -> None:
+    def _op_reduce(self, _) -> None:
         args = self._pop()
         func = self._pop()
         if isinstance(func, _DtypeBuilder) and isinstance(args, tuple) and args:
@@ -500,17 +488,17 @@ class _HeaderState:
                 return
         self._push(_Unknown("reduce"))
 
-    def _op_BUILD(self, arg) -> None:
+    def _op_build(self, _arg) -> None:
         self._pop()  # state
         self._pop()  # instance
         self._push(_Unknown("object"))
 
-    def _op_NEWOBJ(self, arg) -> None:
+    def _op_newobj(self, _arg) -> None:
         self._pop()  # args
         self._pop()  # cls
         self._push(_Unknown("newobj"))
 
-    def _op_NEWOBJ_EX(self, arg) -> None:
+    def _op_newobj_ex(self, _arg) -> None:
         self._pop()  # kwargs
         self._pop()  # args
         self._pop()  # cls
@@ -522,44 +510,90 @@ class _HeaderState:
         self._push(v)
         self._set_descr(v)
 
-    _op_GET = _binget
-    _op_BINGET = _binget
-    _op_LONG_BINGET = _binget
-
     def _memoize_arg(self, arg) -> None:
         idx = int(arg)
         self._memoize_top(idx)
         self.memo_next = max(self.memo_next, idx + 1)
 
-    _op_PUT = _memoize_arg
-    _op_BINPUT = _memoize_arg
-    _op_LONG_BINPUT = _memoize_arg
-
-    def _op_MEMOIZE(self, arg) -> None:
+    def _op_memoize(self, _arg) -> None:
         self._memoize_top(self.memo_next)
         self.memo_next += 1
 
-    def _op_POP(self, _) -> None:
+    def _op_pop(self, _) -> None:
         if self.stack:
             self._pop()
 
-    def _op_POP_MARK(self, _) -> None:
+    def _op_pop_mark(self, _) -> None:
         self._pop_to_mark()
 
-    def _op_DUP(self, arg) -> None:
+    def _op_dup(self, _arg) -> None:
         if self.stack:
             self._push(self.stack[-1])
 
-    def _push_unknown_persid(self, arg) -> None:
+    def _push_unknown_persid(self, _arg) -> None:
         self._push(_Unknown("persid"))
 
-    _op_PERSID = _push_unknown_persid
-    _op_BINPERSID = _push_unknown_persid
+    _opcode_handlers = {
+        "SHORT_BINUNICODE": _push_str,
+        "BINUNICODE": _push_str,
+        "UNICODE": _push_str,
+        "SHORT_BINSTRING": _push_bytes,
+        "BINSTRING": _push_bytes,
+        "SHORT_BINBYTES": _push_bytes,
+        "BINBYTES": _push_bytes,
+        "BINBYTES8": _push_bytes,
+        "BININT": _push_int,
+        "BININT1": _push_int,
+        "BININT2": _push_int,
+        "LONG_BININT": _push_int,
+        "INT": _push_int,
+        "LONG": _push_int,
+        "FLOAT": _push_float,
+        "BINFLOAT": _push_float,
+        "GET": _binget,
+        "BINGET": _binget,
+        "LONG_BINGET": _binget,
+        "PUT": _memoize_arg,
+        "BINPUT": _memoize_arg,
+        "LONG_BINPUT": _memoize_arg,
+        "PERSID": _push_unknown_persid,
+        "BINPERSID": _push_unknown_persid,
+        "FRAME": _op_frame,
+        "PROTO": _op_proto,
+        "NONE": _op_none,
+        "NEWTRUE": _op_newtrue,
+        "NEWFALSE": _op_newfalse,
+        "EMPTY_TUPLE": _op_empty_tuple,
+        "EMPTY_LIST": _op_empty_list,
+        "EMPTY_DICT": _op_empty_dict,
+        "EMPTY_SET": _op_empty_set,
+        "MARK": _op_mark,
+        "TUPLE1": _op_tuple1,
+        "TUPLE2": _op_tuple2,
+        "TUPLE3": _op_tuple3,
+        "TUPLE": _op_tuple,
+        "LIST": _op_list,
+        "DICT": _op_dict,
+        "SETITEM": _op_setitem,
+        "APPEND": _op_append,
+        "SETITEMS": _op_setitems,
+        "APPENDS": _op_appends,
+        "ADDITEMS": _op_additems,
+        "STACK_GLOBAL": _op_stack_global,
+        "REDUCE": _op_reduce,
+        "BUILD": _op_build,
+        "NEWOBJ": _op_newobj,
+        "NEWOBJ_EX": _op_newobj_ex,
+        "MEMOIZE": _op_memoize,
+        "POP": _op_pop,
+        "POP_MARK": _op_pop_mark,
+        "DUP": _op_dup,
+    }
 
     def feed(self, opname: str, arg) -> None:
-        handler = getattr(self, f"_op_{opname}", None)
+        handler = self._opcode_handlers.get(opname)
         if handler is not None:
-            handler(arg)
+            handler(self, arg)
 
     def spec(self, name: str, offset: int, nbytes: int) -> ArraySpec:
         if self.shape is None or self.descr is None:

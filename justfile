@@ -177,10 +177,10 @@ test:
     @cargo test --features cli --locked
     @just _python-tests
 
-# cargo build --all-targets --all-features --locked
+# Build every target with the complete CPU feature matrix (CUDA is opt-in hardware validation).
 build:
-    @echo '+ cargo build --all-targets --all-features --locked'
-    @cargo build --all-targets --all-features --locked
+    @echo '+ cargo build --all-targets --features cli,myelin --locked'
+    @cargo build --all-targets --features cli,myelin --locked
 
 # No harness yet (exit 1). Kernel benches → myelin-accelerator.
 bench:
@@ -195,14 +195,14 @@ bench:
 ci:
     @echo '+ cargo fmt --all -- --check'
     @cargo fmt --all -- --check
-    @echo '+ cargo clippy --all-targets --all-features --locked -- -D warnings'
-    @cargo clippy --all-targets --all-features --locked -- -D warnings
-    @echo '+ cargo test --all-targets --all-features --locked'
-    @cargo test --all-targets --all-features --locked
-    @echo '+ cargo build --all-targets --all-features --locked'
-    @cargo build --all-targets --all-features --locked
-    @echo '+ cargo doc --no-deps --all-features --locked'
-    @cargo doc --no-deps --all-features --locked
+    @echo '+ cargo clippy --all-targets --features cli,myelin --locked -- -D warnings'
+    @cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+    @echo '+ cargo test --all-targets --features cli,myelin --locked'
+    @cargo test --all-targets --features cli,myelin --locked
+    @echo '+ cargo build --all-targets --features cli,myelin --locked'
+    @cargo build --all-targets --features cli,myelin --locked
+    @echo '+ cargo doc --no-deps --features cli,myelin --locked'
+    @cargo doc --no-deps --features cli,myelin --locked
     @just _python-tests
     @just _bash-n-scripts
     @just _codex-hook-tests
@@ -226,13 +226,21 @@ qodana:
     fi
     mkdir -p .qodana/results .qodana/report
     echo "+ qodana scan --linter qodana-python-community --print-problems (results → .qodana/)"
+    # Native: QODANA_PYTHON_PATH=/path/to/python just qodana
+    # Unset: documented Docker interpreter from the Qodana Python docs.
+    if [[ -n "${QODANA_PYTHON_PATH:-}" ]]; then
+      python_path="$QODANA_PYTHON_PATH"
+    else
+      python_path="/data/cache/conda/envs/qodana-env/bin/python"
+    fi
     qodana scan \
       --linter qodana-python-community \
       --project-dir . \
       --results-dir .qodana/results \
       --report-dir .qodana/report \
       --print-problems \
-      --save-report
+      --save-report \
+      -e "QODANA_PYTHON_PATH=${python_path}"
 
 # Full pre-push including local Qodana scan (slow; optional before large PRs)
 review-full:

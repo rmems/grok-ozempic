@@ -17,9 +17,9 @@ Discovery: `just --list`.
 
 ## 1. Recommended gate (`just review`)
 
-bash
+```bash
 just review
-
+```
 
 This is the default **pre-push** recipe. It runs, in order:
 
@@ -37,18 +37,19 @@ or `just qodana` for that).
 
 ### Faster tiers (not enough alone before push)
 
-bash
+```bash
 just check    # cargo fmt --check + clippy --features cli --locked -D warnings
 just test     # cargo test --features cli --locked + CI Python unittests
+just build    # cargo build --all-targets --features cli,myelin --locked
 just ci       # full pre-PR matrix (no cargo-audit, no extra block unittests)
-
+```
 
 ### Data-dependent smoke (local machine only)
 
-bash
+```bash
 just experiment-smoke   # release CLI --help + CKPT / run3 path presence
 # Full pilot (not a just recipe): BLOCK=0 MODE=attention_plus_expert scripts/block_pilot_goz1.sh
-
+```
 
 ---
 
@@ -66,11 +67,11 @@ silently disable beads sync, while leaving it as beads set it silently disabled
 Since GH #97, each tracked `.beads/hooks/{pre-commit,pre-push}` runs the beads
 block first and then invokes the matching `.githooks/` script:
 
-
+```
 .beads/hooks/pre-push
   ├── BEADS INTEGRATION block   → bd hooks run pre-push   (sync)
   └── PROJECT QUALITY GATE block → .githooks/pre-push → just review
-
+```
 
 The gate block sits **outside** the beads markers on purpose: `bd hooks install`
 preserves user content outside its markers across installs and upgrades. The one
@@ -91,21 +92,21 @@ beads sync — use it when you need the export but not a 2–4 minute gate.
 beads writes it as an **absolute** path — so it does not survive a fresh clone
 and is wrong inside a worktree. Set it explicitly:
 
-bash
+```bash
 git config core.hooksPath "$(git rev-parse --show-toplevel)/.beads/hooks"
 just doctor    # confirms the path AND that the project gate is chained
-
+```
 
 Requirements on `PATH`: `just`, `cargo`, `python3`, and for Python tests `numpy`
 (`python3 -m pip install --user 'numpy>=1.26,<3'`).
 
 Verify:
 
-bash
+```bash
 git config --get core.hooksPath   # expect: <repo>/.beads/hooks
 just doctor                       # expect: "project gate chained into both hooks"
 bd github status                  # should not say "Not configured"
-
+```
 
 Agents: if `core.hooksPath` is unset, still run `just review` before any push.
 Do not disable hooks permanently; use `--no-verify` only for documented emergencies.
@@ -119,11 +120,11 @@ CI workflow: [`.github/workflows/qodana.yml`](.github/workflows/qodana.yml).
 
 ### Install
 
-bash
+```bash
 # Official installer (or JetBrains Toolbox / package manager)
 # https://www.jetbrains.com/help/qodana/getting-started.html
 command -v qodana && qodana --version
-
+```
 
 Docker is used when the CLI runs the linter in a container (`--within-docker=true`
 or default depending on environment). Native mode: `--within-docker=false`.
@@ -133,14 +134,14 @@ do not require a token.
 
 ### Recipes
 
-bash
+```bash
 just qodana          # scan with repo qodana.yaml; print problems; local results dir
 just review-full     # just review && just qodana
-
+```
 
 Equivalent manual CLI (kept for environments without the new recipes):
 
-bash
+```bash
 # Full project (matches CI pr-mode: false intent — whole tree, not PR-diff-only)
 qodana scan \
   --linter qodana-python-community \
@@ -156,7 +157,7 @@ qodana show --report-dir .qodana/report
 
 # Diff-only against main (optional, faster feedback while iterating)
 qodana scan --linter qodana-python-community --diff-start origin/main --print-problems
-
+```
 
 `.qodana/` is gitignored (local cache/results). Do not commit SARIF or HTML
 reports.
@@ -173,9 +174,9 @@ wrapped by `just review` / `just qodana`).
 | Command | When | Notes |
 |---------|------|--------|
 | `cargo audit` | Any change to `Cargo.toml` / `Cargo.lock`; always in `just review` when installed | Install: `cargo install cargo-audit --locked` |
-| `cargo clippy --all-targets --all-features --locked -- -D warnings` | Full matrix | Already in `just ci` (not in `just check`, which uses `--features cli` only) |
-| `cargo test --all-targets --all-features --locked` | Full matrix | Already in `just ci` |
-| `cargo doc --no-deps --all-features --locked` | Docs / public API | Already in `just ci` |
+| `cargo clippy --all-targets --features cli,myelin --locked -- -D warnings` | Full CPU matrix | Already in `just ci` (not in `just check`, which uses `--features cli` only) |
+| `cargo test --all-targets --features cli,myelin --locked` | Full CPU matrix | Already in `just ci` |
+| `cargo doc --no-deps --features cli,myelin --locked` | CPU-feature docs / public API | Already in `just ci` |
 | `cargo build --release --features cli --locked` | Release binary / experiment path | In `just experiment-smoke`, not `just ci` |
 | `cargo bench --locked` | N/A | `just bench` exits 1 until a harness exists; kernels → `myelin-accelerator` |
 | `cargo fmt --all` | Fix formatting | Check-only is in `just check` / `just ci`; omit `-- --check` to rewrite |
@@ -192,7 +193,7 @@ gated by nothing in CI; that recipe is gone and there is now one list.
 Path-scoped re-runs (already inside `just test` / `just ci` — run one directly
 when you touched only its script):
 
-bash
+```bash
 python3 -c 'import numpy; print(numpy.__version__)'   # required for all modules below
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_npy -v
@@ -209,30 +210,30 @@ python3 -m unittest scripts.test_grok1_multiblock_side_table_binding -v
 python3 -m unittest scripts.test_grok1_multiblock_v4_supervisor -v
 python3 -m unittest scripts.test_grok1_block_forward -v
 python3 -m unittest scripts.test_grok1_block_weights -v
-
+```
 
 Manual script syntax checks (stdlib-only scripts; not unittest):
 
-bash
+```bash
 python3 -m py_compile scripts/export_grok1_embedding_npy.py
 python3 -m py_compile scripts/export_grok1_int8_npy.py
 python3 -m py_compile scripts/goz1_trit_histogram.py
 python3 -m py_compile scripts/route_preservation_metrics.py
 # add any other scripts/*.py you touched
-
+```
 
 Shell (already in `just ci` via `_bash-n-scripts`):
 
-bash
+```bash
 for f in scripts/*.sh; do bash -n "$f"; done
-
+```
 
 ### Optional host linters (soft in `just ci`)
 
-bash
+```bash
 actionlint                          # .github/workflows/*
 shellcheck scripts/*.sh             # when shellcheck is installed
-
+```
 
 ### GitHub Actions
 
@@ -244,17 +245,17 @@ to reduce supply-chain attack risk.
 
 When you touch `Dockerfile`, `Cargo.toml`, `Cargo.lock`, `src/**`, or `dissect/**`:
 
-bash
+```bash
 docker build --target tester -t grok-ozempic:test .
 docker build --target runtime -t grok-ozempic:latest .
-
+```
 
 ### CLI smoke without `just`
 
-bash
+```bash
 cargo run --features cli --locked -- --help
 cargo run --features cli --locked -- quantize-goz1 --help
-
+```
 
 ---
 
@@ -262,13 +263,13 @@ cargo run --features cli --locked -- quantize-goz1 --help
 
 Mirror **`just review`** without the just binary:
 
-bash
+```bash
 # --- just ci ---
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test --all-targets --all-features --locked
-cargo build --all-targets --all-features --locked
-cargo doc --no-deps --all-features --locked
+cargo clippy --all-targets --features cli,myelin --locked -- -D warnings
+cargo test --all-targets --features cli,myelin --locked
+cargo build --all-targets --features cli,myelin --locked
+cargo doc --no-deps --features cli,myelin --locked
 python3 -c 'import numpy; print(numpy.__version__)'
 python3 -m unittest scripts.test_export_grok1_embedding_npy -v
 python3 -m unittest scripts.test_export_grok1_int8_npy -v
@@ -287,7 +288,7 @@ python3 -m unittest scripts.test_grok1_block_weights -v
 qodana scan --linter qodana-python-community --project-dir . \
   --results-dir .qodana/results --report-dir .qodana/report \
   --print-problems --save-report
-
+```
 
 ---
 
