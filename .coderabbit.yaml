@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Draft CodeRabbit config for rmems/grok-ozempic (generated locally, not pushed).
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  fail_commit_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+  - '!**/target/**'
+  - '!.beads/**/*.jsonl'
+  - '!reports/**/artifacts/**'
+  - '!reports/**/*.json'
+  - '!scripts/testdata/**'
+  path_instructions:
+  - path: '**/*.rs'
+    instructions: 'Rust edition 2024; `rust-version = "1.88"`; CI builds on stable. Do not suggest downgrading the edition or using std/language APIs newer than the pinned toolchain/MSRV. CI gate: `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-targets --all-features`, `cargo doc --no-deps --all-features`, `cargo audit`. Flag anything that would fail `cargo fmt --check` or clippy `-D warnings`.'
+  - path: src/core/{npy,stream}.rs
+    instructions: 'Scrutinize every `unsafe` block (currently in `src/core/npy.rs`, `src/core/stream.rs`): require a written safety justification covering aliasing, lifetimes, alignment and bounds; prefer a safe abstraction when one exists. Flag any new `unsafe` outside these files. In particular `slice::from_raw_parts` casts to `f32`/`f16` need alignment and length checks, and mmapped checkpoints must not be mutated while mapped.'
+  - path: '**/Cargo.toml'
+    instructions: Cargo manifest. Call out new dependencies and feature changes, and keep `rust-version` / `edition` consistent with CI.
+  - path: scripts/**/*.py
+    instructions: 'Python 3.11 (ruff target-version py311, `ruff.toml`). CI gate: ruff 0.15.14 with the high-signal rule set in `ruff.toml`. Keep code compatible with the declared Python floor. Experiment scripts write under `reports/`; review the code and the human-written `results.md`, not the generated artifacts.'
+  - path: '**/*.sh'
+    instructions: Shell scripts. Must pass shellcheck; quote expansions and never echo secrets or tokens.
+  - path: '**/Dockerfile'
+    instructions: Dockerfile. Keep secrets out of layers and build args, and keep toolchain versions in line with the CI pins.
+  - path: .github/workflows/**
+    instructions: 'GitHub Actions workflows. Keep `permissions:` least-privilege and job commands in sync with the local gates documented in the repo. Most `uses:` are pinned to full commit SHAs; prefer SHA pins for new or bumped actions. `grok-pr-review.yml` uses the GROK_AUTH_JSON secret: keep it off `pull_request_target`-style triggers that expose secrets to fork code.'
+  tools:
+    clippy:
+      enabled: true
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    hadolint:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
